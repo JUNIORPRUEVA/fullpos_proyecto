@@ -81,7 +81,7 @@ class AppDb {
           // Defensa: algunas instalaciones pueden tener la versión actual
           // pero carecer de columnas por una migración fallida/interrumpida.
           await _ensureSchemaIntegrity(db);
-          await _ensureDemoProductsIfEmpty(db);
+          await _syncDemoCatalog(db);
         },
       );
     } catch (_) {
@@ -426,7 +426,7 @@ class AppDb {
   static Future<void> _onCreate(Database db, int version) async {
     await db.transaction((txn) async {
       await _createFullSchema(txn);
-      await _ensureDemoProductsIfEmpty(txn);
+      await _syncDemoCatalog(txn);
     });
   }
 
@@ -1480,17 +1480,117 @@ class AppDb {
     }
   }
 
-  /// Inserta un catálogo demo si no hay productos locales.
-  static Future<void> _ensureDemoProductsIfEmpty(DatabaseExecutor db) async {
-    final count = Sqflite.firstIntValue(
+  /// Sincroniza catálogo demo:
+  /// - Inserta 10 categorías y 50 productos demo si no hay datos.
+  /// - Borra demos cuando existan categorías o productos reales.
+  /// - Si se eliminan todos los reales, reaparecen los demos.
+  static Future<void> _syncDemoCatalog(DatabaseExecutor db) async {
+    const demoCategoryNames = [
+      'Taladros recargables',
+      'Taladros eléctricos',
+      'Cajas de herramientas',
+      'Juegos de cubos',
+      'Tubería PVC',
+      'Electricidad',
+      'Plomería',
+      'Medición',
+      'Seguridad',
+      'Adhesivos y sellantes',
+    ];
+
+    final demoCats = (await db.query(
+      DbTables.categories,
+      columns: ['id', 'name'],
+      where: 'name IN (${List.filled(demoCategoryNames.length, '?').join(',')})',
+      whereArgs: demoCategoryNames,
+    ))
+        .map((e) => e['id'])
+        .whereType<int>()
+        .toSet();
+
+    final nonDemoCatsCount = Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM ${DbTables.categories} WHERE name NOT IN (${List.filled(demoCategoryNames.length, '?').join(',')})',
+            demoCategoryNames,
+          ),
+        ) ??
+        0;
+
+    final demoProductsCount = Sqflite.firstIntValue(
+          await db.rawQuery(
+            "SELECT COUNT(*) FROM ${DbTables.products} WHERE code LIKE 'DEMO-%'",
+          ),
+        ) ??
+        0;
+
+    final nonDemoProductsCount = Sqflite.firstIntValue(
+          await db.rawQuery(
+            "SELECT COUNT(*) FROM ${DbTables.products} WHERE code NOT LIKE 'DEMO-%'",
+          ),
+        ) ??
+        0;
+
+    final hasRealCatalog = nonDemoProductsCount > 0 || nonDemoCatsCount > 0;
+
+    // Si hay catálogo real, limpiar demos.
+    if (hasRealCatalog) {
+      if (demoProductsCount > 0) {
+        await db.delete(DbTables.products, where: "code LIKE 'DEMO-%'");
+      }
+      if (demoCats.isNotEmpty) {
+        await db.delete(
+          DbTables.categories,
+          where:
+              'name IN (${List.filled(demoCategoryNames.length, '?').join(',')})',
+          whereArgs: demoCategoryNames,
+        );
+      }
+    }
+
+    // Recalcular totales tras limpieza.
+    final totalProducts = Sqflite.firstIntValue(
           await db.rawQuery(
             'SELECT COUNT(*) FROM ${DbTables.products} WHERE deleted_at_ms IS NULL',
           ),
         ) ??
         0;
-    if (count > 0) return;
+    final totalCategories = Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM ${DbTables.categories}'),
+        ) ??
+        0;
 
+    if (totalProducts > 0 || totalCategories > 0) {
+      return;
+    }
+
+    // Insertar categorías demo.
     final now = DateTime.now().millisecondsSinceEpoch;
+    final categoryIds = <String, int>{};
+    for (final name in demoCategoryNames) {
+      await db.insert(
+        DbTables.categories,
+        {
+          'name': name,
+          'is_active': 1,
+          'deleted_at_ms': null,
+          'created_at_ms': now,
+          'updated_at_ms': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      final rows = await db.query(
+        DbTables.categories,
+        columns: ['id'],
+        where: 'name = ?',
+        whereArgs: [name],
+        limit: 1,
+      );
+      if (rows.isNotEmpty && rows.first['id'] != null) {
+        categoryIds[name] = rows.first['id'] as int;
+      }
+    }
+
+    // Insertar productos demo.
     final demos = _demoProducts();
     final batch = db.batch();
     for (var i = 0; i < demos.length; i++) {
@@ -1503,7 +1603,7 @@ class AppDb {
           'image_url': p['imageUrl'],
           'placeholder_type': 'image',
           'placeholder_color_hex': null,
-          'category_id': null,
+          'category_id': categoryIds[p['category']],
           'supplier_id': null,
           'purchase_price': p['purchasePrice'],
           'sale_price': p['salePrice'],
@@ -1520,89 +1620,28 @@ class AppDb {
     await batch.commit(noResult: true);
   }
 
-  /// Catálogo demo de herramientas (50 items).
+  /// Catálogo demo de herramientas (50 items) repartido en 10 categorías.
   static List<Map<String, dynamic>> _demoProducts() {
     const base = [
       {
-        'name': 'Taladro inalámbrico 20V',
+        'name': 'Taladro recargable 20V',
         'purchasePrice': 2200.0,
         'salePrice': 3200.0,
         'stock': 12.0,
         'stockMin': 2.0,
         'imageUrl':
-            'https://images.unsplash.com/photo-1507721999472-8ed4421c4af2?auto=format&fit=crop&w=800&q=80',
+            'https://images.unsplash.com/photo-1507721999472-8ed4421c4af2?auto=format&fit=crop&w=800&q=80&sig=1',
+        'category': 'Taladros recargables',
       },
       {
-        'name': 'Martillo de fibra 16oz',
-        'purchasePrice': 450.0,
-        'salePrice': 750.0,
-        'stock': 30.0,
-        'stockMin': 5.0,
+        'name': 'Taladro percutor eléctrico 1/2\"',
+        'purchasePrice': 1800.0,
+        'salePrice': 2800.0,
+        'stock': 10.0,
+        'stockMin': 2.0,
         'imageUrl':
-            'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        'name': 'Juego destornilladores 6pzs',
-        'purchasePrice': 600.0,
-        'salePrice': 950.0,
-        'stock': 20.0,
-        'stockMin': 4.0,
-        'imageUrl':
-            'https://images.unsplash.com/photo-1523419400524-fc1e0d787ab7?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        'name': 'Llave ajustable 12\"',
-        'purchasePrice': 400.0,
-        'salePrice': 680.0,
-        'stock': 18.0,
-        'stockMin': 3.0,
-        'imageUrl':
-            'https://images.unsplash.com/photo-1523419400524-fc1e0d787ab7?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        'name': 'Cinta métrica 8m',
-        'purchasePrice': 250.0,
-        'salePrice': 420.0,
-        'stock': 40.0,
-        'stockMin': 5.0,
-        'imageUrl':
-            'https://images.unsplash.com/photo-1503389152951-9f343605f61e?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        'name': 'Serrucho profesional 20\"',
-        'purchasePrice': 320.0,
-        'salePrice': 560.0,
-        'stock': 22.0,
-        'stockMin': 4.0,
-        'imageUrl':
-            'https://images.unsplash.com/photo-1454990926518-22f1f008b4e0?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        'name': 'Nivel de aluminio 60cm',
-        'purchasePrice': 240.0,
-        'salePrice': 390.0,
-        'stock': 28.0,
-        'stockMin': 4.0,
-        'imageUrl':
-            'https://images.unsplash.com/photo-1503389152951-9f343605f61e?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        'name': 'Guantes de trabajo cuero',
-        'purchasePrice': 120.0,
-        'salePrice': 250.0,
-        'stock': 45.0,
-        'stockMin': 6.0,
-        'imageUrl':
-            'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&w=800&q=80',
-      },
-      {
-        'name': 'Manguera de aire 10m',
-        'purchasePrice': 420.0,
-        'salePrice': 720.0,
-        'stock': 16.0,
-        'stockMin': 3.0,
-        'imageUrl':
-            'https://images.unsplash.com/photo-1503389152951-9f343605f61e?auto=format&fit=crop&w=800&q=80',
+            'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=80&sig=2',
+        'category': 'Taladros eléctricos',
       },
       {
         'name': 'Caja de herramientas 19\"',
@@ -1611,7 +1650,78 @@ class AppDb {
         'stock': 14.0,
         'stockMin': 2.0,
         'imageUrl':
-            'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=80',
+            'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80&sig=3',
+        'category': 'Cajas de herramientas',
+      },
+      {
+        'name': 'Juego de cubos 94 piezas',
+        'purchasePrice': 2400.0,
+        'salePrice': 3400.0,
+        'stock': 8.0,
+        'stockMin': 2.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1523419400524-fc1e0d787ab7?auto=format&fit=crop&w=800&q=80&sig=4',
+        'category': 'Juegos de cubos',
+      },
+      {
+        'name': 'Tubo PVC 1\" x 3m',
+        'purchasePrice': 220.0,
+        'salePrice': 420.0,
+        'stock': 60.0,
+        'stockMin': 10.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1503389152951-9f343605f61e?auto=format&fit=crop&w=800&q=80&sig=5',
+        'category': 'Tubería PVC',
+      },
+      {
+        'name': 'Rollo cable THHN #12 100m',
+        'purchasePrice': 3200.0,
+        'salePrice': 4300.0,
+        'stock': 6.0,
+        'stockMin': 2.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1503389152951-9f343605f61e?auto=format&fit=crop&w=800&q=80&sig=6',
+        'category': 'Electricidad',
+      },
+      {
+        'name': 'Llave inglesa plomero 14\"',
+        'purchasePrice': 480.0,
+        'salePrice': 780.0,
+        'stock': 20.0,
+        'stockMin': 3.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1454991727061-2868c0807f7f?auto=format&fit=crop&w=800&q=80&sig=7',
+        'category': 'Plomería',
+      },
+      {
+        'name': 'Cinta métrica 8m',
+        'purchasePrice': 250.0,
+        'salePrice': 420.0,
+        'stock': 40.0,
+        'stockMin': 5.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&w=800&q=80&sig=8',
+        'category': 'Medición',
+      },
+      {
+        'name': 'Guantes de trabajo cuero',
+        'purchasePrice': 120.0,
+        'salePrice': 250.0,
+        'stock': 45.0,
+        'stockMin': 6.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1454991924124-4c0796370749?auto=format&fit=crop&w=800&q=80&sig=9',
+        'category': 'Seguridad',
+      },
+      {
+        'name': 'Silicón blanco 280ml',
+        'purchasePrice': 140.0,
+        'salePrice': 260.0,
+        'stock': 70.0,
+        'stockMin': 10.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1507722407803-9ac805f252d2?auto=format&fit=crop&w=800&q=80&sig=10',
+        'category': 'Adhesivos y sellantes',
       },
     ];
 
@@ -1627,6 +1737,7 @@ class AppDb {
         'stock': b['stock'],
         'stockMin': b['stockMin'],
         'imageUrl': b['imageUrl'],
+        'category': b['category'],
       });
     }
     return products;
