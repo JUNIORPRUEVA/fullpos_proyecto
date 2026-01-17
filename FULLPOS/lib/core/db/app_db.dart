@@ -78,9 +78,10 @@ class AppDb {
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
         onOpen: (db) async {
-        // Defensa: algunas instalaciones pueden tener la versión actual
-        // pero carecer de columnas por una migración fallida/interrumpida.
-        await _ensureSchemaIntegrity(db);
+          // Defensa: algunas instalaciones pueden tener la versión actual
+          // pero carecer de columnas por una migración fallida/interrumpida.
+          await _ensureSchemaIntegrity(db);
+          await _ensureDemoProductsIfEmpty(db);
         },
       );
     } catch (_) {
@@ -425,6 +426,7 @@ class AppDb {
   static Future<void> _onCreate(Database db, int version) async {
     await db.transaction((txn) async {
       await _createFullSchema(txn);
+      await _ensureDemoProductsIfEmpty(txn);
     });
   }
 
@@ -1476,6 +1478,158 @@ class AppDb {
     if (oldVersion < newVersion) {
       await _ensureSchemaIntegrity(db);
     }
+  }
+
+  /// Inserta un catálogo demo si no hay productos locales.
+  static Future<void> _ensureDemoProductsIfEmpty(DatabaseExecutor db) async {
+    final count = Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM ${DbTables.products} WHERE deleted_at_ms IS NULL',
+          ),
+        ) ??
+        0;
+    if (count > 0) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final demos = _demoProducts();
+    final batch = db.batch();
+    for (var i = 0; i < demos.length; i++) {
+      final p = demos[i];
+      batch.insert(
+        DbTables.products,
+        {
+          'code': p['code'],
+          'name': p['name'],
+          'image_url': p['imageUrl'],
+          'placeholder_type': 'image',
+          'placeholder_color_hex': null,
+          'category_id': null,
+          'supplier_id': null,
+          'purchase_price': p['purchasePrice'],
+          'sale_price': p['salePrice'],
+          'stock': p['stock'],
+          'stock_min': p['stockMin'],
+          'is_active': 1,
+          'deleted_at_ms': null,
+          'created_at_ms': now + i,
+          'updated_at_ms': now + i,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  /// Catálogo demo de herramientas (50 items).
+  static List<Map<String, dynamic>> _demoProducts() {
+    const base = [
+      {
+        'name': 'Taladro inalámbrico 20V',
+        'purchasePrice': 2200.0,
+        'salePrice': 3200.0,
+        'stock': 12.0,
+        'stockMin': 2.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1507721999472-8ed4421c4af2?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Martillo de fibra 16oz',
+        'purchasePrice': 450.0,
+        'salePrice': 750.0,
+        'stock': 30.0,
+        'stockMin': 5.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Juego destornilladores 6pzs',
+        'purchasePrice': 600.0,
+        'salePrice': 950.0,
+        'stock': 20.0,
+        'stockMin': 4.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1523419400524-fc1e0d787ab7?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Llave ajustable 12\"',
+        'purchasePrice': 400.0,
+        'salePrice': 680.0,
+        'stock': 18.0,
+        'stockMin': 3.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1523419400524-fc1e0d787ab7?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Cinta métrica 8m',
+        'purchasePrice': 250.0,
+        'salePrice': 420.0,
+        'stock': 40.0,
+        'stockMin': 5.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1503389152951-9f343605f61e?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Serrucho profesional 20\"',
+        'purchasePrice': 320.0,
+        'salePrice': 560.0,
+        'stock': 22.0,
+        'stockMin': 4.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1454990926518-22f1f008b4e0?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Nivel de aluminio 60cm',
+        'purchasePrice': 240.0,
+        'salePrice': 390.0,
+        'stock': 28.0,
+        'stockMin': 4.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1503389152951-9f343605f61e?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Guantes de trabajo cuero',
+        'purchasePrice': 120.0,
+        'salePrice': 250.0,
+        'stock': 45.0,
+        'stockMin': 6.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1514996937319-344454492b37?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Manguera de aire 10m',
+        'purchasePrice': 420.0,
+        'salePrice': 720.0,
+        'stock': 16.0,
+        'stockMin': 3.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1503389152951-9f343605f61e?auto=format&fit=crop&w=800&q=80',
+      },
+      {
+        'name': 'Caja de herramientas 19\"',
+        'purchasePrice': 760.0,
+        'salePrice': 1150.0,
+        'stock': 14.0,
+        'stockMin': 2.0,
+        'imageUrl':
+            'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=800&q=80',
+      },
+    ];
+
+    final products = <Map<String, dynamic>>[];
+    for (var i = 0; i < 50; i++) {
+      final b = base[i % base.length];
+      final idx = (i + 1).toString().padLeft(3, '0');
+      products.add({
+        'code': 'DEMO-$idx',
+        'name': b['name'],
+        'purchasePrice': b['purchasePrice'],
+        'salePrice': b['salePrice'],
+        'stock': b['stock'],
+        'stockMin': b['stockMin'],
+        'imageUrl': b['imageUrl'],
+      });
+    }
+    return products;
   }
 
   /// Crea todo el esquema en su versión más reciente (v18)

@@ -3,6 +3,7 @@ import { addDays, subDays } from 'date-fns';
 import { prisma } from '../src/config/prisma';
 import env from '../src/config/env';
 import { hashPassword } from '../src/utils/password';
+import { buildDemoProducts } from '../src/modules/products/demo-products';
 
 async function main() {
   const password = await hashPassword('fullpos123');
@@ -41,6 +42,14 @@ async function main() {
       displayName: 'Demo Owner',
     },
   });
+
+  const hasProducts = await prisma.product.count({ where: { companyId: company.id } });
+  if (hasProducts === 0) {
+    await prisma.product.createMany({
+      data: buildDemoProducts(company.id, 50),
+      skipDuplicates: true,
+    });
+  }
 
   const hasSales = await prisma.sale.count({ where: { companyId: company.id } });
   if (hasSales === 0) {
