@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,11 +15,12 @@ class SplashPage extends ConsumerWidget {
     final boot = ref.watch(appBootstrapProvider).snapshot;
 
     final business = ref.watch(businessSettingsProvider);
+    final brandName = 'FULLPOS';
     final businessName = business.businessName.isNotEmpty
         ? business.businessName
-        : 'MI NEGOCIO';
-    final logoPath = business.logoPath;
-    final hasLogo = logoPath != null && File(logoPath).existsSync();
+        : brandName;
+    final showBusinessTag =
+        businessName.trim().isNotEmpty && businessName != brandName;
 
     return Scaffold(
       backgroundColor: AppColors.bgDark,
@@ -45,36 +44,59 @@ class SplashPage extends ConsumerWidget {
                     width: 150,
                     height: 150,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(28),
                       boxShadow: [
                         BoxShadow(
-                          color: AppColors.gold.withOpacity(0.3),
-                          blurRadius: 30,
-                          spreadRadius: 5,
+                          color: AppColors.gold.withOpacity(0.35),
+                          blurRadius: 36,
+                          spreadRadius: 8,
+                          offset: const Offset(0, 6),
                         ),
                       ],
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: hasLogo
-                          ? Image.file(File(logoPath), fit: BoxFit.cover)
-                          : Image.asset(
-                              'assets/imagen/app.icon.png',
-                              fit: BoxFit.cover,
-                            ),
+                      borderRadius: BorderRadius.circular(28),
+                      child: Image.asset(
+                        'assets/imagen/app.icon.png',
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                   const SizedBox(height: AppSizes.spaceL),
                   Text(
-                    '$businessName POS',
+                    brandName,
                     style: const TextStyle(
                       color: AppColors.gold,
-                      fontSize: 42,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 3,
+                      fontSize: 40,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 2.6,
                     ),
                     textAlign: TextAlign.center,
                   ),
+                  const SizedBox(height: AppSizes.spaceXS),
+                  Text(
+                    'Software punto de ventas',
+                    style: TextStyle(
+                      color: AppColors.textLight.withOpacity(0.86),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (showBusinessTag) ...[
+                    const SizedBox(height: AppSizes.spaceXS),
+                    Text(
+                      'para $businessName',
+                      style: TextStyle(
+                        color: AppColors.textLight.withOpacity(0.82),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.4,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   const SizedBox(height: AppSizes.spaceXL * 2),
                   if (boot.status == BootStatus.error) ...[
                     const Icon(

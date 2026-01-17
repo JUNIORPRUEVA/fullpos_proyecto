@@ -1,83 +1,62 @@
-import 'dart:typed_data';
-import 'dart:async';
+﻿import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:intl/intl.dart';
-import '../../features/sales/data/quote_model.dart';
+
 import '../../features/sales/data/business_info_model.dart';
+import '../../features/sales/data/quote_model.dart';
 import '../../features/settings/data/business_settings_model.dart';
 import '../../features/settings/data/printer_settings_model.dart';
-import '../services/empresa_service.dart';
 import '../layout/app_shell.dart';
+import '../services/empresa_service.dart';
 
-/// Servicio para imprimir y generar PDF de cotizaciones
-///
-/// ✅ IMPORTANTE: El PDF siempre usa datos REALES desde EmpresaService
-/// No adivina datos. Si un campo no existe en Configuración, no lo muestra.
-/// Single Source of Truth: todos los datos vienen de la Configuración del Negocio
+/// Servicio para imprimir y generar PDF de cotizaciones.
 class QuotePrinter {
   QuotePrinter._();
 
   static String _sanitizePdfText(String input) {
     var s = input.replaceAll('\u00A0', ' ');
-
-    // Caracteres que suelen causar excepciones en fonts built-in (Helvetica)
-    // del paquete `pdf`.
     s = s
         .replaceAll('\u2022', '-') // bullet
         .replaceAll('\u2013', '-') // en-dash
         .replaceAll('\u2014', '-') // em-dash
         .replaceAll('\u2026', '...') // ellipsis
         .replaceAll('\u00B7', '-') // middle dot
-        .replaceAll('\u00AD', '') // soft hyphen
-        .replaceAll('\u00B6', '') // pilcrow
-        .replaceAll('¶', '')
-        .replaceAll('•', '-')
-        .replaceAll('–', '-')
-        .replaceAll('—', '-')
-        .replaceAll('…', '...');
-
-    const map = <String, String>{
-      'á': 'a',
-      'é': 'e',
-      'í': 'i',
-      'ó': 'o',
-      'ú': 'u',
-      'Á': 'A',
-      'É': 'E',
-      'Í': 'I',
-      'Ó': 'O',
-      'Ú': 'U',
-      'ñ': 'n',
-      'Ñ': 'N',
-      'ü': 'u',
-      'Ü': 'U',
-    };
-    map.forEach((k, v) => s = s.replaceAll(k, v));
-
-    s = s.replaceAll(RegExp(r'\\s+'), ' ').trim();
-    return s;
+        .replaceAll('\u00AD', ''); // soft hyphen
+    return s.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
-  /// Normaliza datos de negocio desde cualquier fuente a Map estándar
-  /// Acepta: BusinessSettings, BusinessInfoModel, o usa EmpresaService como fallback
   static Map<String, String> _normalizeBusinessData(dynamic business) {
     final normalized = <String, String>{
-      'name': 'Mi Negocio',
+      'name': 'FULLPOS',
       'slogan': '',
       'address': '',
+      'city': '',
       'phone': '',
+      'phone2': '',
       'rnc': '',
+      'email': '',
+      'website': '',
+      'instagram': '',
+      'facebook': '',
     };
 
     if (business is BusinessSettings) {
       normalized['name'] = business.businessName;
       normalized['slogan'] = business.slogan ?? '';
       normalized['address'] = business.address ?? '';
+      normalized['city'] = business.city ?? '';
       normalized['phone'] = business.phone ?? '';
+      normalized['phone2'] = business.phone2 ?? '';
       normalized['rnc'] = business.rnc ?? '';
+      normalized['email'] = business.email ?? '';
+      normalized['website'] = business.website ?? '';
+      normalized['instagram'] = business.instagramUrl ?? '';
+      normalized['facebook'] = business.facebookUrl ?? '';
     } else if (business is BusinessInfoModel) {
       normalized['name'] = business.name;
       normalized['slogan'] = business.slogan ?? '';
@@ -89,9 +68,6 @@ class QuotePrinter {
     return normalized;
   }
 
-  /// 📌 NUEVA: Obtener datos de empresa desde la FUENTE ÚNICA (EmpresaService)
-  /// Esto garantiza que SIEMPRE lee los datos más actuales desde Configuración
-  /// No debe haber nunca textos fijos como "Sistema POS Profesional" o "LOS NILKAS"
   static Future<Map<String, String>> _getEmpresaDataFromConfig() async {
     try {
       final config = await EmpresaService.getEmpresaConfig();
@@ -100,35 +76,51 @@ class QuotePrinter {
         'name': config.nombreEmpresa,
         'slogan': config.slogan ?? '',
         'address': config.direccion ?? '',
+        'city': config.ciudad ?? '',
         'phone': config.getTelefono() ?? '',
+        'phone2': config.telefono2 ?? '',
         'rnc': config.rnc ?? '',
+        'email': config.email ?? '',
+        'website': config.website ?? '',
+        'instagram': config.instagramUrl ?? '',
+        'facebook': config.facebookUrl ?? '',
       };
     } catch (e) {
-      debugPrint('⚠️ Error en _getEmpresaDataFromConfig: $e');
-      // Retornar valores seguros por defecto
+      debugPrint('Error en _getEmpresaDataFromConfig: $e');
       return {
-        'name': 'Mi Negocio',
+        'name': 'FULLPOS',
         'slogan': '',
         'address': '',
+        'city': '',
         'phone': '',
+        'phone2': '',
         'rnc': '',
+        'email': '',
+        'website': '',
+        'instagram': '',
+        'facebook': '',
       };
     }
   }
 
-  /// 📌 PRINCIPAL: Genera el PDF de cotización SIEMPRE con datos dinámicos
-  ///
-  /// ✅ GARANTÍAS:
-  /// - Los datos de empresa SIEMPRE vienen de Configuración del Negocio
-  /// - Si el parámetro 'business' se proporciona, se usa como fallback
-  /// - Se regenera cada vez que se llama (NO usa cache)
-  /// - El PDF tiene formato profesional sin textos fijos
-  ///
-  /// 🚫 NUNCA contendrá:
-  /// - "Sistema POS Profesional"
-  /// - "LOS NILKAS" (ni otro nombre hardcodeado)
-  /// - Slogans o texto fijo de empresa
-  /// - Cualquier información no configurada (se omite en lugar de mostrar defaults)
+  static Future<Map<String, String>> _resolveBusinessData(dynamic business) async {
+    final empresaData = await _getEmpresaDataFromConfig();
+    final name = (empresaData['name'] ?? '').trim();
+    final hasDetails = empresaData.entries.any(
+      (entry) => entry.key != 'name' && entry.value.trim().isNotEmpty,
+    );
+
+    if (business != null && (!hasDetails && (name.isEmpty || name == 'Mi Negocio' || name == 'FULLPOS'))) {
+      return _normalizeBusinessData(business);
+    }
+
+    if (business != null && name == 'Mi Negocio') {
+      return _normalizeBusinessData(business);
+    }
+
+    return empresaData;
+  }
+
   static Future<Uint8List> generatePdf({
     required QuoteModel quote,
     required List<QuoteItemModel> items,
@@ -138,289 +130,356 @@ class QuotePrinter {
     dynamic business,
     int validDays = 15,
   }) async {
-    // 1️⃣ SIEMPRE obtener datos de empresa desde la fuente única
-    final empresaData = await _getEmpresaDataFromConfig();
+    final businessData = await _resolveBusinessData(business);
+    final payload = <String, dynamic>{
+      'quote': quote.toMap(),
+      'items': items.map((item) => item.toMap()).toList(),
+      'clientName': clientName,
+      'clientPhone': clientPhone,
+      'clientRnc': clientRnc,
+      'business': businessData,
+      'validDays': validDays,
+    };
 
-    // 2️⃣ Si no tenemos datos reales, usar fallback de parámetro
-    final businessData =
-        empresaData['name']! == 'Mi Negocio' && business != null
-        ? _normalizeBusinessData(business)
-        : empresaData;
+    if (kIsWeb) {
+      return _generatePdfInternal(payload);
+    }
 
-    final pdf = pw.Document();
+    try {
+      return await compute(_generatePdfIsolate, payload);
+    } catch (e) {
+      debugPrint('Quote PDF isolate failed: $e');
+      return _generatePdfInternal(payload);
+    }
+  }
 
-    final safeBusinessData = businessData.map(
+  static Future<Uint8List> _generatePdfIsolate(Map<String, dynamic> payload) async {
+    return _generatePdfInternal(payload);
+  }
+
+  static Future<Uint8List> _generatePdfInternal(Map<String, dynamic> payload) async {
+    final quote = QuoteModel.fromMap(
+      Map<String, dynamic>.from(payload['quote'] as Map),
+    );
+    final items = (payload['items'] as List)
+        .map((item) => QuoteItemModel.fromMap(Map<String, dynamic>.from(item as Map)))
+        .toList();
+    final businessData = Map<String, String>.from(payload['business'] as Map);
+    final clientName = payload['clientName'] as String? ?? '';
+    final clientPhone = payload['clientPhone'] as String?;
+    final clientRnc = payload['clientRnc'] as String?;
+    final validDays = payload['validDays'] as int? ?? 15;
+
+    final fonts = await _loadPdfFonts();
+    final pdf = pw.Document(
+      theme: pw.ThemeData.withFont(
+        base: fonts.base,
+        bold: fonts.bold,
+      ),
+    );
+
+    final safeBusiness = businessData.map(
       (k, v) => MapEntry(k, _sanitizePdfText(v)),
     );
     final safeClientName = _sanitizePdfText(clientName);
-    final safeClientPhone = clientPhone == null
-        ? null
-        : _sanitizePdfText(clientPhone);
-    final safeClientRnc = clientRnc == null
-        ? null
-        : _sanitizePdfText(clientRnc);
+    final safeClientPhone = clientPhone == null ? null : _sanitizePdfText(clientPhone);
+    final safeClientRnc = clientRnc == null ? null : _sanitizePdfText(clientRnc);
 
-    final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
-    final currencyFormat = NumberFormat('#,##0.00', 'en_US');
     final createdDate = DateTime.fromMillisecondsSinceEpoch(quote.createdAtMs);
     final expirationDate = createdDate.add(Duration(days: validDays));
+    final issueDate = DateFormat('dd/MM/yyyy HH:mm').format(createdDate);
+    final validUntil = DateFormat('dd/MM/yyyy').format(expirationDate);
+    final currencyFormat = NumberFormat('#,##0.00', 'en_US');
 
     pdf.addPage(
-      pw.Page(
+      pw.MultiPage(
         pageFormat: PdfPageFormat.letter,
-        margin: const pw.EdgeInsets.all(40),
-        build: (context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              // Header con datos de empresa (100% dinámicos)
-              _buildHeader(safeBusinessData, quote),
-              pw.SizedBox(height: 20),
-
-              // Línea divisoria
-              pw.Divider(thickness: 2, color: PdfColors.teal),
-              pw.SizedBox(height: 15),
-
-              // Datos del cliente
-              _buildClientInfo(safeClientName, safeClientPhone, safeClientRnc),
-              pw.SizedBox(height: 20),
-
-              // Fechas
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'Fecha: ${dateFormat.format(createdDate)}',
-                    style: const pw.TextStyle(fontSize: 10),
-                  ),
-                  pw.Container(
-                    padding: const pw.EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
-                    ),
-                    decoration: pw.BoxDecoration(
-                      color: PdfColors.amber100,
-                      borderRadius: pw.BorderRadius.circular(4),
-                    ),
-                    child: pw.Text(
-                      'Válida hasta: ${DateFormat('dd/MM/yyyy').format(expirationDate)}',
-                      style: pw.TextStyle(
-                        fontSize: 10,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.orange900,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 20),
-
-              // Tabla de productos
-              _buildProductsTable(items, currencyFormat),
-              pw.SizedBox(height: 20),
-
-              // Totales
-              _buildTotals(quote, currencyFormat),
-              pw.SizedBox(height: 30),
-
-              // Notas si existen
-              if (quote.notes != null && quote.notes!.isNotEmpty) ...[
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(10),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColors.grey100,
-                    borderRadius: pw.BorderRadius.circular(4),
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        'NOTAS:',
-                        style: pw.TextStyle(
-                          fontSize: 10,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                      pw.SizedBox(height: 4),
-                      pw.Text(
-                        _sanitizePdfText(quote.notes!),
-                        style: const pw.TextStyle(fontSize: 9),
-                      ),
-                    ],
-                  ),
-                ),
-                pw.SizedBox(height: 20),
-              ],
-
-              // Términos y condiciones
-              _buildTerms(validDays),
-
-              // Spacer
-              pw.Spacer(),
-
-              // Footer (con nombre dinámico de empresa)
-              _buildFooter(safeBusinessData),
-            ],
-          );
-        },
+        margin: const pw.EdgeInsets.fromLTRB(36, 36, 36, 40),
+        header: (context) => _buildHeader(
+          safeBusiness,
+          quote,
+          issueDate,
+          validUntil,
+        ),
+        footer: (context) => _buildFooter(
+          context,
+          safeBusiness,
+          quote,
+          currencyFormat,
+        ),
+        build: (context) => [
+          _buildInfoBlocks(
+            safeBusiness,
+            safeClientName.isEmpty ? 'Cliente' : safeClientName,
+            safeClientPhone,
+            safeClientRnc,
+          ),
+          pw.SizedBox(height: 14),
+          _buildProductsTable(items, currencyFormat),
+          if (quote.notes != null && quote.notes!.trim().isNotEmpty) ...[
+            pw.SizedBox(height: 14),
+            _buildNotes(_sanitizePdfText(quote.notes!)),
+          ],
+          pw.SizedBox(height: 14),
+          _buildTerms(validDays),
+        ],
       ),
     );
 
     return pdf.save();
   }
 
+  static Future<_PdfFonts> _loadPdfFonts() async {
+    try {
+      if (Platform.isWindows) {
+        final regular = File(r'C:\\Windows\\Fonts\\segoeui.ttf');
+        final bold = File(r'C:\\Windows\\Fonts\\segoeuib.ttf');
+        if (regular.existsSync() && bold.existsSync()) {
+          return _PdfFonts(
+            base: pw.Font.ttf(ByteData.view(regular.readAsBytesSync().buffer)),
+            bold: pw.Font.ttf(ByteData.view(bold.readAsBytesSync().buffer)),
+          );
+        }
+
+        final arial = File(r'C:\\Windows\\Fonts\\arial.ttf');
+        final arialBold = File(r'C:\\Windows\\Fonts\\arialbd.ttf');
+        if (arial.existsSync() && arialBold.existsSync()) {
+          return _PdfFonts(
+            base: pw.Font.ttf(ByteData.view(arial.readAsBytesSync().buffer)),
+            bold: pw.Font.ttf(ByteData.view(arialBold.readAsBytesSync().buffer)),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Font load failed: $e');
+    }
+
+    return _PdfFonts(
+      base: pw.Font.helvetica(),
+      bold: pw.Font.helveticaBold(),
+    );
+  }
+
   static pw.Widget _buildHeader(
     Map<String, String> businessData,
     QuoteModel quote,
+    String issueDate,
+    String validUntil,
   ) {
     final displayId = quote.id != null
         ? quote.id!.toString().padLeft(5, '0')
         : '-----';
+    final phones = _joinParts(
+      [businessData['phone'] ?? '', businessData['phone2'] ?? ''],
+      separator: ' / ',
+    );
+    final address = _joinParts(
+      [businessData['address'] ?? '', businessData['city'] ?? ''],
+      separator: ', ',
+    );
+
+    return pw.Container(
+      padding: const pw.EdgeInsets.only(bottom: 12),
+      decoration: pw.BoxDecoration(
+        border: pw.Border(
+          bottom: pw.BorderSide(color: PdfColors.grey300),
+        ),
+      ),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  businessData['name']!.isNotEmpty
+                      ? businessData['name']!
+                      : 'Empresa',
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                if (businessData['slogan']!.isNotEmpty)
+                  pw.Text(
+                    businessData['slogan']!,
+                    style: pw.TextStyle(
+                      fontSize: 10,
+                      color: PdfColors.grey700,
+                    ),
+                  ),
+                if (address.isNotEmpty)
+                  pw.Text(
+                    address,
+                    style: const pw.TextStyle(fontSize: 9),
+                  ),
+                if (phones.isNotEmpty)
+                  pw.Text(
+                    'Tel: $phones',
+                    style: const pw.TextStyle(fontSize: 9),
+                  ),
+                if (businessData['email']!.isNotEmpty)
+                  pw.Text(
+                    businessData['email']!,
+                    style: const pw.TextStyle(fontSize: 9),
+                  ),
+                if (businessData['rnc']!.isNotEmpty)
+                  pw.Text(
+                    'RNC: ${businessData['rnc']!}',
+                    style: const pw.TextStyle(fontSize: 9),
+                  ),
+              ],
+            ),
+          ),
+          pw.SizedBox(width: 16),
+          pw.Container(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.teal,
+              borderRadius: pw.BorderRadius.circular(6),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Text(
+                  'COTIZACION',
+                  style: pw.TextStyle(
+                    fontSize: 10,
+                    fontWeight: pw.FontWeight.bold,
+                    letterSpacing: 1,
+                    color: PdfColors.white,
+                  ),
+                ),
+                pw.Text(
+                  '#COT-$displayId',
+                  style: pw.TextStyle(
+                    fontSize: 14,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.white,
+                  ),
+                ),
+                pw.SizedBox(height: 6),
+                pw.Text(
+                  'Fecha: $issueDate',
+                  style: const pw.TextStyle(fontSize: 9, color: PdfColors.white),
+                ),
+                pw.Text(
+                  'Valida hasta: $validUntil',
+                  style: const pw.TextStyle(fontSize: 9, color: PdfColors.white),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _buildInfoBlocks(
+    Map<String, String> businessData,
+    String clientName,
+    String? clientPhone,
+    String? clientRnc,
+  ) {
+    final companyLines = <pw.Widget>[];
+    final address = _joinParts(
+      [businessData['address'] ?? '', businessData['city'] ?? ''],
+      separator: ', ',
+    );
+    final phones = _joinParts(
+      [businessData['phone'] ?? '', businessData['phone2'] ?? ''],
+      separator: ' / ',
+    );
+
+    if (address.isNotEmpty) {
+      companyLines.add(_infoLine('Direccion', address));
+    }
+    if (phones.isNotEmpty) {
+      companyLines.add(_infoLine('Telefono', phones));
+    }
+    if (businessData['email']!.isNotEmpty) {
+      companyLines.add(_infoLine('Correo', businessData['email']!));
+    }
+    if (businessData['website']!.isNotEmpty) {
+      companyLines.add(_infoLine('Web', businessData['website']!));
+    }
+    if (businessData['rnc']!.isNotEmpty) {
+      companyLines.add(_infoLine('RNC', businessData['rnc']!));
+    }
+
+    final clientLines = <pw.Widget>[
+      _infoLine('Nombre', clientName),
+    ];
+    if (clientPhone != null && clientPhone.isNotEmpty) {
+      clientLines.add(_infoLine('Telefono', clientPhone));
+    }
+    if (clientRnc != null && clientRnc.isNotEmpty) {
+      clientLines.add(_infoLine('RNC', clientRnc));
+    }
 
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        // Datos de empresa (centrado, sin iconos ni caracteres especiales)
         pw.Expanded(
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              // Nombre de la empresa (negrita, centrado)
-              pw.Text(
-                businessData['name']!,
-                style: pw.TextStyle(
-                  fontSize: 16,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.black,
-                ),
-                textAlign: pw.TextAlign.center,
-              ),
-              pw.SizedBox(height: 4),
-
-              // RNC
-              if (businessData['rnc']!.isNotEmpty)
-                pw.Text(
-                  'RNC: ${businessData['rnc']!}',
-                  style: const pw.TextStyle(fontSize: 9),
-                  textAlign: pw.TextAlign.center,
-                ),
-
-              // Teléfono
-              if (businessData['phone']!.isNotEmpty)
-                pw.Text(
-                  'Tel: ${businessData['phone']!}',
-                  style: const pw.TextStyle(fontSize: 9),
-                  textAlign: pw.TextAlign.center,
-                ),
-
-              // Dirección
-              if (businessData['address']!.isNotEmpty)
-                pw.Text(
-                  businessData['address']!,
-                  style: const pw.TextStyle(fontSize: 9),
-                  textAlign: pw.TextAlign.center,
-                ),
-            ],
-          ),
+          child: _buildInfoCard('Empresa', companyLines),
         ),
-        // Título de cotización (sin texto fijo adicional)
-        pw.Container(
-          padding: const pw.EdgeInsets.all(15),
-          decoration: pw.BoxDecoration(
-            color: PdfColors.teal,
-            borderRadius: pw.BorderRadius.circular(8),
-          ),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Text(
-                'COTIZACION',
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.white,
-                ),
-              ),
-              pw.SizedBox(height: 4),
-              pw.Text(
-                '#COT-$displayId',
-                style: pw.TextStyle(
-                  fontSize: 14,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.white,
-                ),
-              ),
-            ],
-          ),
+        pw.SizedBox(width: 12),
+        pw.Expanded(
+          child: _buildInfoCard('Cliente', clientLines),
         ),
       ],
     );
   }
 
-  static pw.Widget _buildClientInfo(
-    String clientName,
-    String? clientPhone,
-    String? clientRnc,
-  ) {
+  static pw.Widget _buildInfoCard(String title, List<pw.Widget> lines) {
     return pw.Container(
-      padding: const pw.EdgeInsets.all(12),
+      padding: const pw.EdgeInsets.all(10),
       decoration: pw.BoxDecoration(
         color: PdfColors.grey100,
         borderRadius: pw.BorderRadius.circular(6),
         border: pw.Border.all(color: PdfColors.grey300),
       ),
-      child: pw.Row(
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Container(
-            width: 40,
-            height: 40,
-            decoration: pw.BoxDecoration(
-              color: PdfColors.teal100,
-              borderRadius: pw.BorderRadius.circular(20),
-            ),
-            child: pw.Center(
-              child: pw.Text(
-                clientName.isNotEmpty ? clientName[0].toUpperCase() : 'C',
-                style: pw.TextStyle(
-                  fontSize: 18,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.teal800,
-                ),
-              ),
+          pw.Text(
+            title,
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.grey700,
             ),
           ),
-          pw.SizedBox(width: 12),
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(
-                'CLIENTE',
-                style: pw.TextStyle(
-                  fontSize: 8,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.grey600,
-                ),
-              ),
-              pw.Text(
-                clientName,
-                style: pw.TextStyle(
-                  fontSize: 14,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              if (clientPhone != null && clientPhone.isNotEmpty)
-                pw.Text(
-                  'Tel: $clientPhone',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
-              if (clientRnc != null && clientRnc.isNotEmpty)
-                pw.Text(
-                  'RNC: $clientRnc',
-                  style: const pw.TextStyle(fontSize: 9),
-                ),
-            ],
-          ),
+          pw.SizedBox(height: 6),
+          ...lines,
         ],
+      ),
+    );
+  }
+
+  static pw.Widget _infoLine(String label, String value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 4),
+      child: pw.RichText(
+        text: pw.TextSpan(
+          text: '$label: ',
+          style: pw.TextStyle(
+            fontSize: 9,
+            fontWeight: pw.FontWeight.bold,
+            color: PdfColors.grey700,
+          ),
+          children: [
+            pw.TextSpan(
+              text: value,
+              style: pw.TextStyle(
+                fontSize: 9,
+                fontWeight: pw.FontWeight.normal,
+                color: PdfColors.grey800,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -429,167 +488,110 @@ class QuotePrinter {
     List<QuoteItemModel> items,
     NumberFormat currencyFormat,
   ) {
+    final headerStyle = pw.TextStyle(
+      fontSize: 9,
+      fontWeight: pw.FontWeight.bold,
+      color: PdfColors.white,
+    );
+    final bodyStyle = const pw.TextStyle(fontSize: 9);
+
+    final rows = <pw.TableRow>[
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: PdfColors.teal),
+        children: [
+          _tableCell('DESCRIPCION', headerStyle),
+          _tableCell('CANT', headerStyle, align: pw.TextAlign.center),
+          _tableCell('PRECIO', headerStyle, align: pw.TextAlign.right),
+          _tableCell('DESC', headerStyle, align: pw.TextAlign.right),
+          _tableCell('TOTAL', headerStyle, align: pw.TextAlign.right),
+        ],
+      ),
+    ];
+
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      final isAlt = i.isOdd;
+      rows.add(
+        pw.TableRow(
+          decoration: pw.BoxDecoration(
+            color: isAlt ? PdfColors.grey100 : PdfColors.white,
+          ),
+          children: [
+            _tableCell(_sanitizePdfText(item.description), bodyStyle),
+            _tableCell(
+              _formatQty(item.qty),
+              bodyStyle,
+              align: pw.TextAlign.center,
+            ),
+            _tableCell(
+              _formatMoney(currencyFormat, item.price),
+              bodyStyle,
+              align: pw.TextAlign.right,
+            ),
+            _tableCell(
+              item.discountLine > 0
+                  ? _formatMoney(currencyFormat, item.discountLine)
+                  : '-',
+              bodyStyle,
+              align: pw.TextAlign.right,
+            ),
+            _tableCell(
+              _formatMoney(currencyFormat, item.totalLine),
+              pw.TextStyle(
+                fontSize: 9,
+                fontWeight: pw.FontWeight.bold,
+              ),
+              align: pw.TextAlign.right,
+            ),
+          ],
+        ),
+      );
+    }
+
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey300),
       columnWidths: {
         0: const pw.FlexColumnWidth(4),
         1: const pw.FlexColumnWidth(1),
         2: const pw.FlexColumnWidth(1.5),
-        3: const pw.FlexColumnWidth(1.5),
+        3: const pw.FlexColumnWidth(1.2),
+        4: const pw.FlexColumnWidth(1.7),
       },
-      children: [
-        // Header
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.teal),
-          children: [
-            _tableHeaderCell('PRODUCTO'),
-            _tableHeaderCell('CANT', align: pw.TextAlign.center),
-            _tableHeaderCell('PRECIO', align: pw.TextAlign.right),
-            _tableHeaderCell('TOTAL', align: pw.TextAlign.right),
-          ],
-        ),
-        // Items
-        ...items.map(
-          (item) => pw.TableRow(
-            children: [
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(8),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      _sanitizePdfText(item.description),
-                      style: const pw.TextStyle(fontSize: 10),
-                    ),
-                  ],
-                ),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(8),
-                child: pw.Text(
-                  item.qty.toStringAsFixed(
-                    item.qty == item.qty.roundToDouble() ? 0 : 2,
-                  ),
-                  style: const pw.TextStyle(fontSize: 10),
-                  textAlign: pw.TextAlign.center,
-                ),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(8),
-                child: pw.Text(
-                  '\$${currencyFormat.format(item.price)}',
-                  style: const pw.TextStyle(fontSize: 10),
-                  textAlign: pw.TextAlign.right,
-                ),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.all(8),
-                child: pw.Text(
-                  '\$${currencyFormat.format(item.totalLine)}',
-                  style: pw.TextStyle(
-                    fontSize: 10,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                  textAlign: pw.TextAlign.right,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+      children: rows,
     );
   }
 
-  static pw.Widget _tableHeaderCell(
-    String text, {
+  static pw.Widget _tableCell(
+    String text,
+    pw.TextStyle style, {
     pw.TextAlign align = pw.TextAlign.left,
   }) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.all(8),
-      child: pw.Text(
-        text,
-        style: pw.TextStyle(
-          fontSize: 10,
-          fontWeight: pw.FontWeight.bold,
-          color: PdfColors.white,
-        ),
-        textAlign: align,
-      ),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      child: pw.Text(text, style: style, textAlign: align),
     );
   }
 
-  static pw.Widget _buildTotals(QuoteModel quote, NumberFormat currencyFormat) {
-    return pw.Align(
-      alignment: pw.Alignment.centerRight,
-      child: pw.Container(
-        width: 250,
-        padding: const pw.EdgeInsets.all(12),
-        decoration: pw.BoxDecoration(
-          color: PdfColors.teal50,
-          borderRadius: pw.BorderRadius.circular(6),
-          border: pw.Border.all(color: PdfColors.teal200, width: 2),
-        ),
-        child: pw.Column(
-          children: [
-            _totalRow('Subtotal', quote.subtotal, currencyFormat),
-            if (quote.discountTotal > 0)
-              _totalRow(
-                'Descuento',
-                -quote.discountTotal,
-                currencyFormat,
-                color: PdfColors.red,
-              ),
-            if (quote.itbisEnabled)
-              _totalRow(
-                'ITBIS (${(quote.itbisRate * 100).toInt()}%)',
-                quote.itbisAmount,
-                currencyFormat,
-              ),
-            pw.Divider(thickness: 2, color: PdfColors.teal),
-            pw.SizedBox(height: 4),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              children: [
-                pw.Text(
-                  'TOTAL',
-                  style: pw.TextStyle(
-                    fontSize: 14,
-                    fontWeight: pw.FontWeight.bold,
-                    color: PdfColors.teal800,
-                  ),
-                ),
-                pw.Text(
-                  'RD\$ ${currencyFormat.format(quote.total)}',
-                  style: pw.TextStyle(
-                    fontSize: 16,
-                    fontWeight: pw.FontWeight.bold,
-                    color: PdfColors.teal800,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+  static pw.Widget _buildNotes(String notes) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        borderRadius: pw.BorderRadius.circular(6),
+        border: pw.Border.all(color: PdfColors.grey300),
       ),
-    );
-  }
-
-  static pw.Widget _totalRow(
-    String label,
-    double amount,
-    NumberFormat currencyFormat, {
-    PdfColor? color,
-  }) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text(label, style: const pw.TextStyle(fontSize: 10)),
           pw.Text(
-            '\$${currencyFormat.format(amount)}',
-            style: pw.TextStyle(fontSize: 10, color: color),
+            'Notas',
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+            ),
           ),
+          pw.SizedBox(height: 4),
+          pw.Text(notes, style: const pw.TextStyle(fontSize: 9)),
         ],
       ),
     );
@@ -599,70 +601,172 @@ class QuotePrinter {
     return pw.Container(
       padding: const pw.EdgeInsets.all(10),
       decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        borderRadius: pw.BorderRadius.circular(6),
         border: pw.Border.all(color: PdfColors.grey300),
-        borderRadius: pw.BorderRadius.circular(4),
       ),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text(
-            'TERMINOS Y CONDICIONES',
-            style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+            'Terminos',
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+            ),
           ),
           pw.SizedBox(height: 6),
           pw.Text(
-            '- Esta cotizacion tiene una validez de $validDays dias a partir de la fecha de emision.',
-            style: const pw.TextStyle(fontSize: 8),
+            '- Validez: $validDays dias.',
+            style: const pw.TextStyle(fontSize: 9),
           ),
           pw.Text(
-            '- Los precios estan sujetos a cambios sin previo aviso despues de la fecha de vencimiento.',
-            style: const pw.TextStyle(fontSize: 8),
+            '- Precios sujetos a cambios luego del vencimiento.',
+            style: const pw.TextStyle(fontSize: 9),
           ),
           pw.Text(
-            '- El ITBIS esta incluido segun las leyes fiscales vigentes de Republica Dominicana.',
-            style: const pw.TextStyle(fontSize: 8),
-          ),
-          pw.Text(
-            '- Para confirmar su pedido, favor comunicarse con nosotros.',
-            style: const pw.TextStyle(fontSize: 8),
+            '- ITBIS incluido segun normativa local.',
+            style: const pw.TextStyle(fontSize: 9),
           ),
         ],
       ),
     );
   }
 
-  static pw.Widget _buildFooter(Map<String, String> businessData) {
+  static pw.Widget _buildFooter(
+    pw.Context context,
+    Map<String, String> businessData,
+    QuoteModel quote,
+    NumberFormat currencyFormat,
+  ) {
+    final showTotals = context.pageNumber == context.pagesCount;
+    final footerParts = <String>[];
+
+    if (businessData['website']!.isNotEmpty) {
+      footerParts.add(businessData['website']!);
+    }
+    if (businessData['email']!.isNotEmpty) {
+      footerParts.add(businessData['email']!);
+    }
+    if (businessData['instagram']!.isNotEmpty) {
+      footerParts.add('Instagram: ${businessData['instagram']!}');
+    }
+    if (businessData['facebook']!.isNotEmpty) {
+      footerParts.add('Facebook: ${businessData['facebook']!}');
+    }
+
+    final footerText = footerParts.join(' | ');
+
     return pw.Column(
+      mainAxisSize: pw.MainAxisSize.min,
       children: [
-        pw.Divider(color: PdfColors.grey300),
+        if (showTotals) _buildTotalsFooter(quote, currencyFormat),
         pw.SizedBox(height: 8),
-        pw.Center(
-          child: pw.Text(
-            'Gracias por su preferencia!',
+        pw.Container(height: 1, color: PdfColors.grey400),
+        if (footerText.isNotEmpty) ...[
+          pw.SizedBox(height: 6),
+          pw.Text(
+            footerText,
+            textAlign: pw.TextAlign.center,
             style: pw.TextStyle(
-              fontSize: 12,
-              fontWeight: pw.FontWeight.bold,
-              color: PdfColors.teal,
+              fontSize: 8,
+              color: PdfColors.grey700,
             ),
           ),
-        ),
-        pw.SizedBox(height: 4),
-        pw.Center(
-          child: pw.Text(
-            'Documento generado por ${businessData['name']!}',
-            style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
-          ),
-        ),
+        ],
       ],
     );
   }
 
-  /// 📌 VISTA PREVIA: Muestra el PDF en un visor mejorado
-  ///
-  /// ✅ GARANTÍAS:
-  /// - Regenera el PDF cada vez que se abre (datos siempre frescos)
-  /// - No reutiliza PDFs en cache
-  /// - Cada cotización tiene archivo temporal único con timestamp
+  static pw.Widget _buildTotalsFooter(
+    QuoteModel quote,
+    NumberFormat currencyFormat,
+  ) {
+    return pw.Align(
+      alignment: pw.Alignment.centerRight,
+      child: pw.Container(
+        width: 260,
+        padding: const pw.EdgeInsets.all(10),
+        decoration: pw.BoxDecoration(
+          color: PdfColors.teal50,
+          borderRadius: pw.BorderRadius.circular(6),
+          border: pw.Border.all(color: PdfColors.teal200),
+        ),
+        child: pw.Column(
+          children: [
+            _totalsRow('Subtotal', quote.subtotal, currencyFormat),
+            if (quote.discountTotal > 0)
+              _totalsRow(
+                'Descuento',
+                -quote.discountTotal,
+                currencyFormat,
+                valueColor: PdfColors.red,
+              ),
+            if (quote.itbisEnabled)
+              _totalsRow(
+                'ITBIS (${(quote.itbisRate * 100).toInt()}%)',
+                quote.itbisAmount,
+                currencyFormat,
+              ),
+            pw.Divider(color: PdfColors.teal, thickness: 1),
+            _totalsRow(
+              'TOTAL',
+              quote.total,
+              currencyFormat,
+              isTotal: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static pw.Widget _totalsRow(
+    String label,
+    double amount,
+    NumberFormat currencyFormat, {
+    bool isTotal = false,
+    PdfColor? valueColor,
+  }) {
+    final textStyle = pw.TextStyle(
+      fontSize: isTotal ? 11 : 9,
+      fontWeight: isTotal ? pw.FontWeight.bold : pw.FontWeight.normal,
+      color: valueColor,
+    );
+
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label, style: textStyle),
+          pw.Text(
+            _formatMoney(currencyFormat, amount),
+            style: textStyle,
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatMoney(NumberFormat currencyFormat, double value) {
+    final formatted = currencyFormat.format(value.abs());
+    final sign = value < 0 ? '-' : '';
+    return '${sign}RD\$ $formatted';
+  }
+
+  static String _formatQty(double qty) {
+    if (qty == qty.roundToDouble()) {
+      return qty.toStringAsFixed(0);
+    }
+    return qty.toStringAsFixed(2);
+  }
+
+  static String _joinParts(List<String> parts, {String separator = ' '}) {
+    final filtered = parts.where((part) => part.trim().isNotEmpty).toList();
+    return filtered.join(separator);
+  }
+
   static Future<void> showPreview({
     required BuildContext context,
     required QuoteModel quote,
@@ -677,12 +781,22 @@ class QuotePrinter {
         ? quote.id!.toString().padLeft(5, '0')
         : '-----';
 
-    // 🔄 Usar timestamp único para garantizar que cada apertura regenera el PDF
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final fileId = quote.id ?? timestamp;
     final fileName = 'cotizacion_${fileId}_$timestamp.pdf';
 
-    // ✅ Regenerar PDF siempre (datos frescos desde Configuración)
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    if (context.mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     Uint8List pdfData;
     try {
       pdfData = await generatePdf(
@@ -695,36 +809,38 @@ class QuotePrinter {
         validDays: validDays,
       );
     } catch (e) {
-      debugPrint('Error generando PDF de cotización: $e');
+      if (navigator.canPop()) {
+        navigator.pop();
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No se pudo generar el PDF de la cotización.'),
+            content: Text('No se pudo generar el PDF de la cotizacion.'),
           ),
         );
       }
       return;
     }
 
-    if (context.mounted) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => _PdfViewerWithZoom(
-            title: 'Cotización #COT-$displayId',
-            pdfData: pdfData,
-            fileName: fileName,
-          ),
-        ),
-      );
+    if (navigator.canPop()) {
+      navigator.pop();
     }
+
+    if (!context.mounted) {
+      return;
+    }
+
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (context) => _QuotePdfPreviewPage(
+          title: 'Cotizacion #COT-$displayId',
+          pdfData: pdfData,
+          fileName: fileName,
+        ),
+      ),
+    );
   }
 
-  /// 📌 IMPRESIÓN: Imprime la cotización directamente a impresora
-  ///
-  /// ✅ GARANTÍAS:
-  /// - Regenera PDF con datos frescos cada vez
-  /// - No reutiliza PDFs en cache
   static Future<bool> printQuote({
     required QuoteModel quote,
     required List<QuoteItemModel> items,
@@ -736,7 +852,6 @@ class QuotePrinter {
     int validDays = 15,
   }) async {
     try {
-      // ✅ Regenerar PDF siempre con datos frescos
       final pdfData = await generatePdf(
         quote: quote,
         items: items,
@@ -758,132 +873,39 @@ class QuotePrinter {
         onLayout: (_) => pdfData,
       );
     } catch (e) {
-      debugPrint('❌ Error en printQuote: $e');
+      debugPrint('Error en printQuote: $e');
       return false;
     }
   }
 }
 
-/// Widget para visualizar PDF con controles de zoom mejorados
-class _PdfViewerWithZoom extends StatefulWidget {
+class _PdfFonts {
+  final pw.Font base;
+  final pw.Font bold;
+
+  const _PdfFonts({
+    required this.base,
+    required this.bold,
+  });
+}
+
+class _QuotePdfPreviewPage extends StatelessWidget {
   final String title;
   final Uint8List pdfData;
   final String fileName;
 
-  const _PdfViewerWithZoom({
+  const _QuotePdfPreviewPage({
     required this.title,
     required this.pdfData,
     required this.fileName,
   });
 
   @override
-  State<_PdfViewerWithZoom> createState() => _PdfViewerWithZoomState();
-}
-
-class _PdfViewerWithZoomState extends State<_PdfViewerWithZoom> {
-  double _currentScale = 1.0;
-  static const double _minScale = 0.5;
-  static const double _maxScale = 4.0;
-  static const double _scaleStep = 0.25;
-
-  // Controla el pan/zoom para mantener el PDF centrado.
-  final TransformationController _transformController = TransformationController();
-  Size? _lastViewportSize;
-  bool _didInitTransform = false;
-
-  Future<Uint8List>? _firstPagePng;
-  bool _didFitOnOpen = false;
-
-  // La cotización se genera en PdfPageFormat.letter
-  static const double _pageWidth = 612; // Letter en puntos
-  static const double _pageHeight = 792; // Letter en puntos
-
-  @override
-  void initState() {
-    super.initState();
-    _transformController.addListener(_syncScaleFromTransform);
-    _firstPagePng = _rasterFirstPage(widget.pdfData);
-  }
-
-  @override
-  void dispose() {
-    _transformController.removeListener(_syncScaleFromTransform);
-    _transformController.dispose();
-    super.dispose();
-  }
-
-  Future<Uint8List> _rasterFirstPage(Uint8List pdfBytes) async {
-    // PdfPreview tiene su propio scroll/zoom interno. Para que el zoom sea "del PDF completo",
-    // rasterizamos la página a imagen y usamos SOLO un InteractiveViewer.
-    await for (final page in Printing.raster(pdfBytes, dpi: 160)) {
-      return page.toPng();
-    }
-    throw StateError('El PDF no contiene páginas.');
-  }
-
-  void _syncScaleFromTransform() {
-    final scale = _transformController.value.getMaxScaleOnAxis();
-    if ((scale - _currentScale).abs() > 0.01) {
-      setState(() => _currentScale = scale.clamp(_minScale, _maxScale));
-    }
-  }
-
-  void _applyCenteredTransform({required Size viewport, required double scale}) {
-    final dx = ((viewport.width - (_pageWidth * scale)) / 2).clamp(-_pageWidth * scale, viewport.width);
-    final dy = ((viewport.height - (_pageHeight * scale)) / 2).clamp(-_pageHeight * scale, viewport.height);
-    _transformController.value = Matrix4.identity()
-      ..translateByDouble(dx.toDouble(), dy.toDouble(), 0.0, 1.0)
-      ..scaleByDouble(scale, scale, 1.0, 1.0);
-  }
-
-  double _fitScaleForViewport(Size viewport) {
-    // Queremos que el PDF se vea completo al abrir, sin que el usuario tenga que tocar zoom.
-    // Dejamos un margen visual para que no quede pegado a los bordes.
-    const padding = 24.0;
-    final w = (viewport.width - padding).clamp(100.0, double.infinity);
-    final h = (viewport.height - padding).clamp(100.0, double.infinity);
-    final fit = (w / _pageWidth).clamp(0.01, double.infinity);
-    final fitH = (h / _pageHeight).clamp(0.01, double.infinity);
-    return (fit < fitH ? fit : fitH).clamp(_minScale, _maxScale);
-  }
-
-  void _zoomIn() {
-    final next = (_currentScale + _scaleStep).clamp(_minScale, _maxScale);
-    final viewport = _lastViewportSize;
-    if (viewport != null) {
-      _applyCenteredTransform(viewport: viewport, scale: next);
-    } else {
-      setState(() => _currentScale = next);
-    }
-  }
-
-  void _zoomOut() {
-    final next = (_currentScale - _scaleStep).clamp(_minScale, _maxScale);
-    final viewport = _lastViewportSize;
-    if (viewport != null) {
-      _applyCenteredTransform(viewport: viewport, scale: next);
-    } else {
-      setState(() => _currentScale = next);
-    }
-  }
-
-  void _resetZoom() {
-    final viewport = _lastViewportSize;
-    if (viewport != null) {
-      _applyCenteredTransform(viewport: viewport, scale: 1.0);
-    } else {
-      setState(() => _currentScale = 1.0);
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    // Usar el layout normal de la app (Sidebar + Topbar + Footer).
     return AppShell(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header interno (debajo del Topbar) con acciones de zoom/print/share
           Material(
             color: Colors.white.withValues(alpha: 0.92),
             borderRadius: BorderRadius.circular(12),
@@ -899,7 +921,7 @@ class _PdfViewerWithZoomState extends State<_PdfViewerWithZoom> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      widget.title,
+                      title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -909,42 +931,9 @@ class _PdfViewerWithZoomState extends State<_PdfViewerWithZoom> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.zoom_out),
-                    onPressed: _currentScale > _minScale ? _zoomOut : null,
-                    tooltip: 'Alejar',
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: Text(
-                      '${(_currentScale * 100).toInt()}%',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.zoom_in),
-                    onPressed: _currentScale < _maxScale ? _zoomIn : null,
-                    tooltip: 'Acercar',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.fit_screen),
-                    onPressed: () {
-                      final vp = _lastViewportSize;
-                      if (vp == null) return;
-                      final fit = _fitScaleForViewport(vp);
-                      _applyCenteredTransform(viewport: vp, scale: fit);
-                    },
-                    tooltip: 'Ajustar',
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
                     icon: const Icon(Icons.print),
                     onPressed: () async {
-                      await Printing.layoutPdf(onLayout: (_) => widget.pdfData);
+                      await Printing.layoutPdf(onLayout: (_) => pdfData);
                     },
                     tooltip: 'Imprimir',
                   ),
@@ -953,8 +942,8 @@ class _PdfViewerWithZoomState extends State<_PdfViewerWithZoom> {
                     onPressed: () {
                       unawaited(
                         Printing.sharePdf(
-                          bytes: widget.pdfData,
-                          filename: widget.fileName,
+                          bytes: pdfData,
+                          filename: fileName,
                         ),
                       );
                     },
@@ -971,72 +960,12 @@ class _PdfViewerWithZoomState extends State<_PdfViewerWithZoom> {
                 color: Colors.grey.shade300,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final viewport = constraints.biggest;
-                  final prevViewport = _lastViewportSize;
-                  _lastViewportSize = viewport;
-
-                  final viewportChanged = prevViewport == null || prevViewport != viewport;
-
-                  return Center(
-                    child: InteractiveViewer(
-                      transformationController: _transformController,
-                      minScale: _minScale,
-                      maxScale: _maxScale,
-                      panEnabled: true,
-                      scaleEnabled: true,
-                      constrained: true,
-                      boundaryMargin: const EdgeInsets.all(200),
-                      child: FutureBuilder<Uint8List>(
-                        future: _firstPagePng,
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState != ConnectionState.done) {
-                            return SizedBox(
-                              width: _pageWidth,
-                              height: _pageHeight,
-                              child: const Center(child: CircularProgressIndicator()),
-                            );
-                          }
-                          if (snapshot.hasError) {
-                            return SizedBox(
-                              width: _pageWidth,
-                              height: _pageHeight,
-                              child: Center(
-                                child: Text(
-                                  'No se pudo mostrar el PDF.\n${snapshot.error}',
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            );
-                          }
-
-                          // Al abrir (y cuando cambie el tamaño), ajustar para que el PDF se vea completo.
-                          if (!_didFitOnOpen || viewportChanged) {
-                            _didFitOnOpen = true;
-                            final fit = _fitScaleForViewport(viewport);
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (!mounted) return;
-                              _applyCenteredTransform(viewport: viewport, scale: fit);
-                            });
-                          }
-
-                          final png = snapshot.data!;
-                          return Container(
-                            width: _pageWidth,
-                            height: _pageHeight,
-                            color: Colors.white,
-                            child: Image.memory(
-                              png,
-                              fit: BoxFit.contain,
-                              filterQuality: FilterQuality.high,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  );
-                },
+              child: PdfPreview(
+                build: (format) async => pdfData,
+                canChangeOrientation: false,
+                canChangePageFormat: false,
+                allowPrinting: false,
+                allowSharing: false,
               ),
             ),
           ),

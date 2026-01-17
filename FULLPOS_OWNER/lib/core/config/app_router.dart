@@ -7,6 +7,8 @@ import '../../features/reports/presentation/sales_by_day_page.dart';
 import '../../features/cash/presentation/cash_closings_page.dart';
 import '../../features/cash/presentation/cash_closing_detail_page.dart';
 import '../../features/products/presentation/products_page.dart';
+import '../../features/overrides/presentation/override_requests_page.dart';
+import '../../features/settings/presentation/owner_settings_page.dart';
 import '../../features/shared/owner_shell.dart';
 import '../storage/secure_storage.dart';
 
@@ -17,15 +19,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/login',
     redirect: (context, state) async {
       final token = await storage.readToken();
-      final isAuthRoute = state.matchedLocation == '/login';
-      if (token == null && !isAuthRoute) return '/login';
-      if (token != null && isAuthRoute) return '/dashboard';
+      final isPublicRoute = state.matchedLocation == '/login' || state.matchedLocation == '/settings';
+      if (token == null && !isPublicRoute) return '/login';
+      if (token != null && state.matchedLocation == '/login') return '/dashboard';
       return null;
     },
     routes: [
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginPage(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const OwnerSettingsPage(),
       ),
       GoRoute(
         path: '/',
@@ -41,6 +47,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/products',
             builder: (context, state) => const ProductsPage(),
+          ),
+          GoRoute(
+            path: '/overrides',
+            builder: (context, state) => const OverrideRequestsPage(),
           ),
           GoRoute(
             path: '/sales/list',

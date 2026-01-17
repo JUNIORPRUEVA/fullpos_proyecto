@@ -8,7 +8,7 @@ class BusinessSettingsRepository {
   /// Lista de todas las columnas esperadas con sus definiciones
   static const Map<String, String> _expectedColumns = {
     'id': 'INTEGER PRIMARY KEY DEFAULT 1',
-    'business_name': "TEXT NOT NULL DEFAULT 'MI NEGOCIO'",
+    'business_name': "TEXT NOT NULL DEFAULT 'FULLPOS'",
     'logo_path': 'TEXT',
     'phone': 'TEXT',
     'phone2': 'TEXT',
@@ -18,6 +18,8 @@ class BusinessSettingsRepository {
     'rnc': 'TEXT',
     'slogan': 'TEXT',
     'website': 'TEXT',
+    'instagram_url': 'TEXT',
+    'facebook_url': 'TEXT',
     'default_interest_rate': 'REAL DEFAULT 5.0',
     'default_late_fee_rate': 'REAL DEFAULT 2.0',
     'default_loan_term_days': 'INTEGER DEFAULT 30',
@@ -73,7 +75,7 @@ class BusinessSettingsRepository {
       // Insertar configuración por defecto
       await db.insert(_tableName, {
         'id': 1,
-        'business_name': 'MI NEGOCIO',
+        'business_name': 'FULLPOS',
         'created_at': DateTime.now().toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
       });
@@ -131,14 +133,33 @@ class BusinessSettingsRepository {
         // Si no hay configuración, crear una por defecto
         await db.insert(_tableName, {
           'id': 1,
-          'business_name': 'MI NEGOCIO',
+          'business_name': 'FULLPOS',
           'created_at': DateTime.now().toIso8601String(),
           'updated_at': DateTime.now().toIso8601String(),
         });
         return BusinessSettings.defaultSettings;
       }
 
-      return BusinessSettings.fromMap(results.first);
+      final settings = BusinessSettings.fromMap(results.first);
+      final hasCustomData = (settings.logoPath ?? '').trim().isNotEmpty ||
+          (settings.phone ?? '').trim().isNotEmpty ||
+          (settings.phone2 ?? '').trim().isNotEmpty ||
+          (settings.email ?? '').trim().isNotEmpty ||
+          (settings.address ?? '').trim().isNotEmpty ||
+          (settings.city ?? '').trim().isNotEmpty ||
+          (settings.rnc ?? '').trim().isNotEmpty ||
+          (settings.slogan ?? '').trim().isNotEmpty ||
+          (settings.website ?? '').trim().isNotEmpty ||
+          (settings.instagramUrl ?? '').trim().isNotEmpty ||
+          (settings.facebookUrl ?? '').trim().isNotEmpty;
+
+      if (settings.businessName.trim() == 'Mi Negocio' && !hasCustomData) {
+        final updated = settings.copyWith(businessName: 'FULLPOS');
+        await saveSettings(updated);
+        return updated;
+      }
+
+      return settings;
     } catch (e) {
       print('Error cargando configuración del negocio: $e');
       return BusinessSettings.defaultSettings;

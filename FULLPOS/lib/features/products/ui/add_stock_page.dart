@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../core/errors/error_handler.dart';
+import '../../../core/session/session_manager.dart';
 import '../data/products_repository.dart';
 import '../data/stock_repository.dart';
 import '../models/product_model.dart';
@@ -27,7 +28,7 @@ class _AddStockPageState extends State<AddStockPage> {
   final StockRepository _stockRepo = StockRepository();
 
   ProductModel? _product;
-  List<StockMovementModel> _movements = [];
+  List<StockMovementDetail> _movements = [];
   bool _loading = true;
   bool _saving = false;
   bool _error = false;
@@ -49,8 +50,8 @@ class _AddStockPageState extends State<AddStockPage> {
   Future<void> _load() async {
     try {
       final product = await _productsRepo.getById(widget.productId);
-      final movements = await _stockRepo.getByProductId(
-        widget.productId,
+      final movements = await _stockRepo.getDetailedHistory(
+        productId: widget.productId,
         limit: 50,
       );
 
@@ -78,12 +79,6 @@ class _AddStockPageState extends State<AddStockPage> {
     }
   }
 
-  String _getUserName(int? userId) {
-    if (userId == null) return 'Sistema';
-    // TODO: Obtener nombre de usuario desde contexto autenticado
-    return 'Usuario #${userId}';
-  }
-
   Future<void> _addStock() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -92,9 +87,7 @@ class _AddStockPageState extends State<AddStockPage> {
 
     setState(() => _saving = true);
     try {
-      // Obtener usuario actual (en este caso usamos null, pero en app real sería el usuario autenticado)
-      // TODO: Obtener usuario autenticado desde AuthProvider/Context
-      final currentUserId = 1; // Por defecto admin
+      final currentUserId = await SessionManager.userId();
 
       await _stockRepo.recordInput(
         productId: widget.productId,
@@ -360,12 +353,31 @@ class _AddStockPageState extends State<AddStockPage> {
                   itemCount: _movements.length,
                   separatorBuilder: (context, index) => const Divider(),
                   itemBuilder: (context, index) {
-                    final movement = _movements[index];
-                    final userName = _getUserName(movement.userId);
+                    final detail = _movements[index];
+                    final movement = detail.movement;
                     final dateFormat = DateFormat('dd/MM/yyyy HH:mm:ss');
                     final dateStr = dateFormat.format(
                       movement.createdAt.toLocal(),
                     );
+                    final qtyFormat = NumberFormat.decimalPattern();
+                    String qtyLabel;
+                    if (movement.isAdjust) {
+                      qtyLabel = movement.quantity >= 0
+                          ? '+${qtyFormat.format(movement.quantity)}'
+                          : qtyFormat.format(movement.quantity);
+                    } else if (movement.isInput) {
+                      qtyLabel = '+${qtyFormat.format(movement.quantity)}';
+                    } else {
+                      qtyLabel = '-${qtyFormat.format(movement.quantity)}';
+                    }
+
+                    final color = movement.isInput
+                        ? AppColors.success
+                        : movement.isOutput
+                        ? Colors.red
+                        : (movement.quantity >= 0
+                              ? Colors.orange
+                              : Colors.deepOrange);
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -387,11 +399,7 @@ class _AddStockPageState extends State<AddStockPage> {
                                               : movement.isOutput
                                               ? Icons.remove_circle
                                               : Icons.tune,
-                                          color: movement.isInput
-                                              ? AppColors.success
-                                              : movement.isOutput
-                                              ? Colors.red
-                                              : Colors.orange,
+                                          color: color,
                                           size: 20,
                                         ),
                                         const SizedBox(width: 8),
@@ -408,7 +416,7 @@ class _AddStockPageState extends State<AddStockPage> {
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      'Cantidad: ${movement.quantity.toString()}',
+                                      'Cantidad: $qtyLabel',
                                       style: Theme.of(
                                         context,
                                       ).textTheme.bodySmall,
@@ -442,7 +450,7 @@ class _AddStockPageState extends State<AddStockPage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'Por: $userName',
+                                    'Por: ${detail.userLabel}',
                                     style: Theme.of(context)
                                         .textTheme
                                         .labelSmall

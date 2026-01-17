@@ -126,3 +126,53 @@ class StockMovementModel {
         createdAtMs.hashCode;
   }
 }
+
+/// Detalle enriquecido de un movimiento (para vistas e historiales)
+class StockMovementDetail {
+  final StockMovementModel movement;
+  final String? productName;
+  final String? productCode;
+  final double? currentStock;
+  final String? userDisplayName;
+  final String? userUsername;
+
+  const StockMovementDetail({
+    required this.movement,
+    this.productName,
+    this.productCode,
+    this.currentStock,
+    this.userDisplayName,
+    this.userUsername,
+  });
+
+  /// Etiqueta amigable para el usuario que lo registrゴ.
+  String get userLabel {
+    if (userDisplayName != null && userDisplayName!.trim().isNotEmpty) {
+      return userDisplayName!;
+    }
+    if (userUsername != null && userUsername!.trim().isNotEmpty) {
+      return userUsername!;
+    }
+    return 'Sistema';
+  }
+
+  /// Etiqueta amigable para el producto.
+  String get productLabel => productName ?? 'Producto #${movement.productId}';
+}
+
+/// Resumen agregado de movimientos de inventario.
+class StockSummary {
+  final double totalInputs;
+  final double totalOutputs;
+  final double totalAdjustments;
+  final int movementsCount;
+
+  const StockSummary({
+    this.totalInputs = 0,
+    this.totalOutputs = 0,
+    this.totalAdjustments = 0,
+    this.movementsCount = 0,
+  });
+
+  double get netChange => totalInputs - totalOutputs + totalAdjustments;
+}

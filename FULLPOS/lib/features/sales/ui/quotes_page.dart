@@ -9,8 +9,6 @@ import '../data/quote_model.dart';
 import '../data/quote_to_ticket_converter.dart';
 import '../data/sales_repository.dart';
 import '../data/settings_repository.dart';
-import '../data/tickets_repository.dart';
-import '../data/ticket_model.dart';
 import '../../../core/printing/unified_ticket_printer.dart';
 import '../../../core/printing/quote_printer.dart';
 import '../../../core/session/session_manager.dart';
@@ -92,76 +90,275 @@ class _QuotesPageState extends State<QuotesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final totalQuotes = _filteredQuotes.length;
+    final converted =
+        _filteredQuotes.where((q) => q.quote.status == 'CONVERTED').length;
+    final cancelled =
+        _filteredQuotes.where((q) => q.quote.status == 'CANCELLED').length;
+    final passedToTicket =
+        _filteredQuotes.where((q) => q.quote.status == 'TICKET').length;
+    final open = totalQuotes - converted - cancelled - passedToTicket;
+    final totalAmount = _filteredQuotes.fold<double>(
+      0,
+      (sum, item) => sum + item.quote.total,
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cotizaciones'),
         backgroundColor: Colors.teal,
         elevation: 0,
       ),
-      body: Column(
-        children: [
-          // Barra de filtros
-          QuotesFilterBar(
-            initialConfig: _filterConfig,
-            onFilterChanged: _onFilterChanged,
-          ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final showSummary = constraints.maxWidth > 1100;
+          return Column(
+            children: [
+              QuotesFilterBar(
+                initialConfig: _filterConfig,
+                onFilterChanged: _onFilterChanged,
+              ),
+              Expanded(
+                child: showSummary
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: _buildQuotesList()),
+                          const SizedBox(width: 16),
+                          SizedBox(
+                            width: 280,
+                            child: _buildSummaryPanel(
+                              totalQuotes: totalQuotes,
+                              open: open,
+                              converted: converted,
+                              cancelled: cancelled,
+                              passedToTicket: passedToTicket,
+                              totalAmount: totalAmount,
+                            ),
+                          ),
+                        ],
+                      )
+                    : _buildQuotesList(),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
-          // Lista de cotizaciones
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _filteredQuotes.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.description_outlined,
-                          size: 80,
-                          color: Colors.grey.shade300,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _quotes.isEmpty
-                              ? 'No hay cotizaciones'
-                              : 'No hay resultados',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey.shade600,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _quotes.isEmpty
-                              ? 'Crea una cotización desde la página de ventas'
-                              : 'Ajusta los filtros e intenta de nuevo',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey.shade400,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.only(top: 8),
-                    itemCount: _filteredQuotes.length,
-                    itemBuilder: (context, index) {
-                      final quoteDetail = _filteredQuotes[index];
-                      return CompactQuoteRow(
-                        quoteDetail: quoteDetail,
-                        onTap: () => _showQuoteDetails(quoteDetail),
-                        onSell: () => _convertToSale(quoteDetail),
-                        onWhatsApp: () => _shareWhatsApp(quoteDetail),
-                        onPdf: () => _viewPDF(quoteDetail),
-                        onDownload: () => _downloadPDF(quoteDetail),
-                        onDuplicate: () => _duplicateQuote(quoteDetail),
-                        onDelete: () => _deleteQuote(quoteDetail),
-                        onConvertToTicket: () => _convertToTicket(quoteDetail),
-                      );
-                    },
+  Widget _buildQuotesList() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_filteredQuotes.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.description_outlined,
+              size: 80,
+              color: Colors.grey.shade300,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _quotes.isEmpty ? 'No hay cotizaciones' : 'No hay resultados',
+              style: TextStyle(
+                fontSize: 18,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _quotes.isEmpty
+                  ? 'Crea una cotización desde la página de ventas'
+                  : 'Ajusta los filtros e intenta de nuevo',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey.shade400,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      itemCount: _filteredQuotes.length,
+      itemBuilder: (context, index) {
+        final quoteDetail = _filteredQuotes[index];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: CompactQuoteRow(
+            quoteDetail: quoteDetail,
+            onTap: () => _showQuoteDetails(quoteDetail),
+            onSell: () => _convertToSale(quoteDetail),
+            onWhatsApp: () => _shareWhatsApp(quoteDetail),
+            onPdf: () => _viewPDF(quoteDetail),
+            onDownload: () => _downloadPDF(quoteDetail),
+            onDuplicate: () => _duplicateQuote(quoteDetail),
+            onDelete: () => _deleteQuote(quoteDetail),
+            onConvertToTicket: () => _convertToTicket(quoteDetail),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSummaryPanel({
+    required int totalQuotes,
+    required int open,
+    required int converted,
+    required int cancelled,
+    required int passedToTicket,
+    required double totalAmount,
+  }) {
+    Widget buildChip(String label, int value, Color color) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: color.withOpacity(0.9),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                value.toString(),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: color.withOpacity(0.9),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Resumen',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Visión rápida del desempeño de cotizaciones',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF10B981), Color(0xFF059669)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF10B981).withOpacity(0.28),
+                  blurRadius: 16,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Monto total',
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  NumberFormat.currency(
+                    locale: 'es_DO',
+                    symbol: '\$',
+                    decimalDigits: 2,
+                  ).format(totalAmount),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
                   ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          buildChip('Cotizaciones', totalQuotes, Colors.blueGrey),
+          const SizedBox(height: 10),
+          buildChip('Abiertas', open, Colors.blue),
+          const SizedBox(height: 10),
+          buildChip('Vendidas', converted, Colors.green),
+          const SizedBox(height: 10),
+          buildChip('Pasadas a ticket', passedToTicket, Colors.teal),
+          const SizedBox(height: 10),
+          buildChip('Canceladas', cancelled, Colors.red),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.lightbulb_outline, color: Colors.amber.shade700),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Usa los filtros superiores para segmentar tus cotizaciones y comparar el rendimiento.',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -29,7 +29,7 @@ class _BootstrapLoadingScreenState extends State<BootstrapLoadingScreen> {
       final settings = await BusinessSettingsRepository().loadSettings();
       final name = settings.businessName.isNotEmpty
           ? settings.businessName
-          : 'MI NEGOCIO';
+          : 'FULLPOS';
       final logoPath = settings.logoPath;
       final hasLogo = logoPath != null && File(logoPath).existsSync();
       return _BootstrapBranding(
@@ -38,7 +38,7 @@ class _BootstrapLoadingScreenState extends State<BootstrapLoadingScreen> {
       );
     } catch (_) {
       return const _BootstrapBranding(
-        businessName: 'MI NEGOCIO',
+        businessName: 'FULLPOS',
         logoPath: null,
       );
     }
@@ -62,7 +62,7 @@ class _BootstrapLoadingScreenState extends State<BootstrapLoadingScreen> {
             final branding =
                 snapshot.data ??
                 const _BootstrapBranding(
-                  businessName: 'MI NEGOCIO',
+                  businessName: 'FULLPOS',
                   logoPath: null,
                 );
             final hasLogo = branding.logoPath != null;

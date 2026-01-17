@@ -18,7 +18,7 @@ final themeDataProvider = Provider<ThemeData>((ref) {
 class AppThemeNotifier extends StateNotifier<AppThemeEnum> {
   static const String _themeKey = 'app_theme';
 
-  AppThemeNotifier() : super(AppThemeEnum.original) {
+  AppThemeNotifier() : super(AppThemeEnum.proPos) {
     _loadTheme();
   }
 
@@ -26,11 +26,11 @@ class AppThemeNotifier extends StateNotifier<AppThemeEnum> {
   Future<void> _loadTheme() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final themeKey = prefs.getString(_themeKey) ?? 'original';
+      final themeKey = prefs.getString(_themeKey) ?? 'proPos';
       state = AppThemes.getThemeEnumByKey(themeKey);
     } catch (e) {
-      // Si hay error, mantener el tema original
-      state = AppThemeEnum.original;
+      // Si hay error, mantener el tema profesional
+      state = AppThemeEnum.proPos;
     }
   }
 

@@ -32,11 +32,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // ... tu código de inicialización ...
   
-  runApp(const ProviderScope(child: LosNilkasApp()));
+  runApp(const ProviderScope(child: LosFULLPOSApp()));
 }
 
-class LosNilkasApp extends ConsumerWidget {
-  const LosNilkasApp({super.key});
+class LosFULLPOSApp extends ConsumerWidget {
+  const LosFULLPOSApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 /// Configuración para los filtros y búsqueda
@@ -108,95 +109,97 @@ class _QuotesFilterBarState extends State<QuotesFilterBar> {
     return Container(
       color: Colors.grey.shade50,
       padding: const EdgeInsets.all(16),
-      child: Column(
-        spacing: 12,
+      child: Row(
         children: [
-          // Fila 1: Búsqueda
-          TextField(
-            controller: _searchController,
-            onChanged: (text) {
-              _updateConfig(_config.copyWith(searchText: text));
-            },
-            decoration: InputDecoration(
-              hintText: 'Buscar por cliente, teléfono, código o total...',
-              prefixIcon: const Icon(Icons.search, color: Colors.teal),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _searchController.clear();
-                        _updateConfig(_config.copyWith(searchText: ''));
-                      },
-                    )
-                  : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: Colors.grey.shade300),
+          Expanded(
+            flex: 3,
+            child: TextField(
+              controller: _searchController,
+              onChanged: (text) {
+                _updateConfig(_config.copyWith(searchText: text));
+              },
+              decoration: InputDecoration(
+                hintText: 'Buscar por cliente, teléfono, código o total...',
+                prefixIcon: const Icon(Icons.search, color: Colors.teal),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          _updateConfig(_config.copyWith(searchText: ''));
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
           ),
-
-          // Fila 2: Filtros (Fecha, DateRange, Estado, Orden)
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              spacing: 8,
-              children: [
-                // Botón: Fecha única
-                _buildFilterButton(
-                  icon: Icons.calendar_today,
-                  label: _config.selectedDate != null
-                      ? DateFormat('dd/MM/yy').format(_config.selectedDate!)
-                      : 'Fecha',
-                  onPressed: _pickDate,
-                  isActive: _config.selectedDate != null,
-                ),
-
-                // Botón: Rango de fechas
-                _buildFilterButton(
-                  icon: Icons.date_range,
-                  label: _config.dateRange != null
-                      ? '${DateFormat('dd/MM').format(_config.dateRange!.start)} - ${DateFormat('dd/MM').format(_config.dateRange!.end)}'
-                      : 'Rango',
-                  onPressed: _pickDateRange,
-                  isActive: _config.dateRange != null,
-                ),
-
-                // Dropdown: Estado
-                _buildStatusDropdown(),
-
-                // Dropdown: Ordenamiento
-                _buildSortDropdown(),
-
-                // Botón: Limpiar filtros
-                if (_config.selectedDate != null ||
-                    _config.dateRange != null ||
-                    _config.selectedStatus != null ||
-                    _config.searchText.isNotEmpty)
-                  ElevatedButton(
-                    onPressed: _clearFilters,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade100,
-                      foregroundColor: Colors.red.shade700,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    ),
-                    child: const Row(
-                      spacing: 4,
-                      children: [
-                        Icon(Icons.clear, size: 16),
-                        Text('Limpiar', style: TextStyle(fontSize: 12)),
-                      ],
-                    ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 4,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildFilterButton(
+                    icon: Icons.calendar_today,
+                    label: _config.selectedDate != null
+                        ? DateFormat('dd/MM/yy').format(_config.selectedDate!)
+                        : 'Fecha',
+                    onPressed: _pickDate,
+                    isActive: _config.selectedDate != null,
                   ),
-              ],
+                  const SizedBox(width: 8),
+                  _buildFilterButton(
+                    icon: Icons.date_range,
+                    label: _config.dateRange != null
+                        ? '${DateFormat('dd/MM').format(_config.dateRange!.start)} - ${DateFormat('dd/MM').format(_config.dateRange!.end)}'
+                        : 'Rango',
+                    onPressed: _pickDateRange,
+                    isActive: _config.dateRange != null,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildStatusDropdown(),
+                  const SizedBox(width: 8),
+                  _buildSortDropdown(),
+                  if (_config.selectedDate != null ||
+                      _config.dateRange != null ||
+                      _config.selectedStatus != null ||
+                      _config.searchText.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: _clearFilters,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red.shade100,
+                        foregroundColor: Colors.red.shade700,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.clear, size: 16),
+                          SizedBox(width: 4),
+                          Text('Limpiar', style: TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ],
@@ -224,9 +227,9 @@ class _QuotesFilterBarState extends State<QuotesFilterBar> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       ),
       child: Row(
-        spacing: 4,
         children: [
           Icon(icon, size: 16),
+          const SizedBox(width: 4),
           Text(label, style: const TextStyle(fontSize: 12)),
         ],
       ),

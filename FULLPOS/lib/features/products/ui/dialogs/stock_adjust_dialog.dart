@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'package:fullpos/core/security/app_actions.dart';
 import 'package:fullpos/core/security/authorization_guard.dart';
+import 'package:fullpos/core/session/session_manager.dart';
 import '../../data/stock_repository.dart';
 import '../../models/product_model.dart';
 import '../../models/stock_movement_model.dart';
@@ -50,27 +51,27 @@ class _StockAdjustDialogState extends State<StockAdjustDialog> {
     try {
       final quantity = double.parse(_quantityController.text.trim());
       final note = _noteController.text.trim();
+      final currentUserId = await SessionManager.userId();
 
       await _stockRepo.adjustStock(
         productId: widget.product.id!,
         type: _selectedType,
         quantity: quantity,
         note: note.isEmpty ? null : note,
+        userId: currentUserId,
       );
 
       if (mounted) {
         Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Stock ajustado correctamente'),
-          ),
+          const SnackBar(content: Text('Stock ajustado correctamente')),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -124,10 +125,7 @@ class _StockAdjustDialogState extends State<StockAdjustDialog> {
                     const SizedBox(height: 4),
                     Text(
                       'Código: ${widget.product.code}',
-                      style: TextStyle(
-                        color: Colors.grey[700],
-                        fontSize: 14,
-                      ),
+                      style: TextStyle(color: Colors.grey[700], fontSize: 14),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -144,8 +142,8 @@ class _StockAdjustDialogState extends State<StockAdjustDialog> {
                             color: widget.product.isOutOfStock
                                 ? Colors.red
                                 : widget.product.hasLowStock
-                                    ? Colors.orange
-                                    : Colors.green,
+                                ? Colors.orange
+                                : Colors.green,
                           ),
                         ),
                       ],
@@ -204,8 +202,9 @@ class _StockAdjustDialogState extends State<StockAdjustDialog> {
                       ? 'unidades'
                       : null,
                 ),
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
                 ],

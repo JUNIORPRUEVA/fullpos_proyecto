@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../core/security/app_actions.dart';
 import '../core/security/authorization_service.dart';
 import '../core/security/scanner_input_controller.dart';
 import '../core/security/security_config.dart';
+import '../core/services/app_configuration_service.dart';
 
 class AuthorizationModal extends StatefulWidget {
   final AppAction action;
@@ -67,6 +69,10 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
   bool _isProcessing = false;
   String? _lastGeneratedToken;
   DateTime? _lastGeneratedExpiry;
+  bool _remoteRequesting = false;
+  int? _remoteRequestId;
+  String? _remoteStatus;
+  String? _remoteError;
 
   @override
   void initState() {
@@ -91,6 +97,76 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
     _tokenController.dispose();
     _pinController.dispose();
     super.dispose();
+  }
+
+  String? _resolveRemoteBaseUrl() {
+    try {
+      final settings = appConfigService.settings;
+      if (!settings.cloudEnabled) return null;
+      final endpoint = settings.cloudEndpoint?.trim();
+      if (endpoint == null || endpoint.isEmpty) return null;
+      return endpoint;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _resolveRemoteApiKey() {
+    try {
+      final settings = appConfigService.settings;
+      final key = settings.cloudApiKey?.trim();
+      if (key == null || key.isEmpty) return null;
+      return key;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _copyText(String label, String value) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    _showMessage('$label copiado.');
+  }
+
+  Future<void> _requestRemoteApproval() async {
+    final baseUrl = _resolveRemoteBaseUrl();
+    if (baseUrl == null) {
+      _showMessage('Configura la URL de nube para solicitudes remotas.');
+      return;
+    }
+
+    setState(() {
+      _remoteRequesting = true;
+      _remoteError = null;
+    });
+    try {
+      final result = await AuthorizationService.createRemoteOverrideRequest(
+        baseUrl: baseUrl,
+        apiKey: _resolveRemoteApiKey(),
+        actionCode: widget.action.code,
+        resourceType: widget.resourceType,
+        resourceId: widget.resourceId,
+        companyId: widget.companyId,
+        requestedByUserId: widget.requestedByUserId,
+        terminalId: widget.terminalId,
+        meta: {
+          'action_name': widget.action.name,
+          'action_desc': widget.action.description,
+          'terminal_id': widget.terminalId,
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _remoteRequestId = result.requestId;
+        _remoteStatus = result.status;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _remoteError = 'No se pudo crear la solicitud remota.');
+    } finally {
+      if (mounted) {
+        setState(() => _remoteRequesting = false);
+      }
+    }
   }
 
   Future<void> _authorizeWithPin() async {
@@ -159,6 +235,10 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
         companyId: widget.companyId,
         usedByUserId: widget.requestedByUserId,
         terminalId: widget.terminalId,
+        allowRemote: widget.config.remoteEnabled && widget.isOnline,
+        remoteBaseUrl: _resolveRemoteBaseUrl(),
+        remoteApiKey: _resolveRemoteApiKey(),
+        remoteRequestId: _remoteRequestId,
       );
       _handleResult(result);
     } catch (e) {
@@ -203,16 +283,7 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
         if (widget.config.offlinePinEnabled) _buildPinSection(),
         if (widget.config.offlineBarcodeEnabled) _buildBarcodeSection(),
         _buildTokenInputSection(),
-        if (widget.config.remoteEnabled && widget.isOnline)
-          _buildRemoteHint(),
-        if (!widget.isOnline && widget.config.remoteEnabled)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              'Método remoto requiere internet.',
-              style: TextStyle(color: Colors.orange),
-            ),
-          ),
+        _buildRemoteSection(),
       ],
     );
 
@@ -294,6 +365,17 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
                 _lastGeneratedToken!,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
+              const SizedBox(height: 8),
+              Center(
+                child: Container(
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(6),
+                  child: QrImageView(
+                    data: _lastGeneratedToken!,
+                    size: 160,
+                  ),
+                ),
+              ),
               if (_lastGeneratedExpiry != null)
                 Text(
                   'Vence: ${_lastGeneratedExpiry!}',
@@ -338,19 +420,82 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
     );
   }
 
-  Widget _buildRemoteHint() {
+  Widget _buildRemoteSection() {
+    if (!widget.config.remoteEnabled) return const SizedBox.shrink();
+
+    if (!widget.isOnline) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          'Metodo remoto requiere internet.',
+          style: TextStyle(color: Colors.orange),
+        ),
+      );
+    }
+
+    final baseUrl = _resolveRemoteBaseUrl();
+    if (baseUrl == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          'Configura la nube para solicitudes remotas.',
+          style: TextStyle(color: Colors.orange),
+        ),
+      );
+    }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
-          children: const [
-            Icon(Icons.cloud, color: Colors.blue),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'El método remoto está habilitado. Usa la app del dueño o panel web para aprobar.',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Metodo remoto (nube)',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Envia una solicitud al dueno para aprobar a distancia.',
+            ),
+            if (_remoteRequestId != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Solicitud: #${_remoteRequestId!} (${_remoteStatus ?? 'pending'})',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () =>
+                        _copyText('ID de solicitud', _remoteRequestId!.toString()),
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('Copiar'),
+                  ),
+                ],
               ),
+            ],
+            if (_remoteError != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                _remoteError!,
+                style: const TextStyle(color: Colors.redAccent),
+              ),
+            ],
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _remoteRequesting ? null : _requestRemoteApproval,
+              icon: _remoteRequesting
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.cloud_done),
+              label: const Text('Solicitar permiso remoto'),
             ),
           ],
         ),

@@ -7,6 +7,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_sizes.dart';
 import '../data/owner_app_links.dart';
 import '../../settings/providers/business_settings_provider.dart';
+import 'scanner_settings_page.dart';
 
 /// Página de Herramientas
 class ToolsPage extends ConsumerWidget {
@@ -64,60 +65,13 @@ class ToolsPage extends ConsumerWidget {
         onTap: () => context.go('/ncf'),
       ),
       _ToolItem(
-        icon: Icons.receipt_long_outlined,
-        title: 'Ventas',
-        subtitle: 'Historial',
-        color: AppColors.gold,
-        onTap: () => context.go('/sales-list'),
-      ),
-      _ToolItem(
-        icon: Icons.request_quote_outlined,
-        title: 'Cotizaciones',
-        subtitle: 'Pendientes',
-        color: AppColors.teal600,
-        onTap: () => context.go('/quotes-list'),
-      ),
-      _ToolItem(
-        icon: Icons.keyboard_return_rounded,
-        title: 'Devoluciones',
-        subtitle: 'Gestión',
-        color: Colors.orange,
-        onTap: () => context.go('/returns-list'),
-      ),
-      _ToolItem(
-        icon: Icons.credit_card_outlined,
-        title: 'Créditos',
-        subtitle: 'Ventas a crédito',
-        color: Colors.blue,
-        onTap: () => context.go('/credits-list'),
-      ),
-      _ToolItem(
-        icon: Icons.inventory_2_outlined,
-        title: 'Inventario',
-        subtitle: 'Conteo rápido',
-        color: AppColors.success,
-        onTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Módulo en desarrollo'),
-              backgroundColor: AppColors.info,
-            ),
-          );
-        },
-      ),
-      _ToolItem(
         icon: Icons.qr_code_scanner_rounded,
-        title: 'Escáner',
-        subtitle: 'Códigos',
+        title: 'Lector',
+        subtitle: 'Config. código de barras',
         color: AppColors.info,
-        onTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Módulo en desarrollo'),
-              backgroundColor: AppColors.info,
-            ),
-          );
-        },
+        onTap: () => Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const ScannerSettingsPage())),
       ),
     ];
 

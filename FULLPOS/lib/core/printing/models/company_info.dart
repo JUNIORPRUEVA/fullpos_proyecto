@@ -41,7 +41,7 @@ class CompanyInfo {
   /// Verificar si tiene datos mínimos configurados
   bool get hasMinimalData {
     return name.isNotEmpty &&
-        name.toUpperCase() != 'MI NEGOCIO' &&
+        name.toUpperCase() != 'FULLPOS' &&
       name.toUpperCase() != 'FULLTECH, SRL';
   }
 
@@ -50,7 +50,7 @@ class CompanyInfo {
     return CompanyInfo(
       name: settings.businessName.isNotEmpty
           ? settings.businessName
-          : 'Mi Negocio',
+          : 'FULLPOS',
       address: settings.address,
       phone: settings.phone,
       phone2: settings.phone2,
@@ -67,7 +67,7 @@ class CompanyInfo {
     return CompanyInfo(
       name: config.nombreEmpresa.isNotEmpty
           ? config.nombreEmpresa
-          : 'Mi Negocio',
+          : 'FULLPOS',
       address: config.direccion,
       phone: config.telefono,
       phone2: config.telefono2,

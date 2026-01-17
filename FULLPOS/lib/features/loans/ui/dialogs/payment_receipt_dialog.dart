@@ -162,7 +162,7 @@ class _PaymentReceiptDialogState extends State<PaymentReceiptDialog> {
                   Text(
                     appConfigService.getBusinessName().trim().isNotEmpty
                         ? appConfigService.getBusinessName().trim()
-                        : 'MI NEGOCIO',
+                        : 'FULLPOS',
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,

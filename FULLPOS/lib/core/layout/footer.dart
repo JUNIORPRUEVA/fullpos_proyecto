@@ -22,8 +22,25 @@ class Footer extends ConsumerWidget {
     return Container(
       height: AppSizes.footerHeight,
       decoration: BoxDecoration(
-        color: footerColor,
+        gradient: LinearGradient(
+          colors: [footerColor, footerColor.withOpacity(0.85)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         border: Border(top: BorderSide(color: borderColor, width: 2)),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 10,
+            offset: Offset(0, -3),
+          ),
+          BoxShadow(
+            color: Colors.white24,
+            blurRadius: 6,
+            offset: Offset(0, 1),
+            spreadRadius: -2,
+          ),
+        ],
       ),
       padding: const EdgeInsets.symmetric(horizontal: AppSizes.paddingL),
       child: Row(

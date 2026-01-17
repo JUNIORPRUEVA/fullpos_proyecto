@@ -1,4 +1,4 @@
-APPLICATION: Nilkas POS - Sistema de Punto de Venta
+APPLICATION: FULLPOS - Sistema de Punto de Venta
 VERSION: 1.0.0
 BUILD DATE: 2025-12-24
 PLATFORM: Windows (x64)
@@ -50,7 +50,7 @@ windows/             - Windows-specific native libraries
 data/               - Application data and assets
 
 === INSTALLATION INSTRUCTIONS ===
-1. Extract Nilkas_POS_v1.0.zip
+1. Extract FULLPOS_v1.0.zip
 2. Run nilkas.exe
 3. Complete initial setup wizard
 4. Configure printer and NCF settings
@@ -130,7 +130,7 @@ v1.0 - Initial Release
 === CHECKSUMS ===
 Build Output: build/windows/x64/runner/Release/nilkas.exe
 Release Package: release_production/
-Distribution: Nilkas_POS_v1.0.zip
+Distribution: FULLPOS_v1.0.zip
 
 === SUPPORT & DOCUMENTATION ===
 See README.md for installation and usage instructions

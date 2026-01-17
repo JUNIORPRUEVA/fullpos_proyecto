@@ -7,6 +7,8 @@ import '../../../core/errors/error_handler.dart';
 import '../../../core/errors/app_exception.dart';
 import '../../../core/ui/responsive_grid.dart';
 import '../../../core/printing/unified_ticket_printer.dart';
+import '../../../core/security/scanner_input_controller.dart';
+import '../../../core/security/security_config.dart';
 import '../../../core/session/session_manager.dart';
 import '../../../core/session/ui_preferences.dart';
 import '../../cash/data/cash_repository.dart' as cash_repo;
@@ -51,10 +53,13 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   static const double _layoutBreakpointWidth = 980;
   static const double _layoutHysteresis = 40;
   // Productos: tarjetas pequeñas y consistentes (no se inflan por resolución).
-  static const double _productCardSize = 140;
-  static const double _productTileMaxExtent = 160;
+  // Ajustes visuales del grid de productos (tamaño fijo premium)
+  static const double _productCardSize = 132;
+  static const double _productTileMaxExtent = 150;
   bool _didInitResponsive = false;
   bool _layoutIsNarrow = false;
+
+  ColorScheme get scheme => Theme.of(context).colorScheme;
 
   final List<_Cart> _carts = [_Cart(name: 'Ticket 1')];
   int _currentCartIndex = 0;
@@ -69,6 +74,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   UserPermissions _permissions = UserPermissions.cashier();
   bool _keyboardShortcutsEnabled = true;
   bool _canAccessCash = false;
+  SecurityConfig? _scannerConfig;
+  String? _scannerTerminalId;
+  ScannerInputController? _scanner;
 
   List<ProductModel> _allProducts = [];
   List<ProductModel> _searchResults = [];
@@ -96,12 +104,29 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     if (constraints.maxWidth > upper) _layoutIsNarrow = false;
   }
 
+  BoxConstraints _ticketPanelConstraints(double width, bool isNarrow) {
+    if (isNarrow) {
+      final usable = (width - 24).clamp(300.0, 520.0);
+      return BoxConstraints(minWidth: usable, maxWidth: usable);
+    }
+
+    if (width < 1100) {
+      return const BoxConstraints(minWidth: 320, maxWidth: 380);
+    }
+    if (width < 1350) {
+      return const BoxConstraints(minWidth: 360, maxWidth: 440);
+    }
+    return const BoxConstraints(minWidth: 400, maxWidth: 520);
+  }
+
   @override
   void initState() {
     super.initState();
     _loadAccess();
     _loadInitialData();
     _refreshCashSession();
+    _loadScannerConfig();
+    RawKeyboard.instance.addListener(_handleScannerKey);
   }
 
   Future<void> _loadAccess() async {
@@ -122,12 +147,101 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     });
   }
 
+  void _handleScannerKey(RawKeyEvent event) {
+    _scanner?.handleKeyEvent(event);
+  }
+
+  Future<void> _loadScannerConfig() async {
+    final companyId = await SessionManager.companyId() ?? 1;
+    final terminalId =
+        await SessionManager.terminalId() ??
+        await SessionManager.ensureTerminalId();
+    final config = await SecurityConfigRepository.load(
+      companyId: companyId,
+      terminalId: terminalId,
+    );
+
+    if (!mounted) return;
+
+    _scanner?.dispose();
+    _scanner = config.scannerEnabled
+        ? ScannerInputController(
+            enabled: true,
+            suffix: config.scannerSuffix,
+            prefix: config.scannerPrefix,
+            timeout: Duration(milliseconds: config.scannerTimeoutMs),
+            emitOnTimeout: false,
+            onScan: _handleBarcodeScan,
+          )
+        : null;
+
+    setState(() {
+      _scannerConfig = config;
+      _scannerTerminalId = terminalId;
+    });
+  }
+
+  Future<void> _handleBarcodeScan(String raw) async {
+    final code = raw.trim();
+    if (code.isEmpty) return;
+
+    final repo = ProductsRepository();
+    ProductModel? product = await ErrorHandler.instance.runSafe<ProductModel?>(
+      () => repo.getByCode(code),
+      context: context,
+      onRetry: () => _handleBarcodeScan(code),
+      module: 'sales/scan/code',
+    );
+
+    if (product == null && code.toUpperCase() != code) {
+      product = await ErrorHandler.instance.runSafe<ProductModel?>(
+        () => repo.getByCode(code.toUpperCase()),
+        context: context,
+        onRetry: () => _handleBarcodeScan(code),
+        module: 'sales/scan/code_upper',
+      );
+    }
+
+    if (product == null) {
+      final results = await ErrorHandler.instance.runSafe<List<ProductModel>>(
+        () => repo.search(code),
+        context: context,
+        onRetry: () => _handleBarcodeScan(code),
+        module: 'sales/scan/search',
+      );
+      if (results != null && results.length == 1) {
+        product = results.first;
+      }
+    }
+
+    if (!mounted) return;
+
+    if (product == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se encontro producto con codigo: $code'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    await _addProductToCart(product);
+
+    if (_searchController.text.isNotEmpty) {
+      _searchController.clear();
+      _searchProducts('');
+    }
+  }
+
   @override
   void dispose() {
     _saveAllCartsToDatabase();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _clientFocusNode.dispose();
+    RawKeyboard.instance.removeListener(_handleScannerKey);
+    _scanner?.dispose();
     super.dispose();
   }
 
@@ -700,7 +814,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.teal.shade50,
+                      color: scheme.primary.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Column(
@@ -720,7 +834,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
+                        SizedBox(height: 4),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -740,7 +854,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
+                        SizedBox(height: 4),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -753,11 +867,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                             ),
                             Text(
                               total.toStringAsFixed(2),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.teal,
-                              ),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: scheme.primary,
+                            ),
                             ),
                           ],
                         ),
@@ -798,7 +912,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 },
                 icon: const Icon(Icons.check),
                 label: const Text('Aplicar'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+                style: ElevatedButton.styleFrom(backgroundColor: scheme.primary),
               ),
             ],
           );
@@ -1242,6 +1356,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   builder: (context, constraints) {
                     _updateResponsive(constraints);
                     final isNarrow = _layoutIsNarrow;
+                    final ticketPanelConstraints =
+                        _ticketPanelConstraints(constraints.maxWidth, isNarrow);
+                    final panelMargin =
+                        constraints.maxWidth < 1150 ? 8.0 : 10.0;
+                    final scheme = Theme.of(context).colorScheme;
                     return Flex(
                       direction: isNarrow ? Axis.vertical : Axis.horizontal,
                       children: [
@@ -1252,228 +1371,141 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: scheme.surface,
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 4,
-                                      offset: const Offset(0, 2),
+                                      color: Colors.black.withOpacity(0.2),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 6),
                                     ),
                                   ],
                                 ),
-                                child: Column(
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              color: Colors.grey.shade50,
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                              border: Border.all(
-                                                color: Colors.grey.shade300,
-                                              ),
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                const SizedBox(width: 12),
-                                                const Icon(
-                                                  Icons.search,
-                                                  color: Colors.grey,
-                                                  size: 22,
-                                                ),
-                                                Expanded(
-                                                  child: TextField(
-                                                    controller:
-                                                        _searchController,
-                                                    focusNode: _searchFocusNode,
-                                                    decoration: const InputDecoration(
-                                                      hintText:
-                                                          'Buscar por nombre, código...',
-                                                      border: InputBorder.none,
-                                                      contentPadding:
-                                                          EdgeInsets.symmetric(
-                                                            horizontal: 12,
-                                                            vertical: 14,
-                                                          ),
-                                                    ),
-                                                    onChanged: _searchProducts,
-                                                  ),
-                                                ),
-                                                IconButton(
-                                                  icon: Icon(
-                                                    Icons.filter_list,
-                                                    color:
-                                                        _productFilter
-                                                            .hasActiveFilters
-                                                        ? Colors.orange
-                                                        : Colors.teal,
-                                                  ),
-                                                  onPressed: _openFilterDialog,
-                                                  tooltip: 'Filtros avanzados',
-                                                ),
-                                                Container(
-                                                  height: 40,
-                                                  width: 1,
-                                                  color: Colors.grey.shade300,
-                                                ),
-                                                IconButton(
-                                                  icon: const Icon(
-                                                    Icons.qr_code_scanner,
-                                                    color: Colors.teal,
-                                                  ),
-                                                  onPressed: () {
-                                                    showDialog(
-                                                      context: context,
-                                                      builder: (context) =>
-                                                          const BarcodeInfoDialog(),
-                                                    );
-                                                  },
-                                                  tooltip: 'Escanear código QR',
-                                                ),
-                                                const SizedBox(width: 4),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        _buildCashButton(),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 12),
-                                    SizedBox(
-                                      height: 42,
-                                      child: ListView(
-                                        scrollDirection: Axis.horizontal,
-                                        children: [
-                                          _buildCategoryChip(
-                                            'Todos',
-                                            _selectedCategory == null ||
-                                                _selectedCategory == 'Todos',
-                                          ),
-                                          const SizedBox(width: 8),
-                                          ..._categories.map(
-                                            (category) => Padding(
-                                              padding: const EdgeInsets.only(
-                                                right: 8,
-                                              ),
-                                              child: _buildCategoryChip(
-                                                category.name,
-                                                _selectedCategory ==
-                                                    category.name,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                child: Column(children: [_build3DControlBar()]),
                               ),
                               Expanded(
-                                child: Stack(
-                                  children: [
-                                    _isSearching
-                                        ? const Center(
-                                            child: CircularProgressIndicator(),
-                                          )
-                                        : _filteredProducts().isEmpty
-                                        ? Center(
-                                            child: Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                Icon(
-                                                  Icons.inventory_2_outlined,
-                                                  size: 80,
-                                                  color: Colors.grey[300],
-                                                ),
-                                                const SizedBox(height: 16),
-                                                Text(
-                                                  'No hay productos disponibles',
-                                                  style: TextStyle(
-                                                    color: Colors.grey[600],
-                                                    fontSize: 18,
-                                                    fontWeight: FontWeight.w500,
+                                child: Container(
+                                  margin: const EdgeInsets.only(top: 8),
+                                  decoration: BoxDecoration(
+                                    color: scheme.surface,
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.25),
+                                        blurRadius: 16,
+                                        offset: const Offset(0, 8),
+                                      ),
+                                      BoxShadow(
+                                        color: scheme.primary.withOpacity(0.08),
+                                        blurRadius: 10,
+                                        offset: const Offset(-2, -2),
+                                        spreadRadius: -1,
+                                      ),
+                                    ],
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: Stack(
+                                    children: [
+                                      _isSearching
+                                          ? const Center(
+                                              child:
+                                                  CircularProgressIndicator(),
+                                            )
+                                          : _filteredProducts().isEmpty
+                                          ? Center(
+                                              child: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Icon(
+                                                    Icons.inventory_2_outlined,
+                                                    size: 80,
+                                                    color: Colors.grey[300],
                                                   ),
-                                                ),
-                                                const SizedBox(height: 8),
-                                                Text(
-                                                  'Intenta buscar con otro término',
-                                                  style: TextStyle(
-                                                    color: Colors.grey[400],
-                                                    fontSize: 14,
+                                                  const SizedBox(height: 16),
+                                                  Text(
+                                                    'No hay productos disponibles',
+                                                    style: TextStyle(
+                                                      color: Colors.grey[600],
+                                                      fontSize: 18,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
                                                   ),
-                                                ),
-                                              ],
-                                            ),
-                                          )
-                                        : Padding(
-                                            padding: const EdgeInsets.only(
-                                              left: 12,
-                                              right: 12,
-                                              top: 12,
-                                              bottom: 68,
-                                            ),
-                                            child: LayoutBuilder(
-                                              builder: (context, constraints) {
-                                                final products =
-                                                    _filteredProducts();
-                                                final maxExtent =
-                                                    stableMaxCrossAxisExtent(
-                                                      availableWidth:
-                                                          constraints.maxWidth,
-                                                      desiredMaxExtent:
-                                                          _productTileMaxExtent,
-                                                      spacing: 12,
-                                                      minExtent:
-                                                          _productCardSize,
-                                                    );
+                                                  const SizedBox(height: 8),
+                                                  Text(
+                                                    'Intenta buscar con otro término',
+                                                    style: TextStyle(
+                                                      color: Colors.grey[400],
+                                                      fontSize: 14,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            )
+                                          : Padding(
+                                              padding: const EdgeInsets.only(
+                                                left: 14,
+                                                right: 14,
+                                                top: 16,
+                                                bottom: 72,
+                                              ),
+                                              child: LayoutBuilder(
+                                                builder: (context, constraints) {
+                                                  final products =
+                                                      _filteredProducts();
+                                                  final maxExtent =
+                                                      stableMaxCrossAxisExtent(
+                                                        availableWidth:
+                                                            constraints
+                                                                .maxWidth,
+                                                        desiredMaxExtent:
+                                                            _productTileMaxExtent,
+                                                        spacing: 12,
+                                                        minExtent:
+                                                            _productTileMaxExtent,
+                                                      );
 
-                                                return GridView.builder(
-                                                  gridDelegate:
-                                                      SliverGridDelegateWithMaxCrossAxisExtent(
-                                                        maxCrossAxisExtent:
-                                                            maxExtent,
-                                                        // Tamaño consistente (evita tarjetas gigantes en anchos intermedios)
-                                                        mainAxisExtent:
-                                                            _productCardSize *
-                                                            1.3,
-                                                        crossAxisSpacing: 10,
-                                                        mainAxisSpacing: 10,
-                                                      ),
-                                                  itemCount: products.length,
-                                                  itemBuilder: (context, index) {
-                                                    final product =
-                                                        products[index];
-                                                    // Mantener el tamaño visual de la tarjeta estable.
-                                                    // Si el tile queda más ancho por la matemática de columnas,
-                                                    // centramos una tarjeta fija para que NO se infle.
-                                                    return Center(
-                                                      child: SizedBox(
-                                                        width: _productCardSize,
-                                                        height:
-                                                            _productCardSize *
-                                                            1.3,
-                                                        child:
-                                                            _buildProductCard(
-                                                              product,
-                                                            ),
-                                                      ),
-                                                    );
-                                                  },
-                                                );
-                                              },
+                                                  return GridView.builder(
+                                                    gridDelegate:
+                                                        SliverGridDelegateWithMaxCrossAxisExtent(
+                                                          maxCrossAxisExtent:
+                                                              maxExtent,
+                                                          mainAxisExtent:
+                                                              _productCardSize *
+                                                              1.35,
+                                                          crossAxisSpacing: 12,
+                                                          mainAxisSpacing: 12,
+                                                        ),
+                                                    itemCount: products.length,
+                                                    itemBuilder: (context, index) {
+                                                      final product =
+                                                          products[index];
+                                                      return Center(
+                                                        child: SizedBox(
+                                                          width:
+                                                              _productCardSize,
+                                                          height:
+                                                              _productCardSize *
+                                                              1.3,
+                                                          child:
+                                                              _buildProductCard(
+                                                                product,
+                                                              ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  );
+                                                },
+                                              ),
                                             ),
-                                          ),
-                                    Positioned(
-                                      bottom: 0,
-                                      left: 0,
-                                      right: 0,
-                                      child: _buildTicketsFooter(),
-                                    ),
-                                  ],
+                                      Positioned(
+                                        bottom: 0,
+                                        left: 0,
+                                        right: 0,
+                                        child: _buildTicketsFooter(),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
@@ -1486,53 +1518,56 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                         if (isNarrow)
                           Expanded(
                             flex: 3,
-                            child: Container(
-                              margin: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.08),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 4),
-                                    spreadRadius: 0,
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: ConstrainedBox(
+                                constraints: ticketPanelConstraints,
+                                child: Container(
+                                  margin: EdgeInsets.all(panelMargin),
+                                  decoration: BoxDecoration(
+                                    color: scheme.surface,
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.25),
+                                        blurRadius: 14,
+                                        offset: const Offset(0, 6),
+                                        spreadRadius: 0,
+                                      ),
+                                      BoxShadow(
+                                        color: scheme.primary.withOpacity(0.12),
+                                        blurRadius: 10,
+                                        offset: const Offset(-2, -2),
+                                        spreadRadius: -1,
+                                      ),
+                                    ],
                                   ),
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.04),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 2),
-                                    spreadRadius: 0,
-                                  ),
-                                ],
+                                  clipBehavior: Clip.antiAlias,
+                                  child: _buildTicketPanel(),
+                                ),
                               ),
-                              clipBehavior: Clip.antiAlias,
-                              child: _buildTicketPanel(),
                             ),
                           )
                         else
                           ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              minWidth: 420,
-                              maxWidth: 560,
-                            ),
+                            constraints: ticketPanelConstraints,
                             child: Container(
-                              margin: const EdgeInsets.all(10),
+                              margin: EdgeInsets.all(panelMargin),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: scheme.surface,
                                 borderRadius: BorderRadius.circular(16),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.08),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 4),
+                                    color: Colors.black.withOpacity(0.25),
+                                    blurRadius: 14,
+                                    offset: const Offset(0, 6),
                                     spreadRadius: 0,
                                   ),
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.04),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 2),
-                                    spreadRadius: 0,
+                                    color: scheme.primary.withOpacity(0.12),
+                                    blurRadius: 10,
+                                    offset: const Offset(-2, -2),
+                                    spreadRadius: -1,
                                   ),
                                 ],
                               ),
@@ -1733,17 +1768,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final isOutOfStock = effectiveStock <= 0;
     final stockColor = isOutOfStock
         ? Colors.red.shade600
-        : (isLowStock ? Colors.orange.shade600 : Colors.teal.shade600);
+        : (isLowStock ? Colors.orange.shade600 : scheme.primary.withOpacity(0.85));
 
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         color: Colors.white,
-        boxShadow: [
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: Color(0x1A0F172A),
+            blurRadius: 12,
+            spreadRadius: 1,
+            offset: Offset(0, 4),
           ),
         ],
       ),
@@ -1936,37 +1972,173 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     );
   }
 
-  Widget _buildCategoryChip(String name, bool isSelected) {
-    return Material(
-      elevation: isSelected ? 4 : 2,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        onTap: () => _onCategorySelected(name),
-        borderRadius: BorderRadius.circular(20),
+  Widget _buildCategoryDropdown() {
+    final allOption = 'Todas';
+    final items = [allOption, ..._categories.map((c) => c.name)];
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: PopupMenuButton<String>(
+        tooltip: 'Elegir categoría',
+        offset: const Offset(0, 42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        initialValue: _selectedCategory ?? allOption,
+        onSelected: (value) =>
+            _onCategorySelected(value == allOption ? null : value),
+        itemBuilder: (context) => items
+            .map(
+              (name) => PopupMenuItem<String>(
+                value: name,
+                child: Row(
+                  children: [
+                    Icon(
+                      name == allOption
+                          ? Icons.filter_alt_off_outlined
+                          : Icons.category_outlined,
+                      size: 18,
+                      color: (_selectedCategory ?? allOption) == name
+                          ? scheme.primary
+                          : Colors.grey[700],
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      name,
+                      style: TextStyle(
+                        fontWeight: (_selectedCategory ?? allOption) == name
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+            .toList(),
         child: Container(
-          height: 38,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
           decoration: BoxDecoration(
-            color: isSelected ? const Color(0xFFD4AF37) : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isSelected
-                  ? const Color(0xFFD4AF37)
-                  : Colors.teal.withOpacity(0.3),
-              width: 2,
-            ),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: scheme.primary.withOpacity(0.3), width: 1),
           ),
-          child: Center(
-            child: Text(
-              name,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : Colors.grey.shade800,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.filter_list, size: 18, color: scheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                _selectedCategory ?? 'Categoría',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.primary,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 18,
+                color: scheme.primary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _build3DControlBar() {
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [bg.withOpacity(0.9), bg.withOpacity(0.7)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 12,
+            offset: Offset(0, 6),
+          ),
+          BoxShadow(
+            color: Colors.white24,
+            blurRadius: 10,
+            offset: Offset(-2, -2),
+            spreadRadius: -2,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              height: 50,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  const Icon(Icons.search, color: Colors.grey, size: 20),
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      decoration: const InputDecoration(
+                        hintText: 'Buscar por nombre, código...',
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 14,
+                        ),
+                      ),
+                      onChanged: _searchProducts,
+                    ),
+                  ),
+                  _buildCategoryDropdown(),
+                  IconButton(
+                    icon: Icon(
+                      Icons.filter_list,
+                      color: _productFilter.hasActiveFilters
+                          ? Colors.orange
+                          : scheme.primary,
+                    ),
+                    onPressed: _openFilterDialog,
+                    tooltip: 'Filtros avanzados',
+                  ),
+                  Container(height: 28, width: 1, color: Colors.grey.shade300),
+                  IconButton(
+                    icon: Icon(Icons.barcode_reader, color: scheme.primary),
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => BarcodeInfoDialog(
+                          config: _scannerConfig,
+                          terminalId: _scannerTerminalId,
+                        ),
+                      );
+                    },
+                    tooltip: 'Escanear código de barras',
+                  ),
+                  const SizedBox(width: 4),
+                ],
               ),
             ),
           ),
-        ),
+          const SizedBox(width: 12),
+          _buildCashButton(),
+        ],
       ),
     );
   }
@@ -1982,19 +2154,30 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        elevation: 2,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        elevation: 10,
+        shadowColor: Colors.black54,
+        minimumSize: const Size.fromHeight(44),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 18),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
-            textAlign: TextAlign.center,
+          Icon(icon, size: 20),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4,
+              ),
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
@@ -2005,12 +2188,16 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     return Container(
       height: 64,
       decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F2F48), Color(0xFF163B5A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
-            blurRadius: 10,
-            offset: const Offset(0, -3),
+            color: Colors.black54,
+            blurRadius: 14,
+            offset: Offset(0, -4),
           ),
         ],
       ),
@@ -2020,19 +2207,10 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           children: [
             Expanded(
               child: _buildOperationButton(
-                icon: Icons.shopping_cart,
-                label: 'Ventas',
-                color: const Color(0xFFD4AF37),
-                onPressed: () => context.go('/sales-list'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _buildOperationButton(
-                icon: Icons.description,
-                label: 'Cotizaciones',
-                color: Colors.teal,
-                onPressed: () => context.go('/quotes-list'),
+                icon: Icons.account_balance,
+                label: 'Créditos',
+                color: const Color(0xFF0E7A6F),
+                onPressed: () => context.go('/credits-list'),
               ),
             ),
             if (_isAdmin || _permissions.canProcessReturns) ...[
@@ -2040,19 +2218,19 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               Expanded(
                 child: _buildOperationButton(
                   icon: Icons.assignment_return,
-                  label: 'Devoluciones',
-                  color: Colors.orange.shade700,
-                  onPressed: () => context.go('/returns-list'),
+                  label: 'Cotizaciones',
+                  color: const Color(0xFF0D5C9D),
+                  onPressed: () => context.go('/quotes-list'),
                 ),
               ),
             ],
             const SizedBox(width: 10),
             Expanded(
               child: _buildOperationButton(
-                icon: Icons.credit_card,
-                label: 'Créditos',
-                color: Colors.blue.shade600,
-                onPressed: () => context.go('/credits-list'),
+                icon: Icons.assignment_return,
+                label: 'Devoluciones',
+                color: const Color(0xFFCC8A00),
+                onPressed: () => context.go('/returns-list'),
               ),
             ),
           ],
@@ -2081,6 +2259,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 
   /// CARD A: Ticket / Cliente
   Widget _buildTicketHeaderCard() {
+    final totalTickets = _carts.length;
+
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
       elevation: 2,
@@ -2094,49 +2274,127 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [scheme.primary.withOpacity(0.92), Colors.blue.shade600],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: scheme.primary.withOpacity(0.18),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.16),
+                      border: Border.all(color: Colors.white.withOpacity(0.35)),
+                    ),
+                    child: const Icon(
+                      Icons.description_outlined,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: InkWell(
+                      onTap: _showTicketSelector,
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              totalTickets == 1
+                                  ? '1 Ticket'
+                                  : '${_currentCart.displayName} (${totalTickets} en cola)',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            color: Colors.white,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.18),
+                      border: Border.all(color: Colors.white.withOpacity(0.35)),
+                    ),
+                    child: IconButton(
+                      icon: const Icon(
+                        Icons.add,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      padding: const EdgeInsets.all(8),
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Nuevo ticket',
+                      onPressed: _addNewTicket,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    _currentCart.displayName,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
+                  child: ElevatedButton.icon(
+                    onPressed: _showClientPicker,
+                    icon: const Icon(Icons.group, size: 18),
+                    label: const Text('Clientes'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: scheme.primary.withOpacity(0.98),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(color: scheme.primary.withOpacity(0.14)),
+                      ),
                     ),
-                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _showQuickItemDialog,
+                    icon: const Icon(Icons.flash_on, size: 18),
+                    label: const Text('Venta Rápida'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo.shade50,
+                      foregroundColor: Colors.indigo.shade700,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(color: Colors.indigo.shade100),
+                      ),
+                    ),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-
-            // Barra de tickets pendientes
-            _buildPendingTicketsBar(),
-            const SizedBox(height: 12),
-
-            // Selector de cliente
-            _buildClientSelector(),
-            const SizedBox(height: 8),
-
-            // Botón venta rápida
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _showQuickItemDialog,
-                icon: const Icon(Icons.add_shopping_cart, size: 18),
-                label: const Text(
-                  'Venta Rápida',
-                  style: TextStyle(fontSize: 13),
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.teal,
-                  side: const BorderSide(color: Colors.teal),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              ),
             ),
           ],
         ),
@@ -2194,7 +2452,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.teal.shade100,
+                          color: scheme.primary.withOpacity(0.14),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -2202,7 +2460,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: Colors.teal.shade800,
+                            color: scheme.primary.withOpacity(0.98),
                           ),
                         ),
                       ),
@@ -2290,10 +2548,10 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.teal.shade50 : Colors.transparent,
+          color: isSelected ? scheme.primary.withOpacity(0.08) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: isSelected
-              ? Border.all(color: Colors.teal.shade300, width: 1.5)
+              ? Border.all(color: scheme.primary.withOpacity(0.32), width: 1.5)
               : null,
         ),
         child: Row(
@@ -2303,7 +2561,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: Colors.teal.shade100,
+                color: scheme.primary.withOpacity(0.14),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Center(
@@ -2312,7 +2570,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
-                    color: Colors.teal.shade800,
+                    color: scheme.primary.withOpacity(0.98),
                   ),
                 ),
               ),
@@ -2381,7 +2639,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: Colors.teal.shade700,
+                    color: scheme.primary.withOpacity(0.92),
                   ),
                 ),
               ],
@@ -2434,74 +2692,82 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
           child: Column(
             children: [
-              // Switch ITBIS
-              SwitchListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  'ITBIS ${(_currentCart.itbisRate * 100).toInt()}%',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                value: _currentCart.itbisEnabled,
-                onChanged: _currentCart.fiscalEnabled
-                    ? null
-                    : (value) =>
-                          setState(() => _currentCart.itbisEnabled = value),
-                activeColor: Colors.teal,
-              ),
-              const SizedBox(height: 4),
-
-              // Switch Valor Fiscal
-              SwitchListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: const Text(
-                  'Valor Fiscal',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                subtitle: null,
-                value: _currentCart.fiscalEnabled,
-                onChanged: (value) async {
-                  if (!value) {
-                    setState(() {
-                      _currentCart.fiscalEnabled = false;
-                      _currentCart.selectedNcf = null;
-                    });
-                    return;
-                  }
-
-                  setState(() {
-                    _currentCart.fiscalEnabled = true;
-                    _currentCart.itbisEnabled = true;
-                  });
-
-                  await _loadAvailableNcfs();
-                  if (!mounted) return;
-
-                  if (_availableNcfs.isEmpty) {
-                    setState(() {
-                      _currentCart.fiscalEnabled = false;
-                      _currentCart.selectedNcf = null;
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'No hay NCF disponibles. Hable con Administración para agregarlo.',
+              Row(
+                children: [
+                  Expanded(
+                    child: SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        'ITBIS ${(_currentCart.itbisRate * 100).toInt()}%',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
                         ),
-                        backgroundColor: Colors.red,
                       ),
-                    );
-                    return;
-                  }
+                      value: _currentCart.itbisEnabled,
+                      onChanged: _currentCart.fiscalEnabled
+                          ? null
+                          : (value) => setState(
+                              () => _currentCart.itbisEnabled = value,
+                            ),
+                      activeColor: scheme.primary,
+                    ),
+                  ),
+                  Expanded(
+                    child: SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text(
+                        'Comprobante',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      value: _currentCart.fiscalEnabled,
+                      onChanged: (value) async {
+                        if (!value) {
+                          setState(() {
+                            _currentCart.fiscalEnabled = false;
+                            _currentCart.selectedNcf = null;
+                          });
+                          return;
+                        }
 
-                  setState(
-                    () => _currentCart.selectedNcf ??= _availableNcfs.first,
-                  );
-                },
-                activeColor: const Color(0xFFD4AF37),
+                        setState(() {
+                          _currentCart.fiscalEnabled = true;
+                          _currentCart.itbisEnabled = true;
+                        });
+
+                        await _loadAvailableNcfs();
+                        if (!mounted) return;
+
+                        if (_availableNcfs.isEmpty) {
+                          setState(() {
+                            _currentCart.fiscalEnabled = false;
+                            _currentCart.selectedNcf = null;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'No hay NCF disponibles. Hable con Administración para agregarlo.',
+                              ),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                          return;
+                        }
+
+                        setState(
+                          () =>
+                              _currentCart.selectedNcf ??= _availableNcfs.first,
+                        );
+                      },
+                      activeColor: const Color(0xFFD4AF37),
+                    ),
+                  ),
+                ],
               ),
 
               if (_currentCart.fiscalEnabled) ...[
@@ -2602,9 +2868,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               ],
               if (_currentCart.itbisEnabled ||
                   _currentCart.calculateTotalDiscountsCombined() > 0) ...[
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Divider(thickness: 1.5, color: Colors.teal),
+                  child: Divider(thickness: 1.5, color: scheme.primary),
                 ),
               ],
 
@@ -2614,11 +2880,14 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 child: Tooltip(
                   message: 'Doble click para descuento',
                   child: Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.teal.shade50,
+                      color: scheme.primary.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.teal.shade200, width: 2),
+                      border: Border.all(
+                        color: scheme.primary.withOpacity(0.22),
+                        width: 2.2,
+                      ),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2628,15 +2897,15 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                             Icon(
                               Icons.attach_money,
                               size: 20,
-                              color: Colors.teal.shade700,
+                              color: scheme.primary.withOpacity(0.92),
                             ),
                             const SizedBox(width: 6),
                             Text(
                               'TOTAL:',
                               style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.teal.shade900,
+                                fontSize: 19,
+                                fontWeight: FontWeight.w800,
+                                color: scheme.primary,
                               ),
                             ),
                           ],
@@ -2644,9 +2913,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                         Text(
                           'RD\$${_currentCart.calculateTotal().toStringAsFixed(2)}',
                           style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.teal.shade800,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w900,
+                            color: scheme.primary.withOpacity(0.98),
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -2680,43 +2949,39 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                     ),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal,
+                    backgroundColor: scheme.primary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    elevation: 6,
-                    shadowColor: Colors.tealAccent,
+                    elevation: 10,
+                    shadowColor: scheme.primary.withOpacity(0.6),
                   ),
                 ),
               ),
               const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerRight,
-                child: SizedBox(
-                  width: 150,
-                  child: OutlinedButton.icon(
-                    onPressed: _currentCart.items.isEmpty ? null : _saveAsQuote,
-                    icon: const Icon(Icons.description, size: 18),
-                    label: const Text(
-                      'COTIZAR',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _currentCart.items.isEmpty ? null : _saveAsQuote,
+                  icon: const Icon(Icons.description, size: 18),
+                  label: const Text(
+                    'COTIZAR',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
                     ),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      side: BorderSide(
-                        color: Colors.orange.shade300,
-                        width: 1.5,
-                      ),
-                      foregroundColor: Colors.orange,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    side: BorderSide(color: Colors.orange.shade200, width: 1.5),
+                    foregroundColor: Colors.orange.shade700,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
+                    backgroundColor: Colors.orange.shade50,
                   ),
                 ),
               ),
@@ -2728,13 +2993,34 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 
     return Card(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      elevation: 3,
-      shadowColor: Colors.black26,
+      elevation: 12,
+      shadowColor: Colors.black.withOpacity(0.25),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200, width: 1),
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: scheme.primary.withOpacity(0.08), width: 1),
       ),
-      child: content,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.white, Colors.grey.shade50, Colors.white],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 18,
+              offset: Offset(0, 10),
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 320, maxWidth: 460),
+          child: content,
+        ),
+      ),
     );
   }
 
@@ -2793,8 +3079,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                       style: TextStyle(fontSize: 13),
                     ),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.teal,
-                      side: const BorderSide(color: Colors.teal),
+                      foregroundColor: scheme.primary,
+                      side: BorderSide(color: scheme.primary),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                   ),
@@ -2896,7 +3182,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                             : (value) => setState(
                                 () => _currentCart.itbisEnabled = value,
                               ),
-                        activeColor: Colors.teal,
+                        activeColor: scheme.primary,
                       ),
                       const Divider(height: 8),
                       SwitchListTile(
@@ -3055,9 +3341,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                       if (_currentCart.itbisEnabled ||
                           _currentCart.calculateTotalDiscountsCombined() >
                               0) ...[
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.symmetric(vertical: 10),
-                          child: Divider(thickness: 2, color: Colors.teal),
+                          child: Divider(thickness: 2, color: scheme.primary),
                         ),
                       ],
                       GestureDetector(
@@ -3093,7 +3379,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                             ),
                           ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.teal,
+                            backgroundColor: scheme.primary,
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -3146,12 +3432,12 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       child: Card(
         margin: const EdgeInsets.only(bottom: 3),
         elevation: isSelected ? 4 : 2,
-        shadowColor: isSelected ? Colors.teal.withOpacity(0.3) : Colors.black26,
-        color: isSelected ? Colors.teal.shade50 : Colors.white,
+        shadowColor: isSelected ? scheme.primary.withOpacity(0.3) : Colors.black26,
+        color: isSelected ? scheme.primary.withOpacity(0.08) : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(6),
           side: isSelected
-              ? BorderSide(color: Colors.teal.shade400, width: 1.5)
+              ? BorderSide(color: scheme.primary.withOpacity(0.45), width: 1.5)
               : BorderSide(color: Colors.grey.shade200, width: 0.5),
         ),
         child: InkWell(
@@ -3166,7 +3452,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: Colors.teal.shade100,
+                    color: scheme.primary.withOpacity(0.14),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Center(
@@ -3175,7 +3461,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Colors.teal.shade800,
+                        color: scheme.primary.withOpacity(0.98),
                       ),
                     ),
                   ),
@@ -3246,7 +3532,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
-                          color: Colors.teal.shade700,
+                          color: scheme.primary.withOpacity(0.92),
                         ),
                       ),
                     ],
@@ -3305,9 +3591,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           : null,
       decoration: isTotal
           ? BoxDecoration(
-              color: Colors.teal.shade50,
+              color: scheme.primary.withOpacity(0.08),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.teal.shade200, width: 2),
+              border: Border.all(color: scheme.primary.withOpacity(0.22), width: 2),
             )
           : null,
       child: Row(
@@ -3316,7 +3602,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           Row(
             children: [
               if (isTotal)
-                Icon(Icons.attach_money, size: 20, color: Colors.teal.shade700),
+                Icon(Icons.attach_money, size: 20, color: scheme.primary.withOpacity(0.92)),
               if (isTotal) const SizedBox(width: 4),
               Text(
                 label,
@@ -3325,7 +3611,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   fontWeight: isTotal ? FontWeight.bold : FontWeight.w600,
                   color:
                       color ??
-                      (isTotal ? Colors.teal.shade900 : Colors.grey.shade700),
+                      (isTotal ? scheme.primary : Colors.grey.shade700),
                   letterSpacing: isTotal ? 0.5 : 0,
                 ),
               ),
@@ -3336,7 +3622,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
             style: TextStyle(
               fontSize: isTotal ? 24 : 14,
               fontWeight: FontWeight.bold,
-              color: color ?? (isTotal ? Colors.teal.shade800 : Colors.black87),
+              color: color ?? (isTotal ? scheme.primary.withOpacity(0.98) : Colors.black87),
               letterSpacing: isTotal ? 0.5 : 0,
             ),
           ),
@@ -3367,18 +3653,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 : InkWell(
                     onTap: _showClientPicker,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(
+                      padding: EdgeInsets.symmetric(
                         horizontal: 12,
                         vertical: 10,
                       ),
                       child: Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.person,
                             size: 20,
-                            color: Colors.teal,
+                            color: scheme.primary,
                           ),
-                          const SizedBox(width: 8),
+                          SizedBox(width: 8),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -3431,15 +3717,15 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           vertical: isActive ? 10 : 8,
         ),
         decoration: BoxDecoration(
-          color: isActive ? Colors.teal : Colors.grey.shade100,
+          color: isActive ? scheme.primary : Colors.grey.shade100,
           borderRadius: BorderRadius.circular(10),
           border: isActive
-              ? Border.all(color: Colors.teal.shade700, width: 2)
+              ? Border.all(color: scheme.primary.withOpacity(0.92), width: 2)
               : Border.all(color: Colors.grey.shade300, width: 1),
           boxShadow: isActive
               ? [
                   BoxShadow(
-                    color: Colors.teal.withOpacity(0.3),
+                    color: scheme.primary.withOpacity(0.3),
                     blurRadius: 6,
                     offset: const Offset(0, 2),
                   ),
@@ -3481,13 +3767,13 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 margin: const EdgeInsets.only(left: 8),
                 padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
-                  color: isActive ? Colors.white : Colors.teal,
+                  color: isActive ? Colors.white : scheme.primary,
                   shape: BoxShape.circle,
                 ),
                 child: Text(
                   '${cart.items.length}',
                   style: TextStyle(
-                    color: isActive ? Colors.teal : Colors.white,
+                    color: isActive ? scheme.primary : Colors.white,
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                   ),
@@ -3522,14 +3808,14 @@ class _SalesPageState extends ConsumerState<SalesPage> {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Colors.teal.shade600, Colors.teal.shade400],
+                colors: [scheme.primary.withOpacity(0.85), scheme.primary.withOpacity(0.45)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.teal.withOpacity(0.3),
+                  color: scheme.primary.withOpacity(0.3),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 ),
@@ -3573,12 +3859,12 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.teal,
+                    color: scheme.primary,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.teal.shade700, width: 2),
+                    border: Border.all(color: scheme.primary.withOpacity(0.92), width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.teal.withOpacity(0.3),
+                        color: scheme.primary.withOpacity(0.3),
                         blurRadius: 6,
                         offset: const Offset(0, 2),
                       ),
@@ -3643,11 +3929,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         // Botón para agregar nuevo ticket
         Container(
           decoration: BoxDecoration(
-            color: Colors.teal.shade50,
+            color: scheme.primary.withOpacity(0.08),
             shape: BoxShape.circle,
           ),
           child: IconButton(
-            icon: Icon(Icons.add_circle, color: Colors.teal.shade600, size: 28),
+            icon: Icon(Icons.add_circle, color: scheme.primary.withOpacity(0.85), size: 28),
             onPressed: _addNewTicket,
             tooltip: 'Nuevo ticket',
           ),
@@ -3700,16 +3986,16 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                     ),
                     decoration: BoxDecoration(
                       color: isActive
-                          ? Colors.teal.shade50
+                          ? scheme.primary.withOpacity(0.08)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(8),
                       border: isActive
-                          ? Border.all(color: Colors.teal.shade200, width: 1)
+                          ? Border.all(color: scheme.primary.withOpacity(0.22), width: 1)
                           : null,
                     ),
                     child: ListTile(
                       leading: isActive
-                          ? const Icon(Icons.check_circle, color: Colors.teal)
+                          ? Icon(Icons.check_circle, color: scheme.primary)
                           : Icon(
                               Icons.radio_button_unchecked,
                               color: Colors.grey.shade400,
@@ -3722,7 +4008,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                               : FontWeight.normal,
                           fontSize: isActive ? 15 : 14,
                           color: isActive
-                              ? Colors.teal.shade700
+                              ? scheme.primary.withOpacity(0.92)
                               : Colors.black87,
                         ),
                       ),
@@ -3744,7 +4030,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                               margin: const EdgeInsets.only(right: 8),
                               decoration: BoxDecoration(
                                 color: isActive
-                                    ? Colors.teal
+                                    ? scheme.primary
                                     : Colors.grey.shade200,
                                 shape: BoxShape.circle,
                               ),

@@ -2,7 +2,7 @@
 ║                                                                            ║
 ║              ✅ FUNCIONALIDAD DE DUPLICAR COTIZACIÓN AGREGADA ✅           ║
 ║                                                                            ║
-║               Módulo de Cotizaciones - Sistema POS Nilkas                 ║
+║               Módulo de Cotizaciones - Sistema POS FULLPOS                 ║
 ║                                                                            ║
 ╚════════════════════════════════════════════════════════════════════════════╝
 

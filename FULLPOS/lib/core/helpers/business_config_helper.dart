@@ -163,7 +163,7 @@ class BusinessConfigHelper {
 
   /// Validar configuración mínima
   static bool hasMinimumConfiguration() {
-    return appConfigService.getBusinessName() != 'MI NEGOCIO' &&
+    return appConfigService.getBusinessName() != 'FULLPOS' &&
         appConfigService.getBusinessName().isNotEmpty;
   }
 

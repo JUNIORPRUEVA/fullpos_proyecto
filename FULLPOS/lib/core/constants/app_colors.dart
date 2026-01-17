@@ -1,50 +1,48 @@
 import 'package:flutter/material.dart';
 
-/// Colores del tema LOS NILKAS (Teal + Gold)
+/// Paleta premium FULLPOS (azul profundo + acento turquesa)
 class AppColors {
   AppColors._();
 
-  // Teal principal (marca)
-  static const Color teal = Color(0xFF00695C); // Alias principal
-  static const Color teal900 = Color(0xFF004D40);
-  static const Color teal800 = Color(0xFF00695C);
-  static const Color teal700 = Color(0xFF00796B);
-  static const Color teal600 = Color(0xFF00897B);
-  static const Color teal500 = Color(0xFF009688);
-  static const Color teal400 = Color(0xFF26A69A);
-  static const Color teal300 = Color(0xFF4DB6AC);
+  // Azul de marca (nuevos valores)
+  static const Color teal = Color(0xFF0F2F4F); // Alias principal
+  static const Color teal900 = Color(0xFF0A1E33);
+  static const Color teal800 = Color(0xFF0F2F4F);
+  static const Color teal700 = Color(0xFF16426A);
+  static const Color teal600 = Color(0xFF1E5A88);
+  static const Color teal500 = Color(0xFF2774A6);
+  static const Color teal400 = Color(0xFF3B8FC4);
+  static const Color teal300 = Color(0xFF6BB3DD);
 
-  // Gold/Dorado (acento)
-  static const Color gold = Color(0xFFD4AF37);
-  static const Color goldBright = Color(0xFFFFD700);
-  static const Color goldSoft = Color(0xFFFFC107);
-  static const Color goldDark = Color(0xFFA67C00);
+  // Acento turquesa
+  static const Color gold = Color(0xFF24D3BC);
+  static const Color goldBright = Color(0xFF43E6D4);
+  static const Color goldSoft = Color(0xFF8DEFE6);
+  static const Color goldDark = Color(0xFF149A88);
 
-  // Backgrounds claros (nuevo)
-  static const Color bgLight = Color(
-    0xFFF3F6F5,
-  ); // gris casi blanco con toque teal
-  static const Color bgLightAlt = Color(0xFFF1F5F3);
+  // Backgrounds claros
+  static const Color bgLight = Color(0xFFE8EEF6);
+  static const Color bgLightAlt = Color(0xFFE1E8F1);
 
-  // Surfaces claras
-  static const Color surfaceLight = Color(0xFFFFFFFF); // blanco
-  static const Color surfaceLightVariant = Color(0xFFF8F9F9); // gris muy claro
-  static const Color surfaceLightBorder = Color(0xFFE0E5E4); // bordes sutiles
+  // Superficies claras
+  static const Color surfaceLight = Color(0xFFF9FCFF);
+  static const Color surfaceLightVariant = Color(0xFFF0F5FB);
+  static const Color surfaceLightBorder = Color(0xFFD3DCE7);
 
   // Backgrounds oscuros (para sidebar/topbar)
-  static const Color bgDark = Color(0xFF1A1A1A);
-  static const Color surfaceDark = Color(0xFF242424);
-  static const Color surfaceDarkVariant = Color(0xFF2E2E2E);
+  static const Color bgDark = Color(0xFF0A1726);
+  static const Color surfaceDark = Color(0xFF11263A);
+  static const Color surfaceDarkVariant = Color(0xFF183653);
 
   // Textos en fondos claros
-  static const Color textDark = Color(0xFF1F2937); // gris oscuro casi negro
-  static const Color textDarkSecondary = Color(0xFF6B7280); // gris medio
-  static const Color textDarkMuted = Color(0xFF9CA3AF); // gris claro
+  static const Color textDark = Color(0xFF111827);
+  static const Color textDarkSecondary = Color(0xFF4B5563);
+  static const Color textDarkMuted = Color(0xFF9CA3AF);
 
   // Textos en fondos oscuros
   static const Color textLight = Color(0xFFFFFFFF);
   static const Color textLightSecondary = Color(0xFFE5E7EB);
-  static const Color textLightMuted = Color(0xFFB0BEC5);
+  static const Color textLightMuted = Color(0xFFB7C5D3);
 
   // Aliases para compatibilidad (legacy)
   static const Color textPrimary = textLight;

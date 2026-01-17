@@ -1,21 +1,25 @@
 import { Router } from 'express';
+import { authGuard } from '../../middlewares/authGuard';
+import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
 import {
   approveSchema,
   auditQuerySchema,
   requestSchema,
+  requestsQuerySchema,
   verifySchema,
 } from './override.validation';
 import {
   approveOverride,
   createOverrideRequest,
+  getOverrideRequests,
   getAudit,
   verifyOverride,
 } from './override.service';
 
 const router = Router();
 
-router.post('/request', validate(requestSchema), async (req, res, next) => {
+router.post('/request', overrideKeyGuard, validate(requestSchema), async (req, res, next) => {
   try {
     const result = await createOverrideRequest(req.body);
     res.json(result);
@@ -24,16 +28,20 @@ router.post('/request', validate(requestSchema), async (req, res, next) => {
   }
 });
 
-router.post('/approve', validate(approveSchema), async (req, res, next) => {
+router.post('/approve', authGuard, validate(approveSchema), async (req, res, next) => {
   try {
-    const result = await approveOverride(req.body);
+    const result = await approveOverride({
+      ...req.body,
+      companyId: req.user!.companyId,
+      approvedById: req.user!.id,
+    });
     res.json(result);
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/verify', validate(verifySchema), async (req, res, next) => {
+router.post('/verify', overrideKeyGuard, validate(verifySchema), async (req, res, next) => {
   try {
     const result = await verifyOverride(req.body);
     res.json(result);
@@ -42,14 +50,35 @@ router.post('/verify', validate(verifySchema), async (req, res, next) => {
   }
 });
 
-router.get('/audit', validate(auditQuerySchema, 'query'), async (req, res, next) => {
+router.get('/audit', authGuard, validate(auditQuerySchema, 'query'), async (req, res, next) => {
   try {
     const { companyId, limit } = req.query as any;
-    const audits = await getAudit(Number(companyId), limit ? Number(limit) : 100);
+    const resolvedCompanyId = companyId ? Number(companyId) : req.user!.companyId;
+    const audits = await getAudit(resolvedCompanyId, limit ? Number(limit) : 100);
     res.json(audits);
   } catch (err) {
     next(err);
   }
 });
+
+router.get(
+  '/requests',
+  authGuard,
+  validate(requestsQuerySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const { companyId, status, limit } = req.query as any;
+      const resolvedCompanyId = companyId ? Number(companyId) : req.user!.companyId;
+      const requests = await getOverrideRequests({
+        companyId: resolvedCompanyId,
+        status,
+        limit: limit ? Number(limit) : 50,
+      });
+      res.json(requests);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 export default router;

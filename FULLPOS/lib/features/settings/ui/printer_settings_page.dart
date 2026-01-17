@@ -103,7 +103,7 @@ class _PrinterSettingsPageState extends State<PrinterSettingsPage> {
       footerMessage: _footerCtrl.text.trim(),
       warrantyPolicy: _warrantyPolicyCtrl.text.trim(),
       // Guardar datos de empresa desde CompanyInfo (sin duplicar)
-      headerBusinessName: _companyInfo?.name ?? 'Mi Negocio',
+      headerBusinessName: _companyInfo?.name ?? 'FULLPOS',
       headerRnc: _companyInfo?.rnc,
       headerAddress: _companyInfo?.address,
       headerPhone: _companyInfo?.primaryPhone,

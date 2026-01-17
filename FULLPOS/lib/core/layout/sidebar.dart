@@ -9,6 +9,7 @@ import '../session/session_manager.dart';
 import '../session/ui_preferences.dart';
 import '../window/window_service.dart';
 import '../../features/auth/data/auth_repository.dart';
+import '../../features/cash/data/cash_repository.dart';
 import '../../features/settings/data/user_model.dart';
 import '../../features/settings/providers/theme_provider.dart';
 import '../../features/settings/providers/business_settings_provider.dart';
@@ -17,8 +18,13 @@ import '../../features/products/utils/catalog_pdf_launcher.dart';
 /// Sidebar del layout principal con navegación (colapsable)
 class Sidebar extends ConsumerStatefulWidget {
   final bool? forcedCollapsed;
+  final double? customWidth;
 
-  const Sidebar({super.key, this.forcedCollapsed});
+  const Sidebar({
+    super.key,
+    this.forcedCollapsed,
+    this.customWidth,
+  });
 
   @override
   ConsumerState<Sidebar> createState() => _SidebarState();
@@ -36,31 +42,51 @@ class _SidebarState extends ConsumerState<Sidebar> {
     }
   }
 
-  Future<void> _closeApp(BuildContext context) async {
-    if (!(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) return;
-
-    final confirm = await showDialog<bool>(
+  Future<void> _handleExitApp(BuildContext context) async {
+    final hasOpenCash = await CashRepository.hasOpenSession();
+    final shouldExit = await showDialog<bool>(
       context: context,
-      barrierDismissible: true,
-      builder: (_) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         title: const Text('Cerrar aplicación'),
-        content: const Text('¿Deseas cerrar el programa?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('¿Desea cerrar la aplicación?'),
+            if (hasOpenCash) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Tienes una caja abierta. ¿Cerrar la app y dejar la caja abierta o ir a cerrarla?',
+                style: TextStyle(fontSize: 13),
+              ),
+            ],
+          ],
+        ),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.of(context, rootNavigator: true).pop(false),
+            onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancelar'),
           ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(context, rootNavigator: true).pop(true),
-            child: const Text('Cerrar'),
+          if (hasOpenCash)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx, false);
+                context.go('/cash');
+              },
+              child: const Text('Ir a cerrar caja'),
+            ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade600,
+            ),
+            child: Text(hasOpenCash ? 'Salir (dejar caja abierta)' : 'Salir'),
           ),
         ],
       ),
     );
 
-    if (confirm == true) {
+    if (shouldExit == true) {
       await WindowService.close();
     }
   }
@@ -108,17 +134,38 @@ class _SidebarState extends ConsumerState<Sidebar> {
     final sidebarColor = themeSettings.sidebarColor;
     final sidebarTextColor = themeSettings.sidebarTextColor;
     final sidebarActiveColor = themeSettings.sidebarActiveColor;
+    final sidebarGradientEnd =
+        Color.lerp(sidebarColor, sidebarActiveColor, 0.28) ?? sidebarColor;
     // Border color: ligeramente más claro que el sidebar
     final borderColor = Color.lerp(sidebarColor, Colors.white, 0.15)!;
-    final dividerColor = borderColor.withValues(alpha: 0.55);
+    // final dividerColor = borderColor.withValues(alpha: 0.55);
+
+    final targetWidth = widget.customWidth ?? AppSizes.sidebarWidth;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
-      width: _isCollapsed ? 72 : AppSizes.sidebarWidth,
+      width: _isCollapsed ? 72 : targetWidth,
       decoration: BoxDecoration(
-        color: sidebarColor,
+        gradient: LinearGradient(
+          colors: [sidebarColor, sidebarGradientEnd],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
         border: Border(right: BorderSide(color: borderColor, width: 2)),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black54,
+            blurRadius: 20,
+            offset: Offset(6, 8),
+          ),
+          BoxShadow(
+            color: Colors.white24,
+            blurRadius: 12,
+            offset: Offset(-2, -2),
+            spreadRadius: -3,
+          ),
+        ],
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -238,7 +285,7 @@ class _SidebarState extends ConsumerState<Sidebar> {
                                 Text(
                                   businessSettings.businessName.isNotEmpty
                                       ? businessSettings.businessName
-                                      : 'MI NEGOCIO',
+                                      : 'FULLPOS',
                                   style: TextStyle(
                                     color: sidebarActiveColor,
                                     fontSize: 14,
@@ -287,128 +334,130 @@ class _SidebarState extends ConsumerState<Sidebar> {
 
               // Menú de navegación con verificación de permisos
               Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: AppSizes.paddingM,
-                  ),
+                child: Column(
                   children: [
-                    // Ventas - siempre visible si puede vender
-                    if (_isAdmin || _permissions.canSell)
-                      PremiumNavItem(
-                        icon: Icons.shopping_cart,
-                        title: 'Ventas',
-                        route: '/sales',
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
-                      ),
-                    // Catálogo - visible si puede ver productos
-                    if (_isAdmin || _permissions.canViewProducts)
-                      PremiumNavItem(
-                        icon: Icons.inventory_2,
-                        title: 'Catálogo',
-                        route: '/products',
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
-                      ),
-                    // Clientes - visible si puede ver clientes
-                    if (_isAdmin || _permissions.canViewClients)
-                      PremiumNavItem(
-                        icon: Icons.people,
-                        title: 'Clientes',
-                        route: '/clients',
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
-                      ),
-                    // Préstamos - visible si puede ver préstamos
-                    if (_isAdmin || _permissions.canViewLoans)
-                      PremiumNavItem(
-                        icon: Icons.handshake,
-                        title: 'Préstamos',
-                        route: '/loans',
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
-                      ),
-                    // Reportes - visible si puede ver reportes
-                    if (_isAdmin || _permissions.canViewReports)
-                      PremiumNavItem(
-                        icon: Icons.bar_chart,
-                        title: 'Reportes',
-                        route: '/reports',
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
-                      ),
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: AppSizes.paddingM,
+                        ),
+                        children: [
+                          // Ventas - siempre visible si puede vender
+                          if (_isAdmin || _permissions.canSell)
+                            PremiumNavItem(
+                              icon: Icons.shopping_cart,
+                              title: 'Ventas',
+                              route: '/sales',
+                              isCollapsed: effectiveCollapsed,
+                              textColor: sidebarTextColor,
+                              activeColor: sidebarActiveColor,
+                            ),
+                          // Catálogo - visible si puede ver productos
+                          if (_isAdmin || _permissions.canViewProducts)
+                            PremiumNavItem(
+                              icon: Icons.inventory_2,
+                              title: 'Catálogo',
+                              route: '/products',
+                              isCollapsed: effectiveCollapsed,
+                              textColor: sidebarTextColor,
+                              activeColor: sidebarActiveColor,
+                            ),
+                          // Clientes - visible si puede ver clientes
+                          if (_isAdmin || _permissions.canViewClients)
+                            PremiumNavItem(
+                              icon: Icons.people,
+                              title: 'Clientes',
+                              route: '/clients',
+                              isCollapsed: effectiveCollapsed,
+                              textColor: sidebarTextColor,
+                              activeColor: sidebarActiveColor,
+                            ),
+                          // Préstamos - visible si puede ver préstamos
+                          if (_isAdmin || _permissions.canViewLoans)
+                            PremiumNavItem(
+                              icon: Icons.handshake,
+                              title: 'Préstamos',
+                              route: '/loans',
+                              isCollapsed: effectiveCollapsed,
+                              textColor: sidebarTextColor,
+                              activeColor: sidebarActiveColor,
+                            ),
+                          // Reportes - visible si puede ver reportes
+                          if (_isAdmin || _permissions.canViewReports)
+                            PremiumNavItem(
+                              icon: Icons.bar_chart,
+                              title: 'Reportes',
+                              route: '/reports',
+                              isCollapsed: effectiveCollapsed,
+                              textColor: sidebarTextColor,
+                              activeColor: sidebarActiveColor,
+                            ),
 
-                    // Compras / Órdenes de compra - visible si puede ajustar stock
-                    if (_isAdmin || _permissions.canAdjustStock)
-                      PremiumNavItem(
-                        icon: Icons.shopping_bag_outlined,
-                        title: 'Compras',
-                        route: '/purchases',
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
+                          // Compras / Órdenes de compra - visible si puede ajustar stock
+                          if (_isAdmin || _permissions.canAdjustStock)
+                            PremiumNavItem(
+                              icon: Icons.shopping_bag_outlined,
+                              title: 'Compras',
+                              route: '/purchases',
+                              isCollapsed: effectiveCollapsed,
+                              textColor: sidebarTextColor,
+                              activeColor: sidebarActiveColor,
+                            ),
+                        ],
                       ),
-
-                    // Separador visual antes de Catálogo PDF/Herramientas
+                    ),
                     if (_isAdmin || _permissions.canViewProducts)
-                      Divider(
-                        height: AppSizes.paddingL,
-                        indent: AppSizes.paddingS,
-                        endIndent: AppSizes.paddingS,
-                        color: dividerColor,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSizes.paddingS,
+                          vertical: AppSizes.paddingS,
+                        ),
+                        child: Container(
+                          height: 1,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.white.withValues(alpha: 0.0),
+                                Colors.white.withValues(alpha: 0.25),
+                                Colors.white.withValues(alpha: 0.0),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                    // Catálogo PDF (acceso directo) - antes de Herramientas y Configuración
                     if (_isAdmin || _permissions.canViewProducts)
-                      PremiumNavItem(
-                        icon: Icons.picture_as_pdf,
-                        title: 'Catálogo PDF',
-                        route: null,
-                        onTap: () =>
-                            CatalogPdfLauncher.openFromSidebar(context),
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSizes.paddingS,
+                          vertical: AppSizes.paddingXS,
+                        ),
+                        child: PremiumNavItem(
+                          icon: Icons.picture_as_pdf,
+                          title: 'Catálogo PDF',
+                          route: null,
+                          onTap: () =>
+                              CatalogPdfLauncher.openFromSidebar(context),
+                          isCollapsed: effectiveCollapsed,
+                          textColor: sidebarTextColor,
+                          activeColor: sidebarActiveColor,
+                        ),
                       ),
-                    // Herramientas - visible si puede acceder a herramientas
                     if (_isAdmin || _permissions.canAccessTools)
-                      PremiumNavItem(
-                        icon: Icons.construction,
-                        title: 'Herramientas',
-                        route: '/tools',
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSizes.paddingS,
+                          vertical: AppSizes.paddingXS,
+                        ),
+                        child: PremiumNavItem(
+                          icon: Icons.construction,
+                          title: 'Herramientas',
+                          route: '/tools',
+                          isCollapsed: effectiveCollapsed,
+                          textColor: sidebarTextColor,
+                          activeColor: sidebarActiveColor,
+                        ),
                       ),
-                    Divider(
-                      height: AppSizes.paddingL,
-                      indent: AppSizes.paddingS,
-                      endIndent: AppSizes.paddingS,
-                      color: dividerColor,
-                    ),
-                    // Configuración - visible si puede acceder a configuración
-                    if (_isAdmin || _permissions.canAccessSettings)
-                      PremiumNavItem(
-                        icon: Icons.settings,
-                        title: 'Configuración',
-                        route: '/settings',
-                        isCollapsed: effectiveCollapsed,
-                        textColor: sidebarTextColor,
-                        activeColor: sidebarActiveColor,
-                      ),
-                    // Usuario - siempre visible
-                    PremiumNavItem(
-                      icon: Icons.account_circle,
-                      title: 'Usuario',
-                      route: '/account',
-                      isCollapsed: effectiveCollapsed,
-                      textColor: sidebarTextColor,
-                      activeColor: sidebarActiveColor,
-                    ),
+                    const SizedBox(height: AppSizes.spaceXL * 2),
                   ],
                 ),
               ),
@@ -452,26 +501,26 @@ class _SidebarState extends ConsumerState<Sidebar> {
                       );
                     }
 
-                    final closeAppBtn = actionSquare(
-                      tooltip: 'Cerrar aplicación',
-                      icon: Icons.power_settings_new,
-                      onTap: () => _closeApp(context),
+                    final homeBtn = actionSquare(
+                      tooltip: 'Minimizar a la barra de tareas',
+                      icon: Icons.home_outlined,
+                      onTap: () => WindowService.minimize(),
                       fg: AppColors.textLight,
-                      bg: Colors.white.withValues(alpha: 0.08),
+                      bg: const Color(0xFF0E3A57),
                       border: BorderSide(
                         color: Colors.white.withValues(alpha: 0.18),
                       ),
                       sizeOverride: effectiveCollapsed ? 40.0 : 44.0,
                     );
 
-                    final minimizeBtn = actionSquare(
-                      tooltip: 'Minimizar ventana',
-                      icon: Icons.minimize,
-                      onTap: () => WindowService.minimize(),
+                    final closeBtn = actionSquare(
+                      tooltip: 'Cerrar aplicación',
+                      icon: Icons.power_settings_new,
+                      onTap: () => _handleExitApp(context),
                       fg: AppColors.textLight,
-                      bg: Colors.white.withValues(alpha: 0.06),
+                      bg: const Color(0xFF0B523A),
                       border: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.16),
+                        color: Colors.white.withValues(alpha: 0.18),
                       ),
                       sizeOverride: effectiveCollapsed ? 40.0 : 44.0,
                     );
@@ -481,7 +530,7 @@ class _SidebarState extends ConsumerState<Sidebar> {
                       icon: Icons.logout,
                       onTap: () => _logout(context),
                       fg: AppColors.textLight,
-                      bg: AppColors.error.withValues(alpha: 0.9),
+                      bg: const Color(0xFFB1202C),
                       border: BorderSide(
                         color: Colors.white.withValues(alpha: 0.14),
                       ),
@@ -492,10 +541,9 @@ class _SidebarState extends ConsumerState<Sidebar> {
                       return Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (canCloseApp) minimizeBtn,
-                          if (canCloseApp)
-                            const SizedBox(height: AppSizes.spaceS),
-                          if (canCloseApp) closeAppBtn,
+                          homeBtn,
+                          const SizedBox(height: AppSizes.spaceS),
+                          if (canCloseApp) closeBtn,
                           if (canCloseApp)
                             const SizedBox(height: AppSizes.spaceS),
                           logoutBtn,
@@ -506,9 +554,9 @@ class _SidebarState extends ConsumerState<Sidebar> {
                     return Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        if (canCloseApp) minimizeBtn,
-                        if (canCloseApp) const SizedBox(width: AppSizes.spaceS),
-                        if (canCloseApp) closeAppBtn,
+                        homeBtn,
+                        const SizedBox(width: AppSizes.spaceS),
+                        if (canCloseApp) closeBtn,
                         if (canCloseApp) const SizedBox(width: AppSizes.spaceS),
                         logoutBtn,
                       ],
@@ -580,8 +628,6 @@ class _PremiumNavItemState extends State<PremiumNavItem> {
     final isEnabled = widget.onTap != null || widget.route != null;
 
     const duration = Duration(milliseconds: 180);
-    final hoverBg = Colors.white.withValues(alpha: 0.06);
-    final selectedBg = Colors.white.withValues(alpha: 0.08);
     final pillRadius = BorderRadius.circular(16);
 
     final fgColor = isActive
@@ -617,10 +663,39 @@ class _PremiumNavItemState extends State<PremiumNavItem> {
                 vertical: widget.isCollapsed ? 10 : 12,
               ),
               decoration: BoxDecoration(
-                color: isActive
-                    ? selectedBg
-                    : (_isHover ? hoverBg : Colors.transparent),
+                gradient: isActive
+                    ? LinearGradient(
+                        colors: [
+                          widget.activeColor.withValues(alpha: 0.95),
+                          widget.activeColor.withValues(alpha: 0.70),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : (_isHover
+                          ? const LinearGradient(
+                              colors: [Color(0xFF123D5C), Color(0xFF0F2F48)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            )
+                          : null),
+                color: isActive || _isHover
+                    ? null
+                    : Colors.white.withValues(alpha: 0.04),
                 borderRadius: pillRadius,
+                border: Border.all(
+                  color: isActive
+                      ? Colors.white.withValues(alpha: 0.45)
+                      : Colors.white.withValues(alpha: 0.08),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isActive ? 0.35 : 0.2),
+                    blurRadius: isActive ? 14 : 10,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
               ),
               child: widget.isCollapsed
                   ? SizedBox(
@@ -635,7 +710,7 @@ class _PremiumNavItemState extends State<PremiumNavItem> {
                               width: 4,
                               decoration: BoxDecoration(
                                 color: isActive
-                                    ? widget.activeColor
+                                    ? Colors.white
                                     : Colors.transparent,
                                 borderRadius: BorderRadius.circular(4),
                               ),
@@ -653,47 +728,29 @@ class _PremiumNavItemState extends State<PremiumNavItem> {
                         ],
                       ),
                     )
-                  : Stack(
+                  : Row(
                       children: [
-                        Positioned(
-                          left: 0,
-                          top: 6,
-                          bottom: 6,
-                          child: AnimatedContainer(
-                            duration: duration,
-                            curve: Curves.easeOut,
-                            width: 4,
-                            decoration: BoxDecoration(
-                              color: isActive
-                                  ? widget.activeColor
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(4),
+                        Icon(widget.icon, color: iconColor, size: 21),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            widget.title,
+                            style: TextStyle(
+                              color: fgColor,
+                              fontSize: 14.5,
+                              fontWeight: isActive
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
                           ),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 12),
-                          child: Row(
-                            children: [
-                              Icon(widget.icon, color: iconColor, size: 21),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  widget.title,
-                                  style: TextStyle(
-                                    color: fgColor,
-                                    fontSize: 14.5,
-                                    fontWeight: isActive
-                                        ? FontWeight.w700
-                                        : FontWeight.w500,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  softWrap: false,
-                                ),
-                              ),
-                            ],
-                          ),
+                        const Icon(
+                          Icons.chevron_right,
+                          size: 16,
+                          color: Colors.white70,
                         ),
                       ],
                     ),

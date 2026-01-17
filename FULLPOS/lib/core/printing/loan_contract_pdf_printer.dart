@@ -41,7 +41,7 @@ class LoanContractPdfPrinter {
     final startDate = DateTime.fromMillisecondsSinceEpoch(loan.startDateMs);
 
     final companyName =
-        (company.name).trim().isEmpty ? 'Mi Negocio' : company.name.trim();
+        (company.name).trim().isEmpty ? 'FULLPOS' : company.name.trim();
     final companyRncValue = (company.rnc ?? '').trim();
     final hasCompanyRnc = companyRncValue.isNotEmpty;
     final companyAddress = safeValue(company.address);

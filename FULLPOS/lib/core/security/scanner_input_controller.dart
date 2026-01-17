@@ -8,6 +8,7 @@ class ScannerInputController {
   final String suffix;
   final String? prefix;
   final Duration timeout;
+  final bool emitOnTimeout;
   final void Function(String data)? onScan;
 
   final StringBuffer _buffer = StringBuffer();
@@ -18,6 +19,7 @@ class ScannerInputController {
     required this.suffix,
     required this.timeout,
     this.prefix,
+    this.emitOnTimeout = true,
     this.onScan,
   });
 
@@ -39,7 +41,11 @@ class ScannerInputController {
   void _restartTimer() {
     _timer?.cancel();
     _timer = Timer(timeout, () {
-      _emitBuffer(trimSuffix: false);
+      if (emitOnTimeout) {
+        _emitBuffer(trimSuffix: false);
+      } else {
+        _buffer.clear();
+      }
     });
   }
 

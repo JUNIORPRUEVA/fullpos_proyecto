@@ -29,6 +29,7 @@ Scripts disponibles:
 - `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`: llaves de firma
 - `JWT_ACCESS_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN`: duraciones (`30m`, `7d`, etc.)
 - `CORS_ORIGINS`: lista separada por comas
+- `OVERRIDE_API_KEY`: API key opcional para `override/request` y `override/verify`
 - `OWNER_APP_ANDROID_URL` / `OWNER_APP_IOS_URL` / `OWNER_APP_VERSION`: links para descargas
 
 ## Endpoints principales
@@ -42,6 +43,7 @@ Scripts disponibles:
 - `GET /api/reports/cash/closing/:id`
 - `GET /api/downloads/owner-app`: links de app owner
 - `POST /api/override/request|approve|verify`, `GET /api/override/audit`
+- `GET /api/override/requests`: lista de solicitudes pendientes
 
 Rutas de reportes y auth requieren `Authorization: Bearer <token>`.
 

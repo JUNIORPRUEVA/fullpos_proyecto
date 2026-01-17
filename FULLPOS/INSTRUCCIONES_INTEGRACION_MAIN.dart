@@ -33,14 +33,14 @@ void main() async {
 
   // Ejecutar la aplicación con ProviderScope
   // Así se cargan las configuraciones automáticamente
-  runApp(const ProviderScope(child: LosNilkasApp()));
+  runApp(const ProviderScope(child: LosFULLPOSApp()));
 }
 
 // ============================================
 // OPCIÓN 1: Inicializar en el Widget Raíz
 // ============================================
-class LosNilkasApp extends ConsumerWidget {
-  const LosNilkasApp({super.key});
+class LosFULLPOSApp extends ConsumerWidget {
+  const LosFULLPOSApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

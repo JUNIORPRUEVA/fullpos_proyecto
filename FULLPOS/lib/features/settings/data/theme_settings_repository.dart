@@ -24,7 +24,11 @@ class ThemeSettingsRepository {
     
     try {
       final Map<String, dynamic> map = json.decode(jsonStr) as Map<String, dynamic>;
-      return ThemeSettings.fromMap(map);
+      final loaded = ThemeSettings.fromMap(map);
+      if (_isLegacyTealGold(loaded)) {
+        return ThemeSettings.defaultSettings;
+      }
+      return loaded;
     } catch (e) {
       // Si hay error al parsear, retornar valores por defecto
       return ThemeSettings.defaultSettings;
@@ -59,5 +63,10 @@ class ThemeSettingsRepository {
   Future<bool> hasCustomTheme() async {
     await _ensureInitialized();
     return _prefs!.containsKey(_themeKey);
+  }
+
+  bool _isLegacyTealGold(ThemeSettings settings) {
+    return settings.primaryColor.value == 0xFF00796B &&
+        settings.accentColor.value == 0xFFD4AF37;
   }
 }

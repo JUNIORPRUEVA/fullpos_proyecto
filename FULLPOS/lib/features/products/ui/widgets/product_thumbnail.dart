@@ -98,6 +98,19 @@ class ProductThumbnail extends StatelessWidget {
               )
             : null,
         color: shouldShowImage ? Colors.grey.shade100 : bgColor,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.white24,
+            blurRadius: 6,
+            offset: const Offset(-1, -1),
+            spreadRadius: -2,
+          ),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(

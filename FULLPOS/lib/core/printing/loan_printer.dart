@@ -22,7 +22,7 @@ class LoanPrinter {
     final shouldFallback =
         header.isEmpty ||
       headerUpper == 'FULLTECH, SRL' ||
-        headerUpper == 'MI NEGOCIO';
+        headerUpper == 'FULLPOS';
     if (shouldFallback && business.isNotEmpty) {
       return business;
     }

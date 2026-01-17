@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -20,11 +18,11 @@ class BrandedLoadingView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final business = ref.watch(businessSettingsProvider);
-    final businessName = business.businessName.isNotEmpty
-        ? business.businessName
-        : 'MI NEGOCIO';
-    final logoPath = business.logoPath;
-    final hasLogo = logoPath != null && File(logoPath).existsSync();
+    final brandName = 'FULLPOS';
+    final businessName =
+        business.businessName.isNotEmpty ? business.businessName : brandName;
+    final showBusinessTag =
+        businessName.trim().isNotEmpty && businessName != brandName;
 
     final content = Center(
       child: Column(
@@ -45,17 +43,15 @@ class BrandedLoadingView extends ConsumerWidget {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
-              child: hasLogo
-                  ? Image.file(File(logoPath), fit: BoxFit.cover)
-                  : Image.asset(
-                      'assets/imagen/app.icon.png',
-                      fit: BoxFit.cover,
-                    ),
+              child: Image.asset(
+                'assets/imagen/app.icon.png',
+                fit: BoxFit.cover,
+              ),
             ),
           ),
           const SizedBox(height: AppSizes.spaceL),
           Text(
-            '$businessName POS',
+            brandName,
             style: const TextStyle(
               color: AppColors.gold,
               fontSize: 38,
@@ -64,6 +60,17 @@ class BrandedLoadingView extends ConsumerWidget {
             ),
             textAlign: TextAlign.center,
           ),
+          if (showBusinessTag) ...[
+            const SizedBox(height: AppSizes.spaceXS),
+            Text(
+              'para $businessName',
+              style: TextStyle(
+                color: AppColors.textLight.withOpacity(0.82),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           const SizedBox(height: AppSizes.spaceXL * 2),
           const CircularProgressIndicator(color: AppColors.gold),
           const SizedBox(height: AppSizes.spaceL),

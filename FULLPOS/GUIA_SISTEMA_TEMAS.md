@@ -2,7 +2,7 @@
 
 ## 📋 Descripción General
 
-Tu aplicación LOS NILKAS POS ahora cuenta con un sistema de temas completamente **refactorizado y configurable** que incluye:
+Tu aplicación FULLPOS POS ahora cuenta con un sistema de temas completamente **refactorizado y configurable** que incluye:
 
 ✅ **3 temas predefinidos** completamente configurados  
 ✅ **AppBar y todos los componentes** responden al tema  
@@ -135,7 +135,7 @@ final themeDataProvider = Provider(...); // Retorna ThemeData
 Actualizado para usar el nuevo provider:
 
 ```dart
-class LosNilkasApp extends ConsumerWidget {
+class LosFULLPOSApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeData = ref.watch(themeDataProvider);

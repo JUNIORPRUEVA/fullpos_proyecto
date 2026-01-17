@@ -212,6 +212,69 @@ class StockRepository {
     return getByProductId(productId, limit: limit);
   }
 
+  /// Historial enriquecido (producto + usuario) con filtros opcionales
+  Future<List<StockMovementDetail>> getDetailedHistory({
+    int? productId,
+    StockMovementType? type,
+    DateTime? from,
+    DateTime? to,
+    int limit = 100,
+  }) async {
+    final db = await AppDb.database;
+
+    final where = <String>[];
+    final whereArgs = <dynamic>[];
+
+    if (productId != null) {
+      where.add('sm.product_id = ?');
+      whereArgs.add(productId);
+    }
+    if (type != null) {
+      where.add('sm.type = ?');
+      whereArgs.add(type.value);
+    }
+    if (from != null) {
+      where.add('sm.created_at_ms >= ?');
+      whereArgs.add(from.millisecondsSinceEpoch);
+    }
+    if (to != null) {
+      where.add('sm.created_at_ms <= ?');
+      whereArgs.add(to.millisecondsSinceEpoch);
+    }
+
+    final rows = await db.rawQuery(
+      '''
+      SELECT 
+        sm.*, 
+        p.name AS product_name,
+        p.code AS product_code,
+        p.stock AS product_stock,
+        u.display_name AS user_display_name,
+        u.username AS user_username
+      FROM ${DbTables.stockMovements} sm
+      LEFT JOIN ${DbTables.products} p ON sm.product_id = p.id
+      LEFT JOIN ${DbTables.users} u ON sm.user_id = u.id
+      ${where.isNotEmpty ? 'WHERE ${where.join(' AND ')}' : ''}
+      ORDER BY sm.created_at_ms DESC
+      LIMIT ?
+    ''',
+      [...whereArgs, limit],
+    );
+
+    return rows
+        .map(
+          (row) => StockMovementDetail(
+            movement: StockMovementModel.fromMap(row),
+            productName: row['product_name'] as String?,
+            productCode: row['product_code'] as String?,
+            currentStock: (row['product_stock'] as num?)?.toDouble(),
+            userDisplayName: row['user_display_name'] as String?,
+            userUsername: row['user_username'] as String?,
+          ),
+        )
+        .toList();
+  }
+
   /// Cuenta los movimientos
   Future<int> count({
     int? productId,
@@ -255,6 +318,55 @@ class StockRepository {
     );
 
     return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Obtiene sumarios rヮpidos de movimientos (entradas, salidas, ajustes)
+  Future<StockSummary> summarize({
+    int? productId,
+    StockMovementType? type,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final db = await AppDb.database;
+
+    final where = <String>[];
+    final whereArgs = <dynamic>[];
+
+    if (productId != null) {
+      where.add('product_id = ?');
+      whereArgs.add(productId);
+    }
+    if (type != null) {
+      where.add('type = ?');
+      whereArgs.add(type.value);
+    }
+    if (from != null) {
+      where.add('created_at_ms >= ?');
+      whereArgs.add(from.millisecondsSinceEpoch);
+    }
+    if (to != null) {
+      where.add('created_at_ms <= ?');
+      whereArgs.add(to.millisecondsSinceEpoch);
+    }
+
+    final result = await db.rawQuery('''
+      SELECT
+        SUM(CASE WHEN type = 'in' THEN quantity ELSE 0 END) AS total_inputs,
+        SUM(CASE WHEN type = 'out' THEN quantity ELSE 0 END) AS total_outputs,
+        SUM(CASE WHEN type = 'adjust' THEN quantity ELSE 0 END) AS total_adjustments,
+        COUNT(*) AS movements_count
+      FROM ${DbTables.stockMovements}
+      ${where.isNotEmpty ? 'WHERE ${where.join(' AND ')}' : ''}
+    ''', whereArgs);
+
+    final row = result.isNotEmpty ? result.first : <String, Object?>{};
+
+    return StockSummary(
+      totalInputs: (row['total_inputs'] as num?)?.toDouble() ?? 0,
+      totalOutputs: (row['total_outputs'] as num?)?.toDouble() ?? 0,
+      totalAdjustments: (row['total_adjustments'] as num?)?.toDouble() ?? 0,
+      movementsCount: (row['movements_count'] as num?)?.toInt() ?? 0,
+    );
   }
 
   /// Elimina movimientos antiguos (limpieza de datos)

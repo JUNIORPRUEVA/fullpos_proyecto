@@ -2,7 +2,7 @@
 
 ## 🎯 Tu Aplicación Está Lista para Producción
 
-Tu aplicación **Nilkas POS v1.0** ha sido compilada y empaquetada exitosamente para distribución en Windows.
+Tu aplicación **FULLPOS v1.0** ha sido compilada y empaquetada exitosamente para distribución en Windows.
 
 ---
 
@@ -10,7 +10,7 @@ Tu aplicación **Nilkas POS v1.0** ha sido compilada y empaquetada exitosamente 
 
 ### **Archivo Principal (Recomendado)**
 ```
-C:\Users\PC\Desktop\nilkas\Nilkas_POS_v1.0.zip
+C:\Users\PC\Desktop\nilkas\FULLPOS_v1.0.zip
 ```
 - ✅ **Tamaño:** 40.56 MB (comprimido)
 - ✅ **Incluye:** Aplicación completa + documentación
@@ -30,7 +30,7 @@ C:\Users\PC\Desktop\nilkas\release_production\
 ### Opción 1: Usando Explorer
 1. Abre el **Explorador de Archivos**
 2. Navega a: `C:\Users\PC\Desktop\nilkas\`
-3. Busca el archivo: `Nilkas_POS_v1.0.zip`
+3. Busca el archivo: `FULLPOS_v1.0.zip`
 4. Haz clic derecho → "Enviar a" → "Carpeta comprimida"
 5. O simplemente descarga el ZIP existente
 
@@ -40,7 +40,7 @@ C:\Users\PC\Desktop\nilkas\release_production\
 cd C:\Users\PC\Desktop\nilkas\
 
 # El archivo ZIP está listo
-Get-Item "Nilkas_POS_v1.0.zip" | Select-Object FullName, Length
+Get-Item "FULLPOS_v1.0.zip" | Select-Object FullName, Length
 ```
 
 ---
@@ -48,7 +48,7 @@ Get-Item "Nilkas_POS_v1.0.zip" | Select-Object FullName, Length
 ## 📋 CONTENIDO DEL PAQUETE
 
 ```
-Nilkas_POS_v1.0.zip (40.56 MB)
+FULLPOS_v1.0.zip (40.56 MB)
 │
 ├── release_production/
 │   │
@@ -74,7 +74,7 @@ Nilkas_POS_v1.0.zip (40.56 MB)
 │   └── 📁 packages/             [Librerías adicionales]
 │       └── ...
 │
-└── Nilkas_POS_v1.0.zip          [Este archivo comprimido]
+└── FULLPOS_v1.0.zip          [Este archivo comprimido]
 ```
 
 ---
@@ -85,7 +85,7 @@ Nilkas_POS_v1.0.zip (40.56 MB)
 
 **Opción A: Instalación Asistida** (Recomendado)
 ```
-1. Descomprime Nilkas_POS_v1.0.zip
+1. Descomprime FULLPOS_v1.0.zip
 2. Haz doble clic en INSTALL.bat
 3. Sigue las instrucciones en pantalla
 4. Accede desde el Menú Inicio o Escritorio
@@ -93,7 +93,7 @@ Nilkas_POS_v1.0.zip (40.56 MB)
 
 **Opción B: Instalación Manual**
 ```
-1. Descomprime Nilkas_POS_v1.0.zip
+1. Descomprime FULLPOS_v1.0.zip
 2. Copia la carpeta release_production a tu PC
 3. Crea un acceso directo a nilkas.exe
 4. Ejecuta la aplicación
@@ -101,7 +101,7 @@ Nilkas_POS_v1.0.zip (40.56 MB)
 
 **Opción C: Ejecución Directa**
 ```
-1. Descomprime Nilkas_POS_v1.0.zip
+1. Descomprime FULLPOS_v1.0.zip
 2. Haz doble clic en nilkas.exe
 3. ¡Listo! La app se ejecutará inmediatamente
 ```
@@ -112,7 +112,7 @@ Nilkas_POS_v1.0.zip (40.56 MB)
 
 | Atributo | Valor |
 |----------|-------|
-| **Nombre** | Nilkas POS v1.0 |
+| **Nombre** | FULLPOS v1.0 |
 | **Plataforma** | Windows 10/11 64-bit |
 | **Tipo de Build** | Release (Optimizado) |
 | **Tamaño Ejecutable** | 161 KB |
@@ -199,7 +199,7 @@ Si encuentras problemas:
 
 ## 🎯 PRÓXIMOS PASOS
 
-1. ✅ Descarga `Nilkas_POS_v1.0.zip`
+1. ✅ Descarga `FULLPOS_v1.0.zip`
 2. ✅ Distribúyelo a tus usuarios
 3. ✅ Cada usuario extrae y ejecuta INSTALL.bat
 4. ✅ Completa la configuración inicial
@@ -220,4 +220,4 @@ Si encuentras problemas:
 
 **¡Tu aplicación está lista para producción!**
 
-Archivo descargable: `C:\Users\PC\Desktop\nilkas\Nilkas_POS_v1.0.zip` (40.56 MB)
+Archivo descargable: `C:\Users\PC\Desktop\nilkas\FULLPOS_v1.0.zip` (40.56 MB)

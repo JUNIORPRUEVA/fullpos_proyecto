@@ -66,7 +66,13 @@ export async function approveOverride(body: {
 
   try {
     const [request, tokenRecord] = await prisma.$transaction(async (trx) => {
-      const request = await trx.overrideRequest.update({
+      const request = await trx.overrideRequest.findFirst({
+        where: { id: body.requestId, companyId: body.companyId },
+      });
+      if (!request) throw new Error('Solicitud no encontrada');
+      if (request.status !== 'pending') throw new Error('Solicitud ya resuelta');
+
+      const updated = await trx.overrideRequest.update({
         where: { id: body.requestId },
         data: {
           status: 'approved',
@@ -80,35 +86,35 @@ export async function approveOverride(body: {
       const tokenRecord = await trx.overrideToken.create({
         data: {
           companyId: body.companyId,
-          actionCode: request.actionCode,
-          resourceType: request.resourceType,
-          resourceId: request.resourceId,
+          actionCode: updated.actionCode,
+          resourceType: updated.resourceType,
+          resourceId: updated.resourceId,
           tokenHash,
           method: 'remote',
           nonce: randomToken(8),
-          requestedById: request.requestedById,
+          requestedById: updated.requestedById,
           approvedById: body.approvedById,
           expiresAt,
-          terminalId: request.terminalId,
-          requestId: request.id,
+          terminalId: updated.terminalId,
+          requestId: updated.id,
         },
       });
 
       await trx.auditLog.create({
         data: {
           companyId: body.companyId,
-          actionCode: request.actionCode,
-          resourceType: request.resourceType,
-          resourceId: request.resourceId,
-          requestedById: request.requestedById,
+          actionCode: updated.actionCode,
+          resourceType: updated.resourceType,
+          resourceId: updated.resourceId,
+          requestedById: updated.requestedById,
           approvedById: body.approvedById,
           method: 'remote',
           result: 'approved',
-          terminalId: request.terminalId,
+          terminalId: updated.terminalId,
         },
       });
 
-      return [request, tokenRecord] as const;
+      return [updated, tokenRecord] as const;
     });
 
     return {
@@ -200,4 +206,25 @@ export async function getAudit(companyId: number, limit = 100) {
   });
 
   return audits;
+}
+
+export async function getOverrideRequests(params: {
+  companyId: number;
+  status?: string;
+  limit?: number;
+}) {
+  const requests = await prisma.overrideRequest.findMany({
+    where: {
+      companyId: params.companyId,
+      status: params.status,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: params.limit ?? 50,
+    include: {
+      requestedBy: { select: { id: true, username: true, displayName: true } },
+      approvedBy: { select: { id: true, username: true, displayName: true } },
+    },
+  });
+
+  return requests;
 }

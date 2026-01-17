@@ -1,14 +1,40 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/security/security_config.dart';
+
 class BarcodeInfoDialog extends StatelessWidget {
-  const BarcodeInfoDialog({super.key});
+  final SecurityConfig? config;
+  final String? terminalId;
+
+  const BarcodeInfoDialog({
+    super.key,
+    this.config,
+    this.terminalId,
+  });
+
+  String _escapeSuffix(String value) {
+    if (value.isEmpty) return '(vacio)';
+    return value
+        .replaceAll('\n', '\\n')
+        .replaceAll('\r', '\\r')
+        .replaceAll('\t', '\\t');
+  }
 
   @override
   Widget build(BuildContext context) {
+    final effectiveConfig = config;
+    final isEnabled = effectiveConfig?.scannerEnabled ?? false;
+    final prefix = (effectiveConfig?.scannerPrefix ?? '').trim();
+    final suffix = _escapeSuffix(effectiveConfig?.scannerSuffix ?? '\n');
+    final timeout = effectiveConfig?.scannerTimeoutMs;
+    final terminal = terminalId?.trim().isNotEmpty == true
+        ? terminalId!
+        : 'No asignada';
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 320),
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 360),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -25,14 +51,14 @@ class BarcodeInfoDialog extends StatelessWidget {
               child: Row(
                 children: [
                   const Icon(
-                    Icons.qr_code_scanner,
+                    Icons.barcode_reader,
                     color: Colors.white,
                     size: 28,
                   ),
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text(
-                      'Escáner / Código de barras',
+                      'Lector de codigo de barras',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 20,
@@ -57,10 +83,10 @@ class BarcodeInfoDialog extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.orange.shade50,
+                        color: Colors.blue.shade50,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Colors.orange.shade200,
+                          color: Colors.blue.shade200,
                           width: 2,
                         ),
                       ),
@@ -68,13 +94,15 @@ class BarcodeInfoDialog extends StatelessWidget {
                         children: [
                           Icon(
                             Icons.info_outline,
-                            color: Colors.orange.shade700,
+                            color: Colors.blue.shade700,
                             size: 32,
                           ),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Text(
-                              'Todavía no está construida esta parte. Si desea la construcción de la misma debe hablar con el creador de esta app.',
+                              'Conecta el lector y escanea el codigo en la pantalla de ventas. '
+                              'El lector debe funcionar como teclado y enviar Enter al final. '
+                              'Configura esto en Ajustes > Seguridad y Overrides > Scanner.',
                               style: TextStyle(
                                 fontSize: 16,
                                 color: Colors.grey.shade800,
@@ -96,38 +124,23 @@ class BarcodeInfoDialog extends StatelessWidget {
                           width: 2,
                         ),
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.phone,
-                            color: Colors.teal.shade700,
-                            size: 28,
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Contacto',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.teal.shade700,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                const Text(
-                                  'Tel: 8295319442\nJunior Lopez',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                    height: 1.4,
-                                  ),
-                                ),
-                              ],
+                          Text(
+                            'Estado y configuracion',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.teal.shade700,
                             ),
                           ),
+                          const SizedBox(height: 8),
+                          Text('Terminal: $terminal'),
+                          Text('Scanner: ${isEnabled ? 'Habilitado' : 'Deshabilitado'}'),
+                          Text('Prefijo: ${prefix.isEmpty ? 'Ninguno' : prefix}'),
+                          Text('Sufijo: $suffix'),
+                          if (timeout != null) Text('Timeout: ${timeout}ms'),
                         ],
                       ),
                     ),

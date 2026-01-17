@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 /// Modelo de configuración del negocio con todas las opciones configurables
@@ -16,6 +17,8 @@ class BusinessSettings {
   final String? rnc; // Registro Nacional de Contribuyentes
   final String? slogan;
   final String? website;
+  final String? instagramUrl;
+  final String? facebookUrl;
 
   // Configuraciones de préstamos
   final double defaultInterestRate; // Tasa de interés por defecto (%)
@@ -66,7 +69,7 @@ class BusinessSettings {
 
   BusinessSettings({
     this.id = 1,
-    this.businessName = 'MI NEGOCIO',
+    this.businessName = 'FULLPOS',
     this.logoPath,
     this.phone,
     this.phone2,
@@ -76,6 +79,8 @@ class BusinessSettings {
     this.rnc,
     this.slogan,
     this.website,
+    this.instagramUrl,
+    this.facebookUrl,
     this.defaultInterestRate = 5.0,
     this.defaultLateFeeRate = 2.0,
     this.defaultLoanTermDays = 30,
@@ -119,7 +124,7 @@ class BusinessSettings {
   factory BusinessSettings.fromMap(Map<String, dynamic> map) {
     return BusinessSettings(
       id: map['id'] as int? ?? 1,
-      businessName: map['business_name'] as String? ?? 'MI NEGOCIO',
+      businessName: map['business_name'] as String? ?? 'FULLPOS',
       logoPath: map['logo_path'] as String?,
       phone: map['phone'] as String?,
       phone2: map['phone2'] as String?,
@@ -129,6 +134,8 @@ class BusinessSettings {
       rnc: map['rnc'] as String?,
       slogan: map['slogan'] as String?,
       website: map['website'] as String?,
+      instagramUrl: map['instagram_url'] as String?,
+      facebookUrl: map['facebook_url'] as String?,
       defaultInterestRate:
           (map['default_interest_rate'] as num?)?.toDouble() ?? 5.0,
       defaultLateFeeRate:
@@ -202,6 +209,8 @@ class BusinessSettings {
       'rnc': rnc,
       'slogan': slogan,
       'website': website,
+      'instagram_url': instagramUrl,
+      'facebook_url': facebookUrl,
       'default_interest_rate': defaultInterestRate,
       'default_late_fee_rate': defaultLateFeeRate,
       'default_loan_term_days': defaultLoanTermDays,
@@ -258,6 +267,8 @@ class BusinessSettings {
     String? rnc,
     String? slogan,
     String? website,
+    String? instagramUrl,
+    String? facebookUrl,
     double? defaultInterestRate,
     double? defaultLateFeeRate,
     int? defaultLoanTermDays,
@@ -305,6 +316,8 @@ class BusinessSettings {
       rnc: rnc ?? this.rnc,
       slogan: slogan ?? this.slogan,
       website: website ?? this.website,
+      instagramUrl: instagramUrl ?? this.instagramUrl,
+      facebookUrl: facebookUrl ?? this.facebookUrl,
       defaultInterestRate: defaultInterestRate ?? this.defaultInterestRate,
       defaultLateFeeRate: defaultLateFeeRate ?? this.defaultLateFeeRate,
       defaultLoanTermDays: defaultLoanTermDays ?? this.defaultLoanTermDays,
@@ -369,6 +382,8 @@ class BusinessSettings {
         other.rnc == rnc &&
         other.slogan == slogan &&
         other.website == website &&
+        other.instagramUrl == instagramUrl &&
+        other.facebookUrl == facebookUrl &&
         other.defaultInterestRate == defaultInterestRate &&
         other.defaultLateFeeRate == defaultLateFeeRate &&
         other.defaultLoanTermDays == defaultLoanTermDays &&
@@ -417,6 +432,8 @@ class BusinessSettings {
       rnc,
       slogan,
       website,
+      instagramUrl,
+      facebookUrl,
       defaultInterestRate,
       defaultLateFeeRate,
       defaultLoanTermDays,

@@ -11,6 +11,7 @@ import '../features/clients/ui/clients_page.dart';
 import '../features/loans/ui/loans_page.dart';
 import '../features/products/ui/add_stock_page.dart';
 import '../features/products/ui/products_page.dart';
+import '../features/products/ui/stock_history_page.dart';
 import '../features/purchases/ui/purchase_order_create_auto_page.dart';
 import '../features/purchases/ui/purchase_order_create_manual_page.dart';
 import '../features/purchases/ui/purchase_order_receive_page.dart';
@@ -72,6 +73,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return fallback;
       }
       if (path == '/products' && !permissions.canViewProducts) return fallback;
+      if (path == '/products/history' && !permissions.canViewProducts) {
+        return fallback;
+      }
       if (path.startsWith('/products/add-stock') &&
           !permissions.canAdjustStock) {
         return fallback;
@@ -109,10 +113,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ShellRoute(
         builder: (context, state, child) => AppShell(child: child),
         routes: [
-          GoRoute(path: '/sales', builder: (context, state) => const SalesPage()),
+          GoRoute(
+            path: '/sales',
+            builder: (context, state) => const SalesPage(),
+          ),
           GoRoute(
             path: '/products',
             builder: (context, state) => const ProductsPage(),
+          ),
+          GoRoute(
+            path: '/products/history',
+            builder: (context, state) => const StockHistoryPage(),
           ),
           GoRoute(
             path: '/products/add-stock/:productId',
@@ -127,12 +138,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/clients',
             builder: (context, state) => const ClientsPage(),
           ),
-          GoRoute(path: '/loans', builder: (context, state) => const LoansPage()),
+          GoRoute(
+            path: '/loans',
+            builder: (context, state) => const LoansPage(),
+          ),
           GoRoute(
             path: '/reports',
             builder: (context, state) => const ReportsPage(),
           ),
-          GoRoute(path: '/tools', builder: (context, state) => const ToolsPage()),
+          GoRoute(
+            path: '/tools',
+            builder: (context, state) => const ToolsPage(),
+          ),
           GoRoute(path: '/ncf', builder: (context, state) => const NcfPage()),
           GoRoute(
             path: '/settings',
@@ -160,7 +177,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/sales-list',
             builder: (context, state) => const SalesListPage(),
           ),
-          GoRoute(path: '/quotes', builder: (context, state) => const QuotesPage()),
+          GoRoute(
+            path: '/quotes',
+            builder: (context, state) => const QuotesPage(),
+          ),
           GoRoute(
             path: '/quotes-list',
             builder: (context, state) => const QuotesPage(),
@@ -181,7 +201,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/credits-list',
             builder: (context, state) => const CreditsPage(),
           ),
-          GoRoute(path: '/cash', builder: (context, state) => const CashBoxPage()),
+          GoRoute(
+            path: '/cash',
+            builder: (context, state) => const CashBoxPage(),
+          ),
 
           // Compras / Órdenes de compra
           GoRoute(

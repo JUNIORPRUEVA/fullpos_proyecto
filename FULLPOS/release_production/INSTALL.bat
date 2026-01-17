@@ -23,7 +23,7 @@ echo ✅ Ejecutando como Administrador...
 echo.
 
 REM Crear carpeta de instalación
-set "INSTALL_DIR=%ProgramFiles%\Nilkas POS"
+set "INSTALL_DIR=%ProgramFiles%\FULLPOS"
 set "DATA_DIR=%APPDATA%\nilkas"
 
 echo 📂 Ruta de instalación: %INSTALL_DIR%
@@ -67,7 +67,7 @@ echo 🔗 Creando accesos directos...
 
 REM Crear acceso directo en escritorio
 set "DESKTOP=%USERPROFILE%\Desktop"
-set "SHORTCUT=%DESKTOP%\Nilkas POS.lnk"
+set "SHORTCUT=%DESKTOP%\FULLPOS.lnk"
 
 powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%SHORTCUT%'); $Shortcut.TargetPath = '%INSTALL_DIR%\nilkas.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%INSTALL_DIR%\nilkas.exe'; $Shortcut.Save()" 2>nul
 
@@ -79,11 +79,11 @@ if exist "%SHORTCUT%" (
 
 REM Crear acceso directo en inicio rápido (Menú Inicio)
 set "START_MENU=%APPDATA%\Microsoft\Windows\Start Menu\Programs"
-if not exist "%START_MENU%\Nilkas" mkdir "%START_MENU%\Nilkas"
+if not exist "%START_MENU%\FULLPOS" mkdir "%START_MENU%\FULLPOS"
 
-powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%START_MENU%\Nilkas\Nilkas POS.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\nilkas.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%INSTALL_DIR%\nilkas.exe'; $Shortcut.Save()" 2>nul
+powershell -Command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut('%START_MENU%\FULLPOS\FULLPOS.lnk'); $Shortcut.TargetPath = '%INSTALL_DIR%\nilkas.exe'; $Shortcut.WorkingDirectory = '%INSTALL_DIR%'; $Shortcut.IconLocation = '%INSTALL_DIR%\nilkas.exe'; $Shortcut.Save()" 2>nul
 
-if exist "%START_MENU%\Nilkas\Nilkas POS.lnk" (
+if exist "%START_MENU%\FULLPOS\FULLPOS.lnk" (
     echo ✅ Acceso directo creado en Menú Inicio
 ) else (
     echo ⚠️  No se pudo crear acceso directo en Menú Inicio
@@ -93,7 +93,7 @@ echo.
 echo ✨ INSTALACIÓN COMPLETADA
 echo.
 echo 📌 Próximos pasos:
-echo    1. Busca "Nilkas POS" en el Menú Inicio o tu Escritorio
+echo    1. Busca "FULLPOS" en el Menú Inicio o tu Escritorio
 echo    2. Haz clic en el icono para ejecutar la aplicación
 echo    3. Completa la configuración inicial
 echo    4. ¡Comienza a usar tu sistema POS!

@@ -25,10 +25,12 @@ class AppShellScaffold extends StatelessWidget {
 
     final navItems = [
       _NavItem(icon: Icons.dashboard_outlined, label: 'Dashboard', route: '/dashboard'),
+      _NavItem(icon: Icons.verified_user_outlined, label: 'Autorizaciones', route: '/overrides'),
       _NavItem(icon: Icons.inventory_2_outlined, label: 'Productos', route: '/products'),
       _NavItem(icon: Icons.list_alt_outlined, label: 'Ventas', route: '/sales/list'),
       _NavItem(icon: Icons.calendar_today_outlined, label: 'Ventas por día', route: '/sales/by-day'),
       _NavItem(icon: Icons.attach_money_outlined, label: 'Cierres', route: '/cash/closings'),
+      _NavItem(icon: Icons.settings_outlined, label: 'Configuración', route: '/settings'),
     ];
 
     Widget navBuilder() {

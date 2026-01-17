@@ -10,6 +10,8 @@ import '../data/business_settings_model.dart';
 import '../../../core/services/app_configuration_service.dart';
 import '../../../core/errors/error_handler.dart';
 import '../../../core/window/window_service.dart';
+import '../../sales/data/app_settings_model.dart';
+import '../../sales/data/settings_repository.dart';
 
 /// Página de configuración del negocio
 class BusinessSettingsPage extends ConsumerStatefulWidget {
@@ -28,6 +30,7 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
 
   BusinessSettings _draft = BusinessSettings.defaultSettings;
   String? _pendingLogoSourcePath;
+  AppSettingsModel? _appSettings;
 
   // Controladores de texto
   final _businessNameController = TextEditingController();
@@ -39,8 +42,8 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
   final _rncController = TextEditingController();
   final _sloganController = TextEditingController();
   final _websiteController = TextEditingController();
-  final _receiptHeaderController = TextEditingController();
-  final _receiptFooterController = TextEditingController();
+  final _instagramController = TextEditingController();
+  final _facebookController = TextEditingController();
   final _loanContractRepresentativeNameController = TextEditingController();
   final _loanContractRepresentativeCedulaController = TextEditingController();
 
@@ -50,9 +53,10 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
   @override
   void initState() {
     super.initState();
-    final idx = widget.initialTabIndex.clamp(0, 3);
-    _tabController = TabController(length: 4, vsync: this, initialIndex: idx);
+    final idx = widget.initialTabIndex.clamp(0, 2);
+    _tabController = TabController(length: 3, vsync: this, initialIndex: idx);
     _loadInitialValues(ref.read(businessSettingsProvider));
+    _loadAppSettings();
   }
 
   void _loadInitialValues(BusinessSettings settings) {
@@ -67,12 +71,47 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
     _rncController.text = settings.rnc ?? '';
     _sloganController.text = settings.slogan ?? '';
     _websiteController.text = settings.website ?? '';
-    _receiptHeaderController.text = settings.receiptHeader;
-    _receiptFooterController.text = settings.receiptFooter;
+    _instagramController.text = settings.instagramUrl ?? '';
+    _facebookController.text = settings.facebookUrl ?? '';
     _loanContractRepresentativeNameController.text =
         settings.loanContractRepresentativeName ?? '';
     _loanContractRepresentativeCedulaController.text =
         settings.loanContractRepresentativeCedula ?? '';
+  }
+
+  Future<void> _loadAppSettings() async {
+    try {
+      final settings = await SettingsRepository.getAppSettings();
+      if (!mounted) return;
+      setState(() => _appSettings = settings);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error cargando ajustes de ventas: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _updateItbisDefault(bool value) async {
+    final current = _appSettings;
+    if (current == null) return;
+    final updated = current.copyWith(itbisEnabledDefault: value);
+    try {
+      await SettingsRepository.updateAppSettings(updated);
+      if (!mounted) return;
+      setState(() => _appSettings = updated);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error guardando ITBIS por defecto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -87,8 +126,8 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
     _rncController.dispose();
     _sloganController.dispose();
     _websiteController.dispose();
-    _receiptHeaderController.dispose();
-    _receiptFooterController.dispose();
+    _instagramController.dispose();
+    _facebookController.dispose();
     _loanContractRepresentativeNameController.dispose();
     _loanContractRepresentativeCedulaController.dispose();
     super.dispose();
@@ -206,7 +245,7 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
       var updated = current.copyWith(
         businessName: _businessNameController.text.isNotEmpty
             ? _businessNameController.text
-            : 'MI NEGOCIO',
+            : 'FULLPOS',
         phone: _phoneController.text.isNotEmpty ? _phoneController.text : null,
         phone2: _phone2Controller.text.isNotEmpty
             ? _phone2Controller.text
@@ -223,8 +262,12 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
         website: _websiteController.text.isNotEmpty
             ? _websiteController.text
             : null,
-        receiptHeader: _receiptHeaderController.text,
-        receiptFooter: _receiptFooterController.text,
+        instagramUrl: _instagramController.text.isNotEmpty
+            ? _instagramController.text
+            : null,
+        facebookUrl: _facebookController.text.isNotEmpty
+            ? _facebookController.text
+            : null,
         loanContractRepresentativeName:
             _loanContractRepresentativeNameController.text.trim().isNotEmpty
                 ? _loanContractRepresentativeNameController.text.trim()
@@ -241,8 +284,6 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
         taxIncludedInPrices: _draft.taxIncludedInPrices,
         defaultCurrency: _draft.defaultCurrency,
         currencySymbol: _draft.currencySymbol,
-        showLogoOnReceipt: _draft.showLogoOnReceipt,
-        printReceiptAutomatically: _draft.printReceiptAutomatically,
       );
 
       if (clearLogoPath) {
@@ -363,7 +404,6 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
             Tab(icon: Icon(Icons.store), text: 'Empresa'),
             Tab(icon: Icon(Icons.percent), text: 'Préstamos'),
             Tab(icon: Icon(Icons.attach_money), text: 'Impuestos'),
-            Tab(icon: Icon(Icons.receipt), text: 'Recibos'),
           ],
         ),
       ),
@@ -373,7 +413,6 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
           _buildCompanyTab(settings),
           _buildLoansTab(settings),
           _buildTaxesTab(settings),
-          _buildReceiptsTab(settings),
         ],
       ),
     );
@@ -533,6 +572,28 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
                   label: 'Sitio Web',
                   icon: Icons.language,
                   hint: 'www.ejemplo.com',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildTextField(
+                  controller: _instagramController,
+                  label: 'Instagram',
+                  icon: Icons.photo_camera,
+                  hint: '@tuempresa',
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildTextField(
+                  controller: _facebookController,
+                  label: 'Facebook',
+                  icon: Icons.facebook,
+                  hint: '/tuempresa',
                 ),
               ),
             ],
@@ -761,6 +822,14 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
               });
             },
           ),
+          SwitchListTile(
+            title: const Text('ITBIS activo por defecto en ventas'),
+            subtitle: const Text(
+              'Define el estado inicial del switch de ITBIS en la pantalla de ventas.',
+            ),
+            value: _appSettings?.itbisEnabledDefault ?? true,
+            onChanged: _appSettings == null ? null : _updateItbisDefault,
+          ),
 
           const SizedBox(height: 32),
           const Divider(),
@@ -838,227 +907,6 @@ class _BusinessSettingsPageState extends ConsumerState<BusinessSettingsPage>
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReceiptsTab(BusinessSettings settings) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionTitle('CONFIGURACIÓN DE RECIBOS'),
-          const SizedBox(height: 24),
-
-          // Encabezado del recibo
-          TextField(
-            controller: _receiptHeaderController,
-            decoration: InputDecoration(
-              labelText: 'Encabezado del Recibo',
-              hintText: 'Texto que aparecerá en la parte superior del recibo',
-              prefixIcon: const Icon(Icons.vertical_align_top),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            maxLines: 3,
-            onChanged: (_) => setState(() => _hasChanges = true),
-          ),
-          const SizedBox(height: 24),
-
-          // Pie del recibo
-          TextField(
-            controller: _receiptFooterController,
-            decoration: InputDecoration(
-              labelText: 'Pie del Recibo',
-              hintText: 'Texto que aparecerá al final del recibo',
-              prefixIcon: const Icon(Icons.vertical_align_bottom),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            maxLines: 3,
-            onChanged: (_) => setState(() => _hasChanges = true),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Opciones de recibo
-          SwitchListTile(
-            title: const Text('Mostrar logo en recibos'),
-            subtitle: const Text(
-              'El logo aparecerá en la parte superior del recibo',
-            ),
-            value: settings.showLogoOnReceipt,
-            onChanged: (value) {
-              setState(() {
-                _draft = _draft.copyWith(showLogoOnReceipt: value);
-                _hasChanges = true;
-              });
-            },
-          ),
-
-          SwitchListTile(
-            title: const Text('Imprimir automáticamente'),
-            subtitle: const Text(
-              'El recibo se imprimirá automáticamente al completar una venta',
-            ),
-            value: settings.printReceiptAutomatically,
-            onChanged: (value) {
-              setState(() {
-                _draft = _draft.copyWith(printReceiptAutomatically: value);
-                _hasChanges = true;
-              });
-            },
-          ),
-
-          const SizedBox(height: 32),
-
-          // Vista previa
-          _buildSectionTitle('VISTA PREVIA DEL RECIBO'),
-          const SizedBox(height: 16),
-          _buildReceiptPreview(settings),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReceiptPreview(BusinessSettings settings) {
-    return Container(
-      width: 300,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(20),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // Logo
-          if (settings.showLogoOnReceipt && settings.logoPath != null)
-            Container(
-              width: 80,
-              height: 80,
-              margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                image: File(settings.logoPath!).existsSync()
-                    ? DecorationImage(
-                        image: FileImage(File(settings.logoPath!)),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-              ),
-            ),
-
-          // Nombre del negocio
-          Text(
-            settings.businessName,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            textAlign: TextAlign.center,
-          ),
-
-          if (settings.slogan?.isNotEmpty == true)
-            Text(
-              settings.slogan!,
-              style: TextStyle(
-                color: Colors.grey.shade600,
-                fontSize: 11,
-                fontStyle: FontStyle.italic,
-              ),
-              textAlign: TextAlign.center,
-            ),
-
-          if (settings.receiptHeader.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                settings.receiptHeader,
-                style: const TextStyle(fontSize: 11),
-                textAlign: TextAlign.center,
-              ),
-            ),
-
-          const Divider(height: 16),
-
-          // Info de contacto
-          if (settings.phone?.isNotEmpty == true)
-            Text(
-              'Tel: ${settings.phone}',
-              style: const TextStyle(fontSize: 10),
-            ),
-          if (settings.address?.isNotEmpty == true)
-            Text(
-              settings.address!,
-              style: const TextStyle(fontSize: 10),
-              textAlign: TextAlign.center,
-            ),
-          if (settings.rnc?.isNotEmpty == true)
-            Text('RNC: ${settings.rnc}', style: const TextStyle(fontSize: 10)),
-
-          const Divider(height: 16),
-
-          // Contenido de ejemplo
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Producto ejemplo',
-                      style: TextStyle(fontSize: 10),
-                    ),
-                    Text(
-                      '${settings.currencySymbol}100.00',
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  ],
-                ),
-                const Divider(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'TOTAL',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Text(
-                      '${settings.currencySymbol}100.00',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          const Divider(height: 16),
-
-          // Footer
-          if (settings.receiptFooter.isNotEmpty)
-            Text(
-              settings.receiptFooter,
-              style: const TextStyle(fontSize: 10),
-              textAlign: TextAlign.center,
-            ),
         ],
       ),
     );

@@ -1,16 +1,13 @@
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/services/app_configuration_service.dart';
 import '../../../core/db/app_db.dart';
 import 'package:printing/printing.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/printing/unified_ticket_printer.dart';
 import '../data/printer_settings_model.dart';
 import '../data/printer_settings_repository.dart';
-import '../../../core/session/ui_preferences.dart';
 import 'backup_settings_page.dart';
 import 'users_page.dart';
 import 'theme_settings_page.dart' as theme_page;
@@ -28,8 +25,6 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _posFullscreenEnabled = false;
-  bool _keyboardShortcutsEnabled = true;
   bool _isLoading = true;
 
   @override
@@ -39,57 +34,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _posFullscreenEnabled = prefs.getBool('pos_fullscreen') ?? false;
-      _isLoading = false;
-    });
-
-    final shortcutsEnabled = await UiPreferences.isKeyboardShortcutsEnabled();
-    if (mounted) {
-      setState(() => _keyboardShortcutsEnabled = shortcutsEnabled);
-    }
-  }
-
-  Future<void> _toggleFullscreen(bool value) async {
-    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Modo fullscreen solo disponible en Desktop'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('pos_fullscreen', value);
-
-    setState(() {
-      _posFullscreenEnabled = value;
-    });
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            value
-                ? '✅ Modo POS Activado - Usa Ctrl+Shift+F para salir'
-                : '✅ Modo POS Desactivado',
-          ),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-  }
-
-  Future<void> _toggleKeyboardShortcuts(bool value) async {
-    await UiPreferences.setKeyboardShortcutsEnabled(value);
-
-    setState(() {
-      _keyboardShortcutsEnabled = value;
-    });
+    if (!mounted) return;
+    setState(() => _isLoading = false);
   }
 
   @override
@@ -147,40 +93,34 @@ class _SettingsPageState extends State<SettingsPage> {
             padding: const EdgeInsets.all(16),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                int crossAxisCount = constraints.maxWidth > 1000
-                    ? 5
-                    : (constraints.maxWidth > 700 ? 4 : 3);
+                int crossAxisCount = constraints.maxWidth > 1200
+                    ? 6
+                    : (constraints.maxWidth > 950
+                        ? 5
+                        : (constraints.maxWidth > 700 ? 4 : 3));
 
                 return GridView.count(
                   crossAxisCount: crossAxisCount,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.4,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 1.9,
                   children: [
-                    // 1. Modo POS
-                    _buildSettingsCard(
-                      icon: Icons.fullscreen,
-                      title: 'MODO POS',
-                      subtitle: 'Fullscreen',
-                      color: Colors.teal,
-                      badge: _posFullscreenEnabled ? 'ON' : null,
-                      onTap: () => _showModoPosDialog(),
-                    ),
-
-                    // 2. Impresora
+                    // Impresora
                     _buildSettingsCard(
                       icon: Icons.print,
                       title: 'IMPRESORA',
                       subtitle: 'Tickets',
+                      description: 'Configura impresoras y prueba de impresión.',
                       color: Colors.orange,
                       onTap: () => _showPrinterDialog(),
                     ),
 
-                    // 3. Usuarios
+                    // Usuarios
                     _buildSettingsCard(
                       icon: Icons.people,
                       title: 'USUARIOS',
                       subtitle: 'Accesos',
+                      description: 'Roles, permisos y gestión de cuentas.',
                       color: Colors.blue,
                       onTap: () => _openUsersPage(),
                     ),
@@ -190,6 +130,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       icon: Icons.shield,
                       title: 'SEGURIDAD',
                       subtitle: 'Overrides',
+                      description: 'PIN, códigos locales y autorizaciones.',
                       color: Colors.green,
                       onTap: () => _openSecuritySettingsPage(),
                     ),
@@ -199,62 +140,57 @@ class _SettingsPageState extends State<SettingsPage> {
                       icon: Icons.cloud,
                       title: 'NUBE',
                       subtitle: 'Accesos & Owner',
+                      description: 'Sincronización y acceso del propietario.',
                       color: Colors.lightBlue,
                       onTap: () => _openCloudSettingsPage(),
                     ),
 
-                    // 4. Negocio
+                    // Negocio
                     _buildSettingsCard(
                       icon: Icons.store,
                       title: 'NEGOCIO',
                       subtitle: 'Empresa',
+                      description: 'Datos fiscales, contacto y monedas.',
                       color: Colors.purple,
                       onTap: () => _openBusinessSettingsPage(),
                     ),
 
-                    // 5. Impuestos
-                    _buildSettingsCard(
-                      icon: Icons.receipt_long,
-                      title: 'IMPUESTOS',
-                      subtitle: 'ITBIS/NCF',
-                      color: Colors.red,
-                      onTap: () => _openBusinessSettingsPage(
-                        tabIndex: 2,
-                      ), // Tab de impuestos
-                    ),
-
-                    // 6. Base de Datos
+                    // Backup
                     _buildSettingsCard(
                       icon: Icons.storage,
                       title: 'BACKUP',
                       subtitle: 'Datos',
+                      description: 'Respaldos y restauración del sistema.',
                       color: Colors.indigo,
                       onTap: () => _openBackupPage(),
                     ),
 
-                    // 7. Apariencia
+                    // Apariencia
                     _buildSettingsCard(
                       icon: Icons.palette,
                       title: 'TEMA',
                       subtitle: 'Colores',
+                      description: 'Personaliza colores y estilos visuales.',
                       color: Colors.pink,
                       onTap: () => _openThemeSettings(),
                     ),
 
-                    // 8. Acerca de
+                    // Acerca de
                     _buildSettingsCard(
                       icon: Icons.info,
                       title: 'ACERCA DE',
                       subtitle: 'v1.0.0',
+                      description: 'Información del sistema y atajos.',
                       color: Colors.grey,
                       onTap: () => _showAboutDialog(),
                     ),
 
-                    // 9. Logs / Soporte
+                    // Logs / Soporte
                     _buildSettingsCard(
                       icon: Icons.support_agent,
                       title: 'SOPORTE',
                       subtitle: 'Logs',
+                      description: 'Diagnósticos y registro de eventos.',
                       color: Colors.green,
                       onTap: () => _openLogsPage(),
                     ),
@@ -323,6 +259,7 @@ class _SettingsPageState extends State<SettingsPage> {
     required IconData icon,
     required String title,
     required String subtitle,
+    required String description,
     required Color color,
     String? badge,
     required VoidCallback onTap,
@@ -338,12 +275,12 @@ class _SettingsPageState extends State<SettingsPage> {
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: color.withOpacity(0.1),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+                color: color.withOpacity(0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
-            border: Border.all(color: color.withOpacity(0.15), width: 1),
+            border: Border.all(color: color.withOpacity(0.12), width: 1),
           ),
           child: Stack(
             children: [
@@ -391,6 +328,16 @@ class _SettingsPageState extends State<SettingsPage> {
                               color: Colors.grey.shade500,
                             ),
                           ),
+                          const SizedBox(height: 2),
+                          Text(
+                            description,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -435,178 +382,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  void _showModoPosDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: 400,
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.teal.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.fullscreen,
-                  color: Colors.teal,
-                  size: 40,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'MODO POS',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 24),
-
-              // Opciones
-              _buildOptionTile(
-                icon: Icons.fullscreen,
-                title: 'PANTALLA COMPLETA',
-                subtitle: 'Modo kiosk • Ctrl+Shift+F para salir',
-                value: _posFullscreenEnabled,
-                onChanged: (v) {
-                  _toggleFullscreen(v);
-                  Navigator.pop(context);
-                },
-              ),
-              const Divider(height: 24),
-              _buildOptionTile(
-                icon: Icons.keyboard,
-                title: 'ATAJOS DE TECLADO',
-                subtitle: 'F2: Buscar • F9: Pago • F12: Finalizar',
-                value: _keyboardShortcutsEnabled,
-                onChanged: (v) {
-                  _toggleKeyboardShortcuts(v);
-                  setState(() {});
-                },
-              ),
-
-              const SizedBox(height: 24),
-
-              // Botón ayuda
-              OutlinedButton.icon(
-                onPressed: () => _showShortcutsHelp(),
-                icon: const Icon(Icons.help_outline, size: 18),
-                label: const Text('VER TODOS LOS ATAJOS'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.teal,
-                  side: const BorderSide(color: Colors.teal),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Cerrar
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('CERRAR'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOptionTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: value
-                ? Colors.teal.withOpacity(0.15)
-                : Colors.grey.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, color: value ? Colors.teal : Colors.grey, size: 22),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-              Text(
-                subtitle,
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-              ),
-            ],
-          ),
-        ),
-        Switch(value: value, onChanged: onChanged, activeColor: Colors.teal),
-      ],
-    );
-  }
-
-  void _showShortcutsHelp() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.keyboard, color: Colors.teal),
-            const SizedBox(width: 8),
-            const Text('ATAJOS DE TECLADO'),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildShortcutSection('🌐 GLOBALES', [
-                'Ctrl+Shift+F • Toggle Fullscreen',
-                'Ctrl+Q • Cerrar App',
-                'ESC • Cerrar diálogos',
-              ]),
-              const SizedBox(height: 16),
-              _buildShortcutSection('🛒 VENTAS', [
-                'F2 • Enfocar Búsqueda',
-                'F3 • Seleccionar Cliente',
-                'F4 • Nuevo Cliente',
-                'F7 • Aplicar Descuento',
-                'F9 • Abrir Pago',
-                'F12 • Finalizar Venta',
-                '+ / - • Cambiar Cantidad',
-                'Ctrl+Backspace • Eliminar Item',
-              ]),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('CERRAR'),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildShortcutSection(String title, List<String> shortcuts) {
     return Column(
@@ -841,7 +616,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void _showAboutDialog() {
     final businessName = appConfigService.getBusinessName().trim().isNotEmpty
         ? appConfigService.getBusinessName().trim()
-        : 'MI NEGOCIO';
+        : 'FULLPOS';
     final year = DateTime.now().year;
 
     showDialog(
@@ -906,7 +681,47 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'ATAJOS',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildShortcutSection('GLOBALES', [
+                      'Ctrl+Shift+F - Pantalla completa',
+                      'Ctrl+Q - Cerrar app',
+                      'ESC - Cerrar diálogos',
+                    ]),
+                    const SizedBox(height: 12),
+                    _buildShortcutSection('VENTAS', [
+                      'F2 - Enfocar búsqueda',
+                      'F3 - Seleccionar cliente',
+                      'F4 - Nuevo cliente',
+                      'F7 - Aplicar descuento',
+                      'F9 - Abrir pago',
+                      'F12 - Finalizar venta',
+                      '+ / - - Cambiar cantidad',
+                      'Ctrl+Backspace - Eliminar item',
+                    ]),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
               Text(
                 '© $year $businessName',
                 style: TextStyle(color: Colors.grey.shade500, fontSize: 11),

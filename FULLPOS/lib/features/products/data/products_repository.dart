@@ -41,7 +41,6 @@ class ProductFilters {
 
 /// Repositorio para operaciones CRUD de Productos
 class ProductsRepository {
-
   void _validateRequiredForSave(ProductModel product) {
     final code = product.code.trim();
     final name = product.name.trim();
@@ -49,7 +48,8 @@ class ProductsRepository {
     final imageUrl = product.imageUrl?.trim();
     final placeholderType = product.placeholderType.toLowerCase();
     final placeholderColor = product.placeholderColorHex?.trim();
-    final hasImage = (imagePath != null && imagePath.isNotEmpty) ||
+    final hasImage =
+        (imagePath != null && imagePath.isNotEmpty) ||
         (imageUrl != null && imageUrl.isNotEmpty);
     final wantsColor = placeholderType == 'color';
 
@@ -80,8 +80,9 @@ class ProductsRepository {
   }
 
   ProductModel _withPlaceholderDefaults(ProductModel product) {
-    final normalizedType =
-        product.placeholderType.toLowerCase() == 'color' ? 'color' : 'image';
+    final normalizedType = product.placeholderType.toLowerCase() == 'color'
+        ? 'color'
+        : 'image';
     final color = (product.placeholderColorHex?.trim().isNotEmpty ?? false)
         ? product.placeholderColorHex!.trim()
         : ColorUtils.generateDeterministicColorHex(
@@ -89,20 +90,21 @@ class ProductsRepository {
             categoryId: product.categoryId,
           );
     final prefersColor = normalizedType == 'color';
-    final hasImage = (product.imagePath?.trim().isNotEmpty ?? false) ||
+    final hasImage =
+        (product.imagePath?.trim().isNotEmpty ?? false) ||
         (product.imageUrl?.trim().isNotEmpty ?? false);
 
     // Si el usuario eligio color pero dejo una imagen previa, respetamos la preferencia.
     // Si elige imagen pero no tiene una, forzamos color para evitar inconsistencias.
-    final effectiveType =
-        prefersColor ? 'color' : (hasImage ? 'image' : 'color');
+    final effectiveType = prefersColor
+        ? 'color'
+        : (hasImage ? 'image' : 'color');
 
     return product.copyWith(
       placeholderType: effectiveType,
       placeholderColorHex: color,
     );
   }
-
 
   Future<Directory> _ensureProductsImagesDir() async {
     final docsDir = await getApplicationDocumentsDirectory();
@@ -696,5 +698,22 @@ class ProductsRepository {
       0.0,
       (sum, product) => sum + (product.profit * product.stock),
     );
+  }
+
+  /// Calcula el total de unidades fヮsicas en inventario (solo activos)
+  Future<double> calculateTotalUnits() async {
+    final db = await AppDb.database;
+    final rows = await db.rawQuery('''
+      SELECT SUM(stock) AS total_units
+      FROM ${DbTables.products}
+      WHERE deleted_at_ms IS NULL AND is_active = 1
+    ''');
+    final total = rows.isNotEmpty ? rows.first['total_units'] as num? : null;
+    return (total ?? 0).toDouble();
+  }
+
+  /// Cuenta los productos activos (sin eliminados)
+  Future<int> countActive() async {
+    return count(filters: const ProductFilters(isActive: true));
   }
 }

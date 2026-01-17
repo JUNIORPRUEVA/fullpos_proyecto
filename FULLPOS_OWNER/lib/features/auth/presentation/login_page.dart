@@ -122,6 +122,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               )
                             : const Text('Ingresar'),
                       ),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: () => context.go('/settings'),
+                        icon: const Icon(Icons.cloud_outlined),
+                        label: const Text('Configurar nube'),
+                      ),
                     ],
                   ),
                 ),

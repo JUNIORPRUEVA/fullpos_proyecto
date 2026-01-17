@@ -1,10 +1,9 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../constants/app_sizes.dart';
 import '../utils/date_time_formatter.dart';
-import '../window/window_service.dart';
 import '../session/session_manager.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/cash/data/cash_repository.dart';
@@ -25,14 +24,15 @@ class Topbar extends ConsumerStatefulWidget {
 
 class _TopbarState extends ConsumerState<Topbar> {
   late Timer _timer;
+  // ignore: unused_field
   late Timer _cashTimer;
   StreamSubscription<void>? _sessionSub;
   DateTime _currentTime = DateTime.now();
   String? _username;
   String? _displayName;
-  String? _roleLabel;
 
   bool _canAccessCash = false;
+  // ignore: unused_field
   int? _openCashSessionId;
 
   @override
@@ -73,22 +73,12 @@ class _TopbarState extends ConsumerState<Topbar> {
     final displayName = await SessionManager.displayName();
     final role = await SessionManager.role();
 
-    String? roleLabel;
-    if (role == 'admin') {
-      roleLabel = 'Administrador';
-    } else if (role == 'cashier') {
-      roleLabel = 'Cajero';
-    } else if (role != null && role.trim().isNotEmpty) {
-      roleLabel = role;
-    }
-
     if (!mounted) return;
     setState(() {
       _username = username ?? 'Usuario';
       _displayName = (displayName != null && displayName.trim().isNotEmpty)
           ? displayName.trim()
           : null;
-      _roleLabel = roleLabel;
     });
   }
 
@@ -114,6 +104,7 @@ class _TopbarState extends ConsumerState<Topbar> {
     }
   }
 
+  // ignore: unused_element
   Future<void> _onCashPressed() async {
     // Re-validar estado al momento del click
     final sessionId = await CashRepository.getCurrentSessionId();
@@ -140,69 +131,11 @@ class _TopbarState extends ConsumerState<Topbar> {
     }
   }
 
-  Widget _buildCashButton() {
-    final isOpen = _openCashSessionId != null;
-    final settings = ref.watch(themeProvider);
-    final scheme = Theme.of(context).colorScheme;
-    final success = settings.successColor;
-    final error = settings.errorColor;
-    final statusColor = isOpen ? success : error;
-    final statusTextColor = Colors.black;
-    final statusBgColor = Colors.white;
-
-    return SizedBox(
-      height: 36,
-      child: ElevatedButton.icon(
-        onPressed: _onCashPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: scheme.secondary,
-          foregroundColor: Theme.of(context).colorScheme.onSecondary,
-          elevation: 4,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        icon: const Icon(Icons.point_of_sale, size: 18),
-        label: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Caja', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: statusBgColor,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: statusColor.withOpacity(0.95),
-                  width: 1.2,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isOpen ? Icons.lock_open : Icons.lock,
-                    size: 14,
-                    color: statusColor,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    isOpen ? 'Abierta' : 'Cerrada',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
-                      color: statusTextColor,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  Future<void> _logout(BuildContext context) async {
+    await SessionManager.logout();
+    if (context.mounted) {
+      context.go('/login');
+    }
   }
 
   @override
@@ -222,69 +155,103 @@ class _TopbarState extends ConsumerState<Topbar> {
         }
 
         Widget userControl() {
-          if (!isCompact) {
-            return Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSizes.paddingM,
-                vertical: AppSizes.paddingS,
-              ),
-              decoration: BoxDecoration(
-                color: scheme.secondary.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(AppSizes.radiusM),
-                border: Border.all(color: scheme.secondary, width: 1),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: settings.successColor,
-                      shape: BoxShape.circle,
+          final userLabel = (_displayName ?? _username ?? 'Usuario').trim();
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              PopupMenuButton<String>(
+                tooltip: 'Cuenta y configuración',
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppSizes.radiusM),
+                ),
+                onSelected: (value) {
+                  if (value == 'account') {
+                    context.go('/account');
+                  } else if (value == 'settings') {
+                    context.go('/settings');
+                  }
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem<String>(
+                    value: 'account',
+                    child: Row(
+                      children: const [
+                        Icon(Icons.person_outline),
+                        SizedBox(width: 8),
+                        Text('Usuario'),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: AppSizes.spaceS),
-                  Icon(Icons.person, size: 18, color: scheme.secondary),
-                  const SizedBox(width: AppSizes.spaceS),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  PopupMenuItem<String>(
+                    value: 'settings',
+                    child: Row(
+                      children: const [
+                        Icon(Icons.settings_outlined),
+                        SizedBox(width: 8),
+                        Text('Configuración'),
+                      ],
+                    ),
+                  ),
+                ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSizes.paddingM,
+                    vertical: AppSizes.paddingS,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.secondary.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(AppSizes.radiusM),
+                    border: Border.all(color: scheme.secondary, width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        _displayName ?? _username ?? 'Cargando...',
-                        style: TextStyle(
-                          color: scheme.secondary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: settings.fontFamily,
-                          height: 1.1,
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: settings.successColor,
+                          shape: BoxShape.circle,
                         ),
                       ),
-                      if (_roleLabel != null) ...[
-                        const SizedBox(height: 2),
+                      const SizedBox(width: AppSizes.spaceS),
+                      Icon(Icons.person, size: 18, color: scheme.secondary),
+                      const SizedBox(width: AppSizes.spaceS),
+                      Icon(
+                        Icons.settings_outlined,
+                        color: scheme.secondary.withOpacity(0.7),
+                        size: 16,
+                      ),
+                      const SizedBox(width: AppSizes.spaceS),
+                      if (!isCompact)
                         Text(
-                          _roleLabel!,
+                          userLabel.isNotEmpty ? userLabel : 'Usuario',
                           style: TextStyle(
-                            color: scheme.secondary.withOpacity(0.90),
-                            fontSize: 11,
+                            color: scheme.secondary,
+                            fontSize: 13,
                             fontWeight: FontWeight.w700,
                             fontFamily: settings.fontFamily,
                             height: 1.1,
                           ),
                         ),
-                      ],
+                      const SizedBox(width: AppSizes.spaceS),
+                      Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: scheme.secondary,
+                        size: 18,
+                      ),
                     ],
                   ),
-                ],
+                ),
               ),
-            );
-          }
-
-          final userLabel = (_displayName ?? _username ?? 'Usuario').trim();
-          return Tooltip(
-            message: userLabel.isNotEmpty ? userLabel : 'Usuario',
-            child: Icon(Icons.person, color: scheme.secondary),
+            ],
           );
         }
 
@@ -332,6 +299,19 @@ class _TopbarState extends ConsumerState<Topbar> {
                 width: 2,
               ),
             ),
+            boxShadow: const [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 12,
+                offset: Offset(0, 4),
+              ),
+              BoxShadow(
+                color: Colors.white24,
+                blurRadius: 8,
+                offset: Offset(0, -2),
+                spreadRadius: -1,
+              ),
+            ],
           ),
           padding: EdgeInsets.symmetric(
             horizontal: isCompact ? AppSizes.paddingM : AppSizes.paddingL,
@@ -376,3 +356,4 @@ class _TopbarState extends ConsumerState<Topbar> {
     );
   }
 }
+

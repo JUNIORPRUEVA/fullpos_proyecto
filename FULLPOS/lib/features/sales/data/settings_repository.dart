@@ -20,7 +20,7 @@ class SettingsRepository {
       final now = DateTime.now().millisecondsSinceEpoch;
       return BusinessInfoModel(
         id: null,
-        name: 'Mi Negocio',
+        name: 'FULLPOS',
         rnc: '',
         address: '',
         phone: '',
@@ -29,7 +29,21 @@ class SettingsRepository {
       );
     }
     
-    return BusinessInfoModel.fromMap(maps.first);
+    final info = BusinessInfoModel.fromMap(maps.first);
+    final hasCustomData = (info.phone ?? '').trim().isNotEmpty ||
+        (info.address ?? '').trim().isNotEmpty ||
+        (info.rnc ?? '').trim().isNotEmpty ||
+        (info.slogan ?? '').trim().isNotEmpty;
+    if (info.name.trim() == 'Mi Negocio' && !hasCustomData) {
+      final updated = info.copyWith(
+        name: 'FULLPOS',
+        updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+      );
+      await updateBusinessInfo(updated);
+      return updated;
+    }
+
+    return info;
   }
 
   /// Actualiza la información del negocio

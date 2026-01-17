@@ -1,5 +1,5 @@
 ═══════════════════════════════════════════════════════════════════
-   LOS NILKAS - SISTEMA PUNTO DE VENTA (POS)
+   FULLPOS - SISTEMA PUNTO DE VENTA (POS)
    Versión 1.0 - Enero 2026
 ═══════════════════════════════════════════════════════════════════
 
@@ -47,5 +47,5 @@ NOTAS IMPORTANTES
 - Mantener el sistema actualizado para mejor rendimiento
 
 ═══════════════════════════════════════════════════════════════════
-© 2026 Los Nilkas POS - Todos los derechos reservados
+© 2026 Los FULLPOS - Todos los derechos reservados
 ═══════════════════════════════════════════════════════════════════

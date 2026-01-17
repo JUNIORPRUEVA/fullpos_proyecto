@@ -1,15 +1,18 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_sizes.dart';
 import '../../../core/errors/error_handler.dart';
-import '../data/auth_repository.dart';
+import '../../../core/window/window_service.dart';
+import '../../settings/data/user_model.dart';
+import '../../settings/data/users_repository.dart';
 import '../../settings/providers/business_settings_provider.dart';
+import '../data/auth_repository.dart';
 
-/// Pantalla de login
+/// Pantalla de inicio de sesión con soporte de PIN opcional.
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
@@ -21,14 +24,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _pinController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _usePin = false;
   String? _errorMessage;
 
   @override
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
+    _pinController.dispose();
     super.dispose();
   }
 
@@ -43,17 +49,24 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     try {
       final username = _usernameController.text.trim();
       final password = _passwordController.text;
+      final pin = _pinController.text.trim();
 
-      final user = await AuthRepository.login(username, password);
+      UserModel? user;
+      if (_usePin && pin.isNotEmpty) {
+        user = await UsersRepository.verifyPin(username, pin);
+      } else {
+        user = await AuthRepository.login(username, password);
+      }
 
       if (!mounted) return;
 
       if (user != null) {
-        // Login exitoso, navegar al inicio
         context.go('/sales');
       } else {
         setState(() {
-          _errorMessage = 'Usuario o contraseña incorrectos';
+          _errorMessage = _usePin
+              ? 'PIN o usuario incorrecto'
+              : 'Usuario o contraseña incorrectos';
         });
       }
     } catch (e, st) {
@@ -77,11 +90,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final business = ref.watch(businessSettingsProvider);
-    final businessName = business.businessName.isNotEmpty
-        ? business.businessName
-        : 'MI NEGOCIO';
-    final logoPath = business.logoPath;
-    final hasLogo = logoPath != null && File(logoPath).existsSync();
+    final businessName =
+        business.businessName.isNotEmpty ? business.businessName : 'FULLPOS';
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -90,7 +100,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [AppColors.bgDark, AppColors.teal900],
+            colors: [AppColors.bgDark, AppColors.teal800],
           ),
         ),
         child: Center(
@@ -113,32 +123,29 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       children: [
                         // Logo
                         Container(
-                          width: 80,
-                          height: 80,
+                          width: 92,
+                          height: 92,
                           decoration: BoxDecoration(
-                            color: AppColors.teal700,
-                            borderRadius: BorderRadius.circular(20),
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(24),
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.teal700.withOpacity(0.3),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
+                                color: AppColors.teal900.withOpacity(0.28),
+                                blurRadius: 26,
+                                offset: const Offset(0, 12),
+                              ),
+                              BoxShadow(
+                                color: Colors.white.withOpacity(0.14),
+                                blurRadius: 12,
+                                offset: const Offset(-4, -4),
                               ),
                             ],
                           ),
-                          child: hasLogo
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Image.file(
-                                    File(logoPath),
-                                    fit: BoxFit.cover,
-                                  ),
-                                )
-                              : const Icon(
-                                  Icons.store_rounded,
-                                  color: Colors.white,
-                                  size: 40,
-                                ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.asset(
+                            'assets/imagen/app.icon.png',
+                            fit: BoxFit.cover,
+                          ),
                         ),
                         const SizedBox(height: 20),
 
@@ -155,10 +162,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Sistema de Punto de Venta',
+                          'Software punto de ventas',
                           style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 14,
+                            color: AppColors.textDarkMuted,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                         const SizedBox(height: 32),
@@ -233,6 +241,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           enabled: !_isLoading,
                           textInputAction: TextInputAction.next,
                         ),
+
                         const SizedBox(height: 16),
 
                         // Campo de contraseña
@@ -277,15 +286,58 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           ),
                           obscureText: _obscurePassword,
                           validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Ingrese una contraseña';
+                            if (!_usePin) {
+                              if (value == null || value.isEmpty) {
+                                return 'Ingrese una contraseña';
+                              }
                             }
                             return null;
                           },
-                          enabled: !_isLoading,
+                          enabled: !_isLoading && !_usePin,
                           onFieldSubmitted: (_) => _handleLogin(),
                         ),
-                        const SizedBox(height: 28),
+                        const SizedBox(height: 14),
+
+                        // PIN alternativo
+                        Row(
+                          children: [
+                            Checkbox(
+                              value: _usePin,
+                              onChanged: (v) =>
+                                  setState(() => _usePin = v ?? false),
+                              activeColor: AppColors.teal700,
+                            ),
+                            const Text('Iniciar con PIN'),
+                          ],
+                        ),
+                        TextFormField(
+                          controller: _pinController,
+                          enabled: _usePin && !_isLoading,
+                          decoration: InputDecoration(
+                            labelText: 'PIN de acceso',
+                            hintText: '4-6 dígitos',
+                            prefixIcon: const Icon(Icons.password),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            helperText:
+                                'Activa la casilla para usar PIN en lugar de contraseña',
+                          ),
+                          keyboardType: TextInputType.number,
+                          obscureText: true,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(6),
+                          ],
+                          validator: (_) {
+                            if (_usePin &&
+                                _pinController.text.trim().length < 4) {
+                              return 'PIN mínimo de 4 dígitos';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 22),
 
                         // Botón de login
                         SizedBox(
@@ -296,8 +348,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.teal700,
                               foregroundColor: Colors.white,
-                              disabledBackgroundColor: AppColors.teal700
-                                  .withOpacity(0.6),
+                              disabledBackgroundColor:
+                                  AppColors.teal700.withOpacity(0.6),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -328,7 +380,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                   ),
                           ),
                         ),
-                        const SizedBox(height: 20),
+                        const SizedBox(height: 14),
+                        TextButton.icon(
+                          onPressed: () => WindowService.close(),
+                          icon: const Icon(Icons.exit_to_app_rounded),
+                          label: const Text('Salir'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.textDarkSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
 
                         // Info por defecto
                         Container(
@@ -345,7 +406,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                 size: 18,
                               ),
                               const SizedBox(width: 10),
-                              Expanded(
+                              const Expanded(
                                 child: Text(
                                   'Usuario: admin | Contraseña: admin123',
                                   style: TextStyle(

@@ -1,4 +1,4 @@
-# 📊 Nilkas POS - Sistema de Punto de Venta
+# 📊 FULLPOS - Sistema de Punto de Venta
 
 **Versión:** 1.0  
 **Fecha:** Diciembre 2025  
@@ -142,4 +142,4 @@ Esta aplicación es software propietario. Todos los derechos reservados.
 
 ---
 
-**¡Gracias por usar Nilkas POS!**
+**¡Gracias por usar FULLPOS!**

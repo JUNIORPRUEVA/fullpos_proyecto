@@ -26,7 +26,8 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
   Future<void> _load() async {
     final companyId = await SessionManager.companyId() ?? 1;
     final terminalId =
-        await SessionManager.terminalId() ?? await SessionManager.ensureTerminalId();
+        await SessionManager.terminalId() ??
+        await SessionManager.ensureTerminalId();
     final config = await SecurityConfigRepository.load(
       companyId: companyId,
       terminalId: terminalId,
@@ -55,17 +56,13 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading || _config == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final config = _config!;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Seguridad y Overrides'),
-      ),
+      appBar: AppBar(title: const Text('Seguridad y Overrides')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -91,54 +88,11 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
           ),
           const Divider(),
           const Text(
-            'Scanner (por terminal)',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          SwitchListTile(
-            title: const Text('Scanner habilitado'),
-            subtitle: Text('Terminal: $_terminalId'),
-            value: config.scannerEnabled,
-            onChanged: (v) => _save(config.copyWith(scannerEnabled: v)),
-          ),
-          TextField(
-            decoration: const InputDecoration(
-              labelText: 'Prefijo (opcional)',
-            ),
-            controller: TextEditingController(text: config.scannerPrefix ?? ''),
-            onSubmitted: (value) =>
-                _save(config.copyWith(scannerPrefix: value.trim().isEmpty ? null : value)),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            decoration: const InputDecoration(
-              labelText: 'Sufijo (default Enter \\n)',
-            ),
-            controller: TextEditingController(text: config.scannerSuffix),
-            onSubmitted: (value) =>
-                _save(config.copyWith(scannerSuffix: value.isEmpty ? '\n' : value)),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            decoration: const InputDecoration(
-              labelText: 'Timeout agrupación (ms)',
-            ),
-            keyboardType: TextInputType.number,
-            controller:
-                TextEditingController(text: config.scannerTimeoutMs.toString()),
-            onSubmitted: (value) {
-              final parsed = int.tryParse(value.trim()) ?? config.scannerTimeoutMs;
-              _save(config.copyWith(scannerTimeoutMs: parsed));
-            },
-          ),
-          const Divider(),
-          const Text(
             'Acciones que requieren override',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          ...AppActionCategory.values.map(
-            (cat) => _buildCategory(cat, config),
-          ),
+          ...AppActionCategory.values.map((cat) => _buildCategory(cat, config)),
         ],
       ),
     );
@@ -164,10 +118,13 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
               (a) => SwitchListTile(
                 title: Text(a.name),
                 subtitle: Text('${a.description} • Riesgo: ${a.risk.name}'),
-                value: config.overrideByAction[a.code] ?? a.requiresOverrideByDefault,
+                value:
+                    config.overrideByAction[a.code] ??
+                    a.requiresOverrideByDefault,
                 onChanged: (v) {
-                  final updated = Map<String, bool>.from(config.overrideByAction)
-                    ..[a.code] = v;
+                  final updated = Map<String, bool>.from(
+                    config.overrideByAction,
+                  )..[a.code] = v;
                   _save(config.copyWith(overrideByAction: updated));
                 },
               ),

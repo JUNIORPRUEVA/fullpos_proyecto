@@ -2,7 +2,7 @@
 ║                                                                           ║
 ║    ✅ REFACTORIZACIÓN COMPLETADA - PDF DINÁMICO Y PROFESIONAL ✅          ║
 ║                                                                           ║
-║           Módulo de Cotizaciones - Sistema POS Nilkas                   ║
+║           Módulo de Cotizaciones - Sistema POS FULLPOS                   ║
 ║                                                                           ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
 
@@ -17,7 +17,7 @@
 ✅ PDF 100% dinámico
    → Lee SIEMPRE desde la BD (no cache)
    → Datos actualizados automáticamente
-   → Sin textos fijos tipo "Sistema POS Profesional" o "LOS NILKAS"
+   → Sin textos fijos tipo "Sistema POS Profesional" o "LOS FULLPOS"
 
 ✅ Regeneración garantizada
    → Cada apertura de PDF genera versión fresca
@@ -57,7 +57,7 @@
 
 1️⃣  No hay textos fijos hardcodeados
    ❌ "Sistema POS Profesional"
-   ❌ "LOS NILKAS"
+   ❌ "LOS FULLPOS"
    ❌ Slogans o nombres de empresa inventados
    ✅ SOLO datos desde Configuración del Negocio
 
@@ -179,7 +179,7 @@ TEST 3: Sin Textos Fijos
 2. Ver PDF
 3. Busca en todo el documento:
    - "Sistema POS Profesional"
-   - "LOS NILKAS"
+   - "LOS FULLPOS"
    - "Cotización profesional"
 4. RESULTADO: ✅ NO aparecen (0 coincidencias)
 

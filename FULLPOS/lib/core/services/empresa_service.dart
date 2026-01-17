@@ -13,6 +13,8 @@ class EmpresaConfig {
   final String? email;
   final String? slogan;
   final String? website;
+  final String? instagramUrl;
+  final String? facebookUrl;
   final String? logoPath;
 
   EmpresaConfig({
@@ -25,6 +27,8 @@ class EmpresaConfig {
     this.email,
     this.slogan,
     this.website,
+    this.instagramUrl,
+    this.facebookUrl,
     this.logoPath,
   });
 
@@ -40,6 +44,8 @@ class EmpresaConfig {
       email: settings.email,
       slogan: settings.slogan,
       website: settings.website,
+      instagramUrl: settings.instagramUrl,
+      facebookUrl: settings.facebookUrl,
       logoPath: settings.logoPath,
     );
   }
@@ -54,8 +60,8 @@ class EmpresaConfig {
   /// Validar que tenemos datos mínimos
   bool hasMinimalData() {
     return nombreEmpresa.isNotEmpty &&
-        nombreEmpresa != 'MI NEGOCIO' &&
-        nombreEmpresa != 'Mi Negocio';
+        nombreEmpresa != 'FULLPOS' &&
+        nombreEmpresa != 'FULLPOS';
   }
 
   @override
@@ -88,11 +94,14 @@ class EmpresaService {
       
       // Retornar valores por defecto seguros
       return EmpresaConfig(
-        nombreEmpresa: 'Mi Negocio',
+        nombreEmpresa: 'FULLPOS',
         telefono: null,
         direccion: null,
         rnc: null,
         email: null,
+        website: null,
+        instagramUrl: null,
+        facebookUrl: null,
       );
     }
   }

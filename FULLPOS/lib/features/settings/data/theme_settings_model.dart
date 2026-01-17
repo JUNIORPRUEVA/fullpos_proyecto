@@ -47,26 +47,25 @@ class ThemeSettings {
     required this.isDarkMode,
   });
 
-  /// Valores por defecto (tema original)
+  /// Valores por defecto (tema azul ejecutivo)
   static const ThemeSettings defaultSettings = ThemeSettings(
-    primaryColor: Color(0xFF00796B), // teal700
-    accentColor: Color(0xFFD4AF37), // gold
-    backgroundColor: Color(0xFFF3F6F5), // bgLight
-    // Mantener el "surface" con el gris claro por defecto (mejor contraste y look limpio)
-    surfaceColor: Color(0xFFF8F9F9), // surfaceLightVariant
-    textColor: Color(0xFF1F2937), // textDark
-    appBarColor: Color(0xFF00695C), // teal800
-    appBarTextColor: Color(0xFFFFFFFF), // white
-    cardColor: Color(0xFFFFFFFF), // white
-    buttonColor: Color(0xFFD4AF37), // gold
+    primaryColor: Color(0xFF0D84FF), // azul eléctrico premium
+    accentColor: Color(0xFF0D84FF), // un solo acento
+    backgroundColor: Color(0xFF050915), // base negro-azul
+    surfaceColor: Color(0xFF0F1B2C), // superficies oscuras
+    textColor: Color(0xFFE8EEF7),
+    appBarColor: Color(0xFF0B2038),
+    appBarTextColor: Color(0xFFFFFFFF),
+    cardColor: Color(0xFF0F1B2C),
+    buttonColor: Color(0xFF0D84FF),
     successColor: Color(0xFF10B981), // success
     errorColor: Color(0xFFEF4444), // error
     warningColor: Color(0xFFF59E0B), // warning
-    sidebarColor: Color(0xFF004D40), // teal900
-    sidebarTextColor: Color(0xFFB2DFDB), // teal100
-    sidebarActiveColor: Color(0xFFD4AF37), // gold
-    footerColor: Color(0xFF004D40), // teal900
-    footerTextColor: Color(0xFF9E9E9E), // grey
+    sidebarColor: Color(0xFF050915),
+    sidebarTextColor: Color(0xFFD8E5F5),
+    sidebarActiveColor: Color(0xFF0D84FF),
+    footerColor: Color(0xFF0B2038),
+    footerTextColor: Color(0xFFAEBED6),
     fontSize: 14.0,
     fontFamily: 'Roboto',
     isDarkMode: false,
@@ -75,25 +74,27 @@ class ThemeSettings {
   /// Crear desde Map (para cargar desde DB)
   factory ThemeSettings.fromMap(Map<String, dynamic> map) {
     return ThemeSettings(
-      primaryColor: Color(map['primaryColor'] as int? ?? 0xFF00796B),
-      accentColor: Color(map['accentColor'] as int? ?? 0xFFD4AF37),
-      backgroundColor: Color(map['backgroundColor'] as int? ?? 0xFFF3F6F5),
-      surfaceColor: Color(map['surfaceColor'] as int? ?? 0xFFF8F9F9),
-      textColor: Color(map['textColor'] as int? ?? 0xFF1F2937),
-      appBarColor: Color(map['appBarColor'] as int? ?? 0xFF00695C),
+      primaryColor: Color(map['primaryColor'] as int? ?? 0xFF0D84FF),
+      accentColor: Color(map['accentColor'] as int? ?? 0xFF0D84FF),
+      backgroundColor: Color(map['backgroundColor'] as int? ?? 0xFF050915),
+      surfaceColor: Color(map['surfaceColor'] as int? ?? 0xFF0F1B2C),
+      textColor: Color(map['textColor'] as int? ?? 0xFFE8EEF7),
+      appBarColor: Color(map['appBarColor'] as int? ?? 0xFF0B2038),
       appBarTextColor: Color(map['appBarTextColor'] as int? ?? 0xFFFFFFFF),
-      cardColor: Color(map['cardColor'] as int? ?? 0xFFFFFFFF),
-      buttonColor: Color(map['buttonColor'] as int? ?? 0xFFD4AF37),
+      cardColor: Color(map['cardColor'] as int? ?? 0xFF0F1B2C),
+      buttonColor: Color(map['buttonColor'] as int? ?? 0xFF0D84FF),
       successColor: Color(map['successColor'] as int? ?? 0xFF10B981),
       errorColor: Color(map['errorColor'] as int? ?? 0xFFEF4444),
       warningColor: Color(map['warningColor'] as int? ?? 0xFFF59E0B),
-      sidebarColor: Color(map['sidebarColor'] as int? ?? 0xFF004D40),
-      sidebarTextColor: Color(map['sidebarTextColor'] as int? ?? 0xFFB2DFDB),
-      sidebarActiveColor: Color(
-        map['sidebarActiveColor'] as int? ?? 0xFFD4AF37,
+      sidebarColor: Color(map['sidebarColor'] as int? ?? 0xFF050915),
+      sidebarTextColor: Color(
+        map['sidebarTextColor'] as int? ?? 0xFFD8E5F5,
       ),
-      footerColor: Color(map['footerColor'] as int? ?? 0xFF004D40),
-      footerTextColor: Color(map['footerTextColor'] as int? ?? 0xFF9E9E9E),
+      sidebarActiveColor: Color(
+        map['sidebarActiveColor'] as int? ?? 0xFF0D84FF,
+      ),
+      footerColor: Color(map['footerColor'] as int? ?? 0xFF0B2038),
+      footerTextColor: Color(map['footerTextColor'] as int? ?? 0xFFAEBED6),
       fontSize: (map['fontSize'] as num?)?.toDouble() ?? 14.0,
       fontFamily: map['fontFamily'] as String? ?? 'Roboto',
       isDarkMode: (map['isDarkMode'] as int? ?? 0) == 1,

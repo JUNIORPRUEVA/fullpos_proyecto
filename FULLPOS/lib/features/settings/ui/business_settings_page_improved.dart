@@ -184,7 +184,7 @@ class _BusinessSettingsPageImprovedState
       final updated = current.copyWith(
         businessName: _businessNameController.text.isNotEmpty
             ? _businessNameController.text
-            : 'MI NEGOCIO',
+            : 'FULLPOS',
         phone: _phoneController.text.isNotEmpty ? _phoneController.text : null,
         phone2: _phone2Controller.text.isNotEmpty
             ? _phone2Controller.text
@@ -404,7 +404,7 @@ class _BusinessSettingsPageImprovedState
           _buildTextField(
             controller: _businessNameController,
             label: 'Nombre del Negocio',
-            hint: 'Ej: Mi Negocio S.A.',
+            hint: 'Ej: FULLPOS S.A.',
             icon: Icons.business,
             onChanged: (_) => setState(() => _hasChanges = true),
           ),

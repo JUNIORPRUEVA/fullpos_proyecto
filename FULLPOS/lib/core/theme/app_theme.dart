@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
 import '../constants/app_sizes.dart';
 
-/// Tema de la aplicación LOS NILKAS
+/// Tema de la aplicación FULLPOS
 class AppTheme {
   AppTheme._();
 

@@ -1103,7 +1103,7 @@ class AppDb {
           show_discounts INTEGER NOT NULL DEFAULT 1,
           show_code INTEGER NOT NULL DEFAULT 1,
           show_datetime INTEGER NOT NULL DEFAULT 1,
-          header_business_name TEXT DEFAULT 'MI NEGOCIO',
+          header_business_name TEXT DEFAULT 'FULLPOS',
           header_rnc TEXT,
           header_address TEXT,
           header_phone TEXT,
@@ -1132,7 +1132,7 @@ class AppDb {
         'show_discounts': 1,
         'show_code': 1,
         'show_datetime': 1,
-        'header_business_name': 'MI NEGOCIO',
+        'header_business_name': 'FULLPOS',
         'header_rnc': '',
         'header_address': '',
         'header_phone': '',
@@ -1530,10 +1530,8 @@ class AppDb {
         ) ??
         0;
 
-    final hasRealCatalog = nonDemoProductsCount > 0 || nonDemoCatsCount > 0;
-
-    // Si hay catálogo real, limpiar demos.
-    if (hasRealCatalog) {
+    // Si hay catálogo real, limpiar demos y salir (productos o categorías reales).
+    if (nonDemoProductsCount > 0 || nonDemoCatsCount > 0) {
       if (demoProductsCount > 0) {
         await db.delete(DbTables.products, where: "code LIKE 'DEMO-%'");
       }
@@ -1545,6 +1543,7 @@ class AppDb {
           whereArgs: demoCategoryNames,
         );
       }
+      return;
     }
 
     // Recalcular totales tras limpieza.
@@ -1559,34 +1558,54 @@ class AppDb {
         ) ??
         0;
 
-    if (totalProducts > 0 || totalCategories > 0) {
+    // Si quedan productos (solo demo) ya sembrados, salir.
+    if (totalProducts > 0) {
       return;
     }
 
-    // Insertar categorías demo.
+    // Si hay categorías reales, no recrear categorías demo; si no hay categorías, crea las demo.
+    final shouldCreateDemoCategories = nonDemoCatsCount == 0 && totalCategories == 0;
+
+    // Insertar categorías demo si corresponde.
     final now = DateTime.now().millisecondsSinceEpoch;
     final categoryIds = <String, int>{};
-    for (final name in demoCategoryNames) {
-      await db.insert(
-        DbTables.categories,
-        {
-          'name': name,
-          'is_active': 1,
-          'deleted_at_ms': null,
-          'created_at_ms': now,
-          'updated_at_ms': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
-      final rows = await db.query(
-        DbTables.categories,
-        columns: ['id'],
-        where: 'name = ?',
-        whereArgs: [name],
-        limit: 1,
-      );
-      if (rows.isNotEmpty && rows.first['id'] != null) {
-        categoryIds[name] = rows.first['id'] as int;
+    if (shouldCreateDemoCategories) {
+      for (final name in demoCategoryNames) {
+        await db.insert(
+          DbTables.categories,
+          {
+            'name': name,
+            'is_active': 1,
+            'deleted_at_ms': null,
+            'created_at_ms': now,
+            'updated_at_ms': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        final rows = await db.query(
+          DbTables.categories,
+          columns: ['id'],
+          where: 'name = ?',
+          whereArgs: [name],
+          limit: 1,
+        );
+        if (rows.isNotEmpty && rows.first['id'] != null) {
+          categoryIds[name] = rows.first['id'] as int;
+        }
+      }
+    } else {
+      // Si hay categorías reales, solo reusar IDs demo existentes si quedan.
+      for (final name in demoCategoryNames) {
+        final rows = await db.query(
+          DbTables.categories,
+          columns: ['id'],
+          where: 'name = ?',
+          whereArgs: [name],
+          limit: 1,
+        );
+        if (rows.isNotEmpty && rows.first['id'] != null) {
+          categoryIds[name] = rows.first['id'] as int;
+        }
       }
     }
 
@@ -2467,7 +2486,7 @@ class AppDb {
         show_discounts INTEGER NOT NULL DEFAULT 1,
         show_code INTEGER NOT NULL DEFAULT 1,
         show_datetime INTEGER NOT NULL DEFAULT 1,
-        header_business_name TEXT DEFAULT 'MI NEGOCIO',
+        header_business_name TEXT DEFAULT 'FULLPOS',
         header_rnc TEXT,
         header_address TEXT,
         header_phone TEXT,
@@ -2498,7 +2517,7 @@ class AppDb {
       'show_discounts': 1,
       'show_code': 1,
       'show_datetime': 1,
-      'header_business_name': 'MI NEGOCIO',
+      'header_business_name': 'FULLPOS',
       'header_rnc': '',
       'header_address': '',
       'header_phone': '',
@@ -2814,7 +2833,7 @@ class AppDb {
         show_discounts INTEGER NOT NULL DEFAULT 1,
         show_code INTEGER NOT NULL DEFAULT 1,
         show_datetime INTEGER NOT NULL DEFAULT 1,
-        header_business_name TEXT DEFAULT 'MI NEGOCIO',
+        header_business_name TEXT DEFAULT 'FULLPOS',
         header_rnc TEXT,
         header_address TEXT,
         header_phone TEXT,
@@ -3079,7 +3098,7 @@ class AppDb {
         db,
         DbTables.printerSettings,
         'header_business_name',
-        "TEXT DEFAULT 'MI NEGOCIO'",
+        "TEXT DEFAULT 'FULLPOS'",
       );
       await _addColumnIfMissing(
         db,
@@ -3269,7 +3288,7 @@ class AppDb {
           'show_discounts': 1,
           'show_code': 1,
           'show_datetime': 1,
-          'header_business_name': 'MI NEGOCIO',
+          'header_business_name': 'FULLPOS',
           'header_rnc': '',
           'header_address': '',
           'header_phone': '',

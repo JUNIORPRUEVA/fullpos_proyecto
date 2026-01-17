@@ -1,6 +1,8 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import '../constants/app_colors.dart';
+import '../constants/app_sizes.dart';
 import '../window/window_service.dart';
 import 'desktop_frame.dart';
 import 'sidebar.dart';
@@ -29,6 +31,13 @@ class _AppShellState extends State<AppShell> {
   bool get _isDesktop =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
+  double _sidebarWidthFor(double maxWidth) {
+    if (maxWidth < 1100) return 208;
+    if (maxWidth < 1400) return 230;
+    if (maxWidth < 1700) return 248;
+    return AppSizes.sidebarWidth;
+  }
+
   void _updateResponsive(BoxConstraints constraints) {
     if (!_didInitResponsive) {
       _didInitResponsive = true;
@@ -50,7 +59,6 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return ValueListenableBuilder<bool>(
       valueListenable: WindowService.fullScreenListenable,
       builder: (context, isFullScreen, _) {
@@ -61,6 +69,7 @@ class _AppShellState extends State<AppShell> {
             final isNarrow = _isNarrow;
             final isShort = _isShort;
             final showFooter = !isShort;
+            final sidebarWidth = _sidebarWidthFor(constraints.maxWidth);
 
             Widget topbar() {
               if (!isNarrow) return const Topbar();
@@ -81,12 +90,22 @@ class _AppShellState extends State<AppShell> {
             );
 
             final baseBody = Container(
-              decoration: const BoxDecoration(color: Colors.white),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: const [
+                    Color(0xFF050915),
+                    Color(0xFF0B2038),
+                    Color(0xFF0D84FF),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
               child: isNarrow
                   ? SafeArea(child: contentColumn)
                   : Row(
                       children: [
-                        const Sidebar(),
+                        Sidebar(customWidth: sidebarWidth),
                         Expanded(child: contentColumn),
                       ],
                     ),
@@ -95,8 +114,13 @@ class _AppShellState extends State<AppShell> {
             return Scaffold(
               backgroundColor: Theme.of(context).scaffoldBackgroundColor,
               drawer: isNarrow
-                  ? const Drawer(
-                      child: SafeArea(child: Sidebar(forcedCollapsed: false)),
+                  ? Drawer(
+                      child: SafeArea(
+                        child: Sidebar(
+                          forcedCollapsed: false,
+                          customWidth: sidebarWidth,
+                        ),
+                      ),
                     )
                   : null,
               body: baseBody,
