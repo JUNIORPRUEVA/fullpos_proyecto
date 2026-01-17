@@ -5,6 +5,10 @@
 .pub/
 build/
 
+# Node / TS
+node_modules/
+dist/
+
 # IDEs
 .idea/
 .vscode/

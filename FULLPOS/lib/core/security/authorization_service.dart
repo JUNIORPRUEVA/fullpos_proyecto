@@ -1,0 +1,410 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
+import 'package:sqflite/sqflite.dart';
+
+import '../db/app_db.dart';
+import '../db/tables.dart';
+
+enum OverrideMethod { offlinePin, offlineBarcode, remote }
+
+class GeneratedOverrideToken {
+  final String token;
+  final DateTime expiresAt;
+  final OverrideMethod method;
+  final String nonce;
+
+  GeneratedOverrideToken({
+    required this.token,
+    required this.expiresAt,
+    required this.method,
+    required this.nonce,
+  });
+}
+
+class AuthorizationResult {
+  final bool success;
+  final String message;
+  final OverrideMethod method;
+
+  AuthorizationResult({
+    required this.success,
+    required this.message,
+    required this.method,
+  });
+}
+
+class AuthorizationService {
+  AuthorizationService._();
+
+  static const Duration defaultTtl = Duration(seconds: 120);
+
+  static Future<GeneratedOverrideToken> generateOfflinePinToken({
+    required String pin,
+    required String actionCode,
+    required String resourceType,
+    String? resourceId,
+    required int companyId,
+    required int requestedByUserId,
+    required String terminalId,
+    Duration ttl = defaultTtl,
+  }) async {
+    final db = await AppDb.database;
+    final now = DateTime.now();
+    final expiresAt = now.add(ttl);
+    final nonce = _randomToken(10);
+    final payload =
+        '$companyId|$actionCode|$resourceType|${resourceId ?? ''}|$requestedByUserId|$terminalId|$nonce|${expiresAt.millisecondsSinceEpoch}';
+    final hmac = Hmac(sha256, utf8.encode(pin));
+    final digest = hmac.convert(utf8.encode(payload));
+    final tokenValue = _shortCodeFromDigest(digest);
+    final tokenHash = _hashToken(tokenValue);
+
+    await db.insert(
+      DbTables.overrideTokens,
+      {
+        'company_id': companyId,
+        'action_code': actionCode,
+        'resource_type': resourceType,
+        'resource_id': resourceId,
+        'token_hash': tokenHash,
+        'payload_signature': digest.toString(),
+        'method': _methodToString(OverrideMethod.offlinePin),
+        'nonce': nonce,
+        'requested_by_user_id': requestedByUserId,
+        'approved_by_user_id': requestedByUserId,
+        'terminal_id': terminalId,
+        'expires_at_ms': expiresAt.millisecondsSinceEpoch,
+        'created_at_ms': now.millisecondsSinceEpoch,
+        'result': 'issued',
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    await _logAudit(
+      db: db,
+      companyId: companyId,
+      actionCode: actionCode,
+      resourceType: resourceType,
+      resourceId: resourceId,
+      requestedBy: requestedByUserId,
+      approvedBy: requestedByUserId,
+      method: OverrideMethod.offlinePin,
+      result: 'issued',
+      terminalId: terminalId,
+      meta: {'nonce': nonce},
+    );
+
+    return GeneratedOverrideToken(
+      token: tokenValue,
+      expiresAt: expiresAt,
+      method: OverrideMethod.offlinePin,
+      nonce: nonce,
+    );
+  }
+
+  static Future<GeneratedOverrideToken> generateLocalBarcodeToken({
+    required String actionCode,
+    required String resourceType,
+    String? resourceId,
+    required int companyId,
+    required int requestedByUserId,
+    required String terminalId,
+    Duration ttl = defaultTtl,
+  }) async {
+    final db = await AppDb.database;
+    final now = DateTime.now();
+    final expiresAt = now.add(ttl);
+    final nonce = _randomToken(12);
+    final tokenValue = _randomToken(12);
+    final tokenHash = _hashToken(tokenValue);
+
+    await db.insert(
+      DbTables.overrideTokens,
+      {
+        'company_id': companyId,
+        'action_code': actionCode,
+        'resource_type': resourceType,
+        'resource_id': resourceId,
+        'token_hash': tokenHash,
+        'payload_signature': sha256.convert(utf8.encode(nonce)).toString(),
+        'method': _methodToString(OverrideMethod.offlineBarcode),
+        'nonce': nonce,
+        'requested_by_user_id': requestedByUserId,
+        'approved_by_user_id': requestedByUserId,
+        'terminal_id': terminalId,
+        'expires_at_ms': expiresAt.millisecondsSinceEpoch,
+        'created_at_ms': now.millisecondsSinceEpoch,
+        'result': 'issued',
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    await _logAudit(
+      db: db,
+      companyId: companyId,
+      actionCode: actionCode,
+      resourceType: resourceType,
+      resourceId: resourceId,
+      requestedBy: requestedByUserId,
+      approvedBy: requestedByUserId,
+      method: OverrideMethod.offlineBarcode,
+      result: 'issued',
+      terminalId: terminalId,
+      meta: {'nonce': nonce},
+    );
+
+    return GeneratedOverrideToken(
+      token: tokenValue,
+      expiresAt: expiresAt,
+      method: OverrideMethod.offlineBarcode,
+      nonce: nonce,
+    );
+  }
+
+  static Future<AuthorizationResult> validateAndConsumeToken({
+    required String token,
+    required String actionCode,
+    required String resourceType,
+    String? resourceId,
+    required int companyId,
+    required int usedByUserId,
+    required String terminalId,
+  }) async {
+    final db = await AppDb.database;
+    final tokenHash = _hashToken(token);
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    return await db.transaction((txn) async {
+      final rows = await txn.query(
+        DbTables.overrideTokens,
+        where:
+            'token_hash = ? AND company_id = ? AND action_code = ? AND used_at_ms IS NULL',
+        whereArgs: [tokenHash, companyId, actionCode],
+        limit: 1,
+      );
+
+      if (rows.isEmpty) {
+        await _logAudit(
+          db: txn,
+          companyId: companyId,
+          actionCode: actionCode,
+          resourceType: resourceType,
+          resourceId: resourceId,
+          requestedBy: usedByUserId,
+          approvedBy: null,
+          method: OverrideMethod.offlineBarcode,
+          result: 'invalid',
+          terminalId: terminalId,
+          meta: {'reason': 'not_found'},
+        );
+        return AuthorizationResult(
+          success: false,
+          message: 'Token inválido',
+          method: OverrideMethod.offlineBarcode,
+        );
+      }
+
+      final row = rows.first;
+      final method = _methodFromString(row['method'] as String?);
+      final expiresAtMs = row['expires_at_ms'] as int?;
+      final dbResourceType = row['resource_type'] as String?;
+      final dbResourceId = row['resource_id'] as String?;
+
+      if (expiresAtMs != null && expiresAtMs < now) {
+        await _markResult(
+          txn,
+          row['id'] as int,
+          usedByUserId,
+          'expired',
+          now,
+        );
+        await _logAudit(
+          db: txn,
+          companyId: companyId,
+          actionCode: actionCode,
+          resourceType: resourceType,
+          resourceId: resourceId,
+          requestedBy: row['requested_by_user_id'] as int?,
+          approvedBy: usedByUserId,
+          method: method,
+          result: 'expired',
+          terminalId: terminalId,
+        );
+        return AuthorizationResult(
+          success: false,
+          message: 'Token vencido',
+          method: method,
+        );
+      }
+
+      if (dbResourceType != null &&
+          dbResourceType.isNotEmpty &&
+          dbResourceType != resourceType) {
+        await _logAudit(
+          db: txn,
+          companyId: companyId,
+          actionCode: actionCode,
+          resourceType: resourceType,
+          resourceId: resourceId,
+          requestedBy: row['requested_by_user_id'] as int?,
+          approvedBy: usedByUserId,
+          method: method,
+          result: 'resource_mismatch',
+          terminalId: terminalId,
+        );
+        return AuthorizationResult(
+          success: false,
+          message: 'Token no corresponde al recurso',
+          method: method,
+        );
+      }
+      if (dbResourceId != null &&
+          dbResourceId.isNotEmpty &&
+          resourceId != null &&
+          dbResourceId != resourceId) {
+        await _logAudit(
+          db: txn,
+          companyId: companyId,
+          actionCode: actionCode,
+          resourceType: resourceType,
+          resourceId: resourceId,
+          requestedBy: row['requested_by_user_id'] as int?,
+          approvedBy: usedByUserId,
+          method: method,
+          result: 'resource_mismatch',
+          terminalId: terminalId,
+        );
+        return AuthorizationResult(
+          success: false,
+          message: 'Token no corresponde a este ítem',
+          method: method,
+        );
+      }
+
+      await txn.update(
+        DbTables.overrideTokens,
+        {
+          'used_at_ms': now,
+          'used_by_user_id': usedByUserId,
+          'result': 'approved',
+        },
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+
+      await _logAudit(
+        db: txn,
+        companyId: companyId,
+        actionCode: actionCode,
+        resourceType: resourceType,
+        resourceId: resourceId,
+        requestedBy: row['requested_by_user_id'] as int?,
+        approvedBy: usedByUserId,
+        method: method,
+        result: 'approved',
+        terminalId: terminalId,
+      );
+
+      return AuthorizationResult(
+        success: true,
+        message: 'Autorización aprobada',
+        method: method,
+      );
+    });
+  }
+
+  static String _hashToken(String token) {
+    final bytes = utf8.encode(token);
+    return sha256.convert(bytes).toString();
+  }
+
+  static String _randomToken(int length) {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final rand = Random.secure();
+    return List.generate(
+      length,
+      (_) => alphabet[rand.nextInt(alphabet.length)],
+    ).join();
+  }
+
+  static String _shortCodeFromDigest(Digest digest) {
+    final chars = digest.bytes.take(6).map((b) => (b % 10).toString()).join();
+    return chars.padLeft(6, '0');
+  }
+
+  static String _methodToString(OverrideMethod method) {
+    switch (method) {
+      case OverrideMethod.offlinePin:
+        return 'offline_pin';
+      case OverrideMethod.offlineBarcode:
+        return 'offline_barcode';
+      case OverrideMethod.remote:
+        return 'remote';
+    }
+  }
+
+  static OverrideMethod _methodFromString(String? method) {
+    switch (method) {
+      case 'offline_pin':
+        return OverrideMethod.offlinePin;
+      case 'remote':
+        return OverrideMethod.remote;
+      default:
+        return OverrideMethod.offlineBarcode;
+    }
+  }
+
+  static Future<void> _markResult(
+    DatabaseExecutor db,
+    int id,
+    int usedBy,
+    String result,
+    int now,
+  ) async {
+    await db.update(
+      DbTables.overrideTokens,
+      {
+        'used_at_ms': now,
+        'used_by_user_id': usedBy,
+        'result': result,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  static Future<void> _logAudit({
+    required DatabaseExecutor db,
+    required int companyId,
+    required String actionCode,
+    required String resourceType,
+    String? resourceId,
+    required int? requestedBy,
+    required int? approvedBy,
+    required OverrideMethod method,
+    required String result,
+    required String terminalId,
+    Map<String, dynamic>? meta,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert(
+      DbTables.auditLog,
+      {
+        'company_id': companyId,
+        'action_code': actionCode,
+        'resource_type': resourceType,
+        'resource_id': resourceId,
+        'requested_by_user_id': requestedBy,
+        'approved_by_user_id': approvedBy,
+        'method': _methodToString(method),
+        'result': result,
+        'terminal_id': terminalId,
+        'meta': meta != null ? jsonEncode(meta) : null,
+        'created_at_ms': now,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+}
