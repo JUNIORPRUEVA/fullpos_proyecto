@@ -6,6 +6,7 @@ import '../../features/reports/presentation/sales_list_page.dart';
 import '../../features/reports/presentation/sales_by_day_page.dart';
 import '../../features/cash/presentation/cash_closings_page.dart';
 import '../../features/cash/presentation/cash_closing_detail_page.dart';
+import '../../features/products/presentation/products_page.dart';
 import '../../features/shared/owner_shell.dart';
 import '../storage/secure_storage.dart';
 
@@ -36,6 +37,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/dashboard',
             builder: (context, state) => const DashboardPage(),
+          ),
+          GoRoute(
+            path: '/products',
+            builder: (context, state) => const ProductsPage(),
           ),
           GoRoute(
             path: '/sales/list',

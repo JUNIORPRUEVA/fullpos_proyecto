@@ -26,6 +26,7 @@ model Company {
   sales          Sale[]
   cashSessions   CashSession[]
   cashMovements  CashMovement[]
+  products       Product[]
 
   @@unique([name])
 }
@@ -192,6 +193,26 @@ model CashMovement {
   @@index([sessionId])
 }
 
+model Product {
+  id         Int       @id @default(autoincrement())
+  companyId  Int
+  company    Company   @relation(fields: [companyId], references: [id])
+  code       String
+  name       String
+  description String?
+  price      Decimal   @db.Decimal(12, 2)
+  stock      Decimal   @default(0) @db.Decimal(12, 3)
+  imageUrl   String?
+  isDemo     Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  saleItems  SaleItem[]
+
+  @@unique([companyId, code])
+  @@index([companyId, isDemo])
+}
+
 model Sale {
   id                   Int         @id @default(autoincrement())
   companyId            Int
@@ -232,6 +253,7 @@ model SaleItem {
   saleId                 Int
   sale                   Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
   productId              Int?
+  product                Product? @relation(fields: [productId], references: [id])
   productCodeSnapshot    String?
   productNameSnapshot    String
   qty                    Decimal   @db.Decimal(12, 3)
