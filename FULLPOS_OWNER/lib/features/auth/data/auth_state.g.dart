@@ -1,0 +1,27 @@
+// GENERATED CODE - DO NOT MODIFY BY HAND
+
+part of 'auth_state.dart';
+
+// **************************************************************************
+// JsonSerializableGenerator
+// **************************************************************************
+
+_$AuthStateImpl _$$AuthStateImplFromJson(Map<String, dynamic> json) =>
+    _$AuthStateImpl(
+      accessToken: json['accessToken'] as String?,
+      refreshToken: json['refreshToken'] as String?,
+      companyName: json['companyName'] as String?,
+      ownerVersion: json['ownerVersion'] as String?,
+      username: json['username'] as String?,
+      loading: json['loading'] as bool? ?? false,
+    );
+
+Map<String, dynamic> _$$AuthStateImplToJson(_$AuthStateImpl instance) =>
+    <String, dynamic>{
+      'accessToken': instance.accessToken,
+      'refreshToken': instance.refreshToken,
+      'companyName': instance.companyName,
+      'ownerVersion': instance.ownerVersion,
+      'username': instance.username,
+      'loading': instance.loading,
+    };
