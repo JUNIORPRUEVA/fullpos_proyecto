@@ -2154,26 +2154,34 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
         ),
-        elevation: 10,
+        elevation: 12,
         shadowColor: Colors.black54,
-        minimumSize: const Size.fromHeight(44),
+        minimumSize: const Size.fromHeight(50),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 20),
-          const SizedBox(width: 8),
+          Icon(icon, size: 22),
+          const SizedBox(width: 10),
           Flexible(
             child: Text(
               label,
               style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.4,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.6,
+                height: 1.1,
+                shadows: [
+                  Shadow(
+                    color: Colors.black38,
+                    offset: Offset(0, 1),
+                    blurRadius: 2,
+                  ),
+                ],
               ),
               textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
