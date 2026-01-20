@@ -28,13 +28,13 @@ function normalizeNullable(value?: string | null) {
   if (value === undefined) return undefined;
   if (value === null) return null;
   const trimmed = value.trim();
-  return trimmed.isEmpty ? null : trimmed;
+  return trimmed.length === 0 ? null : trimmed;
 }
 
 function normalizeRequired(value?: string) {
   if (value === undefined) return undefined;
   const trimmed = value.trim();
-  return trimmed.isEmpty ? undefined : trimmed;
+  return trimmed.length === 0 ? undefined : trimmed;
 }
 
 async function ensureCompanyConfig(companyId: number) {
@@ -106,31 +106,40 @@ export async function getCompanyConfig(companyId: number) {
 
 export async function updateCompanyConfig(companyId: number, payload: UpdateCompanyConfigInput) {
   const companyName = normalizeRequired(payload.companyName);
-  const configPayload: Prisma.CompanyConfigUncheckedUpdateInput = {};
-
-  if (payload.logoUrl !== undefined)
-    configPayload.logoUrl = normalizeNullable(payload.logoUrl);
-  if (payload.phone !== undefined)
-    configPayload.phone = normalizeNullable(payload.phone);
-  if (payload.phone2 !== undefined)
-    configPayload.phone2 = normalizeNullable(payload.phone2);
-  if (payload.email !== undefined)
-    configPayload.email = normalizeNullable(payload.email);
-  if (payload.address !== undefined)
-    configPayload.address = normalizeNullable(payload.address);
-  if (payload.city !== undefined)
-    configPayload.city = normalizeNullable(payload.city);
-  if (payload.slogan !== undefined)
-    configPayload.slogan = normalizeNullable(payload.slogan);
-  if (payload.website !== undefined)
-    configPayload.website = normalizeNullable(payload.website);
-  if (payload.instagramUrl !== undefined)
-    configPayload.instagramUrl = normalizeNullable(payload.instagramUrl);
-  if (payload.facebookUrl !== undefined)
-    configPayload.facebookUrl = normalizeNullable(payload.facebookUrl);
+  const normalized = {
+    logoUrl:
+      payload.logoUrl !== undefined ? normalizeNullable(payload.logoUrl) : undefined,
+    phone: payload.phone !== undefined ? normalizeNullable(payload.phone) : undefined,
+    phone2:
+      payload.phone2 !== undefined ? normalizeNullable(payload.phone2) : undefined,
+    email: payload.email !== undefined ? normalizeNullable(payload.email) : undefined,
+    address:
+      payload.address !== undefined ? normalizeNullable(payload.address) : undefined,
+    city: payload.city !== undefined ? normalizeNullable(payload.city) : undefined,
+    slogan: payload.slogan !== undefined ? normalizeNullable(payload.slogan) : undefined,
+    website: payload.website !== undefined ? normalizeNullable(payload.website) : undefined,
+    instagramUrl:
+      payload.instagramUrl !== undefined ? normalizeNullable(payload.instagramUrl) : undefined,
+    facebookUrl:
+      payload.facebookUrl !== undefined ? normalizeNullable(payload.facebookUrl) : undefined,
+  };
 
   const themeKey = normalizeRequired(payload.themeKey);
-  if (themeKey !== undefined) configPayload.themeKey = themeKey;
+  const configUpdate: Prisma.CompanyConfigUpdateInput = {};
+
+  if (normalized.logoUrl !== undefined) configUpdate.logoUrl = normalized.logoUrl;
+  if (normalized.phone !== undefined) configUpdate.phone = normalized.phone;
+  if (normalized.phone2 !== undefined) configUpdate.phone2 = normalized.phone2;
+  if (normalized.email !== undefined) configUpdate.email = normalized.email;
+  if (normalized.address !== undefined) configUpdate.address = normalized.address;
+  if (normalized.city !== undefined) configUpdate.city = normalized.city;
+  if (normalized.slogan !== undefined) configUpdate.slogan = normalized.slogan;
+  if (normalized.website !== undefined) configUpdate.website = normalized.website;
+  if (normalized.instagramUrl !== undefined)
+    configUpdate.instagramUrl = normalized.instagramUrl;
+  if (normalized.facebookUrl !== undefined)
+    configUpdate.facebookUrl = normalized.facebookUrl;
+  if (themeKey !== undefined) configUpdate.themeKey = themeKey;
 
   if (companyName) {
     await prisma.company.update({
@@ -139,14 +148,28 @@ export async function updateCompanyConfig(companyId: number, payload: UpdateComp
     });
   }
 
+  const configCreate: Prisma.CompanyConfigCreateInput = {
+    companyId,
+    themeKey: themeKey ?? DEFAULT_THEME_KEY,
+  };
+
+  if (normalized.logoUrl !== undefined) configCreate.logoUrl = normalized.logoUrl;
+  if (normalized.phone !== undefined) configCreate.phone = normalized.phone;
+  if (normalized.phone2 !== undefined) configCreate.phone2 = normalized.phone2;
+  if (normalized.email !== undefined) configCreate.email = normalized.email;
+  if (normalized.address !== undefined) configCreate.address = normalized.address;
+  if (normalized.city !== undefined) configCreate.city = normalized.city;
+  if (normalized.slogan !== undefined) configCreate.slogan = normalized.slogan;
+  if (normalized.website !== undefined) configCreate.website = normalized.website;
+  if (normalized.instagramUrl !== undefined)
+    configCreate.instagramUrl = normalized.instagramUrl;
+  if (normalized.facebookUrl !== undefined)
+    configCreate.facebookUrl = normalized.facebookUrl;
+
   await prisma.companyConfig.upsert({
     where: { companyId },
-    update: configPayload,
-    create: {
-      companyId,
-      ...configPayload,
-      themeKey: configPayload.themeKey ?? DEFAULT_THEME_KEY,
-    },
+    update: configUpdate,
+    create: configCreate,
   });
 
   return getCompanyConfig(companyId);
