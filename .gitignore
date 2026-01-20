@@ -1,27 +1,6 @@
-# Root ignore (Flutter/Dart + common)
-.dart_tool/
-.packages
-.pub-cache/
-.pub/
-build/
-
-# Node / TS
-node_modules/
-dist/
-
-# IDEs
-.idea/
-.vscode/
-*.iml
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Env files
-.env
-.env.*
-!.env.example
+# Ignore all by default; keep only backend tracked
+*
+!/.gitignore
+!/.gitattributes
+!/FULLPOS_BACKEND/
+!/FULLPOS_BACKEND/**
