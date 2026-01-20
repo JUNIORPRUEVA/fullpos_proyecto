@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma';
+import { Prisma } from '@prisma/client';
 
 const DEFAULT_THEME_KEY = 'proPos';
 
@@ -14,8 +15,10 @@ type UpdateCompanyConfigInput = {
   website?: string | null;
   instagramUrl?: string | null;
   facebookUrl?: string | null;
-  themeKey?: string | null;
+  themeKey?: string;
 };
+
+type CompanyWithConfig = Prisma.CompanyGetPayload<{ include: { config: true } }>;
 
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -23,10 +26,12 @@ function normalizeRnc(value: string) {
 
 function sanitizePayload(input: UpdateCompanyConfigInput): UpdateCompanyConfigInput {
   const result: UpdateCompanyConfigInput = {};
+  const nonNullableFields = new Set(['companyName', 'themeKey']);
 
   for (const [key, value] of Object.entries(input)) {
     if (value === undefined) continue;
     if (typeof value === 'string' && value.trim() === '') {
+      if (nonNullableFields.has(key)) continue;
       result[key as keyof UpdateCompanyConfigInput] = null;
       continue;
     }
@@ -47,7 +52,7 @@ async function ensureCompanyConfig(companyId: number) {
   });
 }
 
-function mapConfigResponse(company: Awaited<ReturnType<typeof prisma.company.findUnique>>) {
+function mapConfigResponse(company: CompanyWithConfig | null) {
   if (!company) return null;
   const config = company.config ?? {
     companyId: company.id,
@@ -105,7 +110,8 @@ export async function getCompanyConfig(companyId: number) {
 
 export async function updateCompanyConfig(companyId: number, payload: UpdateCompanyConfigInput) {
   const sanitized = sanitizePayload(payload);
-  const companyName = payload.companyName?.trim();
+  const companyName = sanitized.companyName?.trim();
+  const { companyName: _ignored, ...configPayload } = sanitized;
 
   if (companyName) {
     await prisma.company.update({
@@ -116,11 +122,11 @@ export async function updateCompanyConfig(companyId: number, payload: UpdateComp
 
   await prisma.companyConfig.upsert({
     where: { companyId },
-    update: sanitized,
+    update: configPayload,
     create: {
       companyId,
-      ...sanitized,
-      themeKey: sanitized.themeKey ?? DEFAULT_THEME_KEY,
+      ...configPayload,
+      themeKey: configPayload.themeKey ?? DEFAULT_THEME_KEY,
     },
   });
 
