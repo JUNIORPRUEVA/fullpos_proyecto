@@ -181,15 +181,16 @@ export async function updateCompanyConfigByRnc(
 ) {
   const trimmed = companyRnc.trim();
   const normalized = normalizeRnc(trimmed);
+  const companyName = normalizeRequired(payload.companyName);
   let company = await prisma.company.findFirst({
     where: { rnc: trimmed },
-    select: { id: true, rnc: true },
+    select: { id: true, rnc: true, name: true, isActive: true },
   });
 
   if (!company && normalized.length > 0) {
     const candidates = await prisma.company.findMany({
       where: { rnc: { not: null } },
-      select: { id: true, rnc: true },
+      select: { id: true, rnc: true, name: true, isActive: true },
     });
     company =
       candidates.find(
@@ -197,8 +198,27 @@ export async function updateCompanyConfigByRnc(
       ) ?? null;
   }
 
+  if (company && !company.isActive) {
+    company = await prisma.company.update({
+      where: { id: company.id },
+      data: { isActive: true },
+      select: { id: true, rnc: true, name: true, isActive: true },
+    });
+  }
+
   if (!company) {
-    throw { status: 404, message: 'Compañía no encontrada' };
+    let resolvedName = companyName ?? `Empresa ${trimmed}`;
+    const nameClash = await prisma.company.findFirst({
+      where: { name: resolvedName },
+      select: { id: true },
+    });
+    if (nameClash) {
+      resolvedName = `Empresa ${trimmed}`;
+    }
+    company = await prisma.company.create({
+      data: { name: resolvedName, rnc: trimmed, isActive: true },
+      select: { id: true, rnc: true, name: true, isActive: true },
+    });
   }
 
   return updateCompanyConfig(company.id, payload);

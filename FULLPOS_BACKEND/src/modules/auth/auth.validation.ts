@@ -11,6 +11,7 @@ export const refreshSchema = z.object({
 
 export const provisionOwnerSchema = z.object({
   companyRnc: z.string().min(3, 'RNC requerido'),
+  companyName: z.string().min(2, 'Nombre de empresa requerido').optional(),
   username: z.string().min(3, 'Usuario requerido'),
   password: z.string().min(6, 'Contrase\u00f1a m\u00ednima 6 caracteres'),
 });

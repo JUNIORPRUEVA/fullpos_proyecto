@@ -198,19 +198,66 @@ export async function ensureUserPassword(userId: number, password: string) {
   });
 }
 
-export async function provisionOwnerByRnc(companyRnc: string, username: string, password: string) {
+function normalizeRnc(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+export async function provisionOwnerByRnc(
+  companyRnc: string,
+  username: string,
+  password: string,
+  companyName?: string,
+) {
   const rnc = companyRnc.trim();
   const uname = username.trim();
+  const cname = companyName?.trim();
   if (!rnc || !uname) {
     throw { status: 400, message: 'Datos incompletos' };
   }
 
-  const company = await prisma.company.findFirst({
-    where: { rnc: rnc, isActive: true },
+  const normalized = normalizeRnc(rnc);
+  let company = await prisma.company.findFirst({
+    where: { rnc: rnc },
+    select: { id: true, name: true, rnc: true, isActive: true },
   });
 
+  if (!company && normalized.length > 0) {
+    const candidates = await prisma.company.findMany({
+      where: { rnc: { not: null } },
+      select: { id: true, name: true, rnc: true, isActive: true },
+    });
+    company =
+      candidates.find(
+        (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
+      ) ?? null;
+  }
+
+  if (company && !company.isActive) {
+    company = await prisma.company.update({
+      where: { id: company.id },
+      data: { isActive: true },
+      select: { id: true, name: true, rnc: true, isActive: true },
+    });
+  }
+
   if (!company) {
-    throw { status: 404, message: 'Empresa no encontrada. Verifica el RNC.' };
+    let resolvedName = cname && cname.length > 1 ? cname : `Empresa ${rnc}`;
+    const nameClash = await prisma.company.findFirst({
+      where: { name: resolvedName },
+      select: { id: true },
+    });
+    if (nameClash) {
+      resolvedName = `Empresa ${rnc}`;
+    }
+
+    company = await prisma.company.create({
+      data: {
+        name: resolvedName,
+        rnc: rnc,
+        isActive: true,
+      },
+      select: { id: true, name: true, rnc: true, isActive: true },
+    });
   }
 
   const hashed = await hashPassword(password);
