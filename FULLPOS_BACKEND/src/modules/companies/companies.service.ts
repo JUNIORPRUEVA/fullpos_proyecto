@@ -24,21 +24,17 @@ function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function sanitizePayload(input: UpdateCompanyConfigInput): UpdateCompanyConfigInput {
-  const result: UpdateCompanyConfigInput = {};
-  const nonNullableFields = new Set(['companyName', 'themeKey']);
+function normalizeNullable(value?: string | null) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = value.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
 
-  for (const [key, value] of Object.entries(input)) {
-    if (value === undefined) continue;
-    if (typeof value === 'string' && value.trim() === '') {
-      if (nonNullableFields.has(key)) continue;
-      result[key as keyof UpdateCompanyConfigInput] = null;
-      continue;
-    }
-    result[key as keyof UpdateCompanyConfigInput] = value;
-  }
-
-  return result;
+function normalizeRequired(value?: string) {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.isEmpty ? undefined : trimmed;
 }
 
 async function ensureCompanyConfig(companyId: number) {
@@ -109,9 +105,32 @@ export async function getCompanyConfig(companyId: number) {
 }
 
 export async function updateCompanyConfig(companyId: number, payload: UpdateCompanyConfigInput) {
-  const sanitized = sanitizePayload(payload);
-  const companyName = sanitized.companyName?.trim();
-  const { companyName: _ignored, ...configPayload } = sanitized;
+  const companyName = normalizeRequired(payload.companyName);
+  const configPayload: Prisma.CompanyConfigUncheckedUpdateInput = {};
+
+  if (payload.logoUrl !== undefined)
+    configPayload.logoUrl = normalizeNullable(payload.logoUrl);
+  if (payload.phone !== undefined)
+    configPayload.phone = normalizeNullable(payload.phone);
+  if (payload.phone2 !== undefined)
+    configPayload.phone2 = normalizeNullable(payload.phone2);
+  if (payload.email !== undefined)
+    configPayload.email = normalizeNullable(payload.email);
+  if (payload.address !== undefined)
+    configPayload.address = normalizeNullable(payload.address);
+  if (payload.city !== undefined)
+    configPayload.city = normalizeNullable(payload.city);
+  if (payload.slogan !== undefined)
+    configPayload.slogan = normalizeNullable(payload.slogan);
+  if (payload.website !== undefined)
+    configPayload.website = normalizeNullable(payload.website);
+  if (payload.instagramUrl !== undefined)
+    configPayload.instagramUrl = normalizeNullable(payload.instagramUrl);
+  if (payload.facebookUrl !== undefined)
+    configPayload.facebookUrl = normalizeNullable(payload.facebookUrl);
+
+  const themeKey = normalizeRequired(payload.themeKey);
+  if (themeKey !== undefined) configPayload.themeKey = themeKey;
 
   if (companyName) {
     await prisma.company.update({
