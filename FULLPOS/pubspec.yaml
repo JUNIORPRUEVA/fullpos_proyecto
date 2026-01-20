@@ -103,12 +103,12 @@ flutter_launcher_icons:
   android: true
   ios: true
   remove_alpha_ios: true
-  image_path: assets/imagen/FULLPOS_icon_1024x1024_full.png
-  adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: assets/imagen/FULLPOS_icon_1024x1024_full.png
+  image_path: assets/imagen/FULLPOS_icon_1024x1024_clean.png
+  adaptive_icon_background: assets/imagen/transparent_1024.png
+  adaptive_icon_foreground: assets/imagen/FULLPOS_icon_1024x1024_clean.png
   windows:
     generate: true
-    image_path: assets/imagen/FULLPOS_icon_1024x1024_full.png
+    image_path: assets/imagen/FULLPOS_icon_1024x1024_clean.png
 
 flutter_native_splash:
   color: "#FFFFFF"
