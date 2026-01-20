@@ -9,6 +9,8 @@ class AuthState with _$AuthState {
     String? accessToken,
     String? refreshToken,
     String? companyName,
+    int? companyId,
+    String? companyRnc,
     String? ownerVersion,
     String? username,
     @Default(false) bool loading,

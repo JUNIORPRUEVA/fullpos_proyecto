@@ -2,7 +2,6 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { buildPagination } from '../../utils/pagination';
 import { createProductSchema } from './products.validation';
-import { buildDemoProducts } from './demo-products';
 
 function toNumber(value: Prisma.Decimal | number | null) {
   if (value === null || value === undefined) return 0;
@@ -21,17 +20,14 @@ export async function listProducts(
   pageSize = 20,
   search?: string,
 ) {
-  const existingCount = await prisma.product.count({ where: { companyId } });
-  if (existingCount === 0) {
-    await prisma.product.createMany({
-      data: buildDemoProducts(companyId),
-      skipDuplicates: true,
-    });
-  }
-
   const { skip, take, page: safePage } = buildPagination(page, pageSize);
+
+  // Mantener solo datos reales: limpiamos productos demo y filtramos por isDemo = false
+  await prisma.product.deleteMany({ where: { companyId, isDemo: true } });
+
   const where = {
     companyId,
+    isDemo: false,
     ...(search
       ? {
           OR: [
@@ -46,7 +42,7 @@ export async function listProducts(
     prisma.product.count({ where }),
     prisma.product.findMany({
       where,
-      orderBy: [{ isDemo: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }],
       skip,
       take,
     }),

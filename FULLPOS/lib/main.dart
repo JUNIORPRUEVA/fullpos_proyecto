@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/app.dart';
 import 'core/debug/render_diagnostics.dart';
 import 'core/db/db_init.dart';
+import 'core/db_hardening/db_hardening.dart';
 import 'core/logging/app_logger.dart';
 import 'core/window/window_service.dart';
 import 'features/settings/data/business_settings_model.dart';
@@ -32,6 +33,8 @@ Future<void> main() async {
   }
 
   DbInit.ensureInitialized();
+  // FULLPOS DB HARDENING: validar la base antes de iniciar la UI.
+  await DbHardening.instance.preflight();
 
   final businessRepo = BusinessSettingsRepository();
   final initialSettings = BusinessSettings.defaultSettings;

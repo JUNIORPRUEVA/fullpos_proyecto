@@ -197,3 +197,66 @@ export async function ensureUserPassword(userId: number, password: string) {
     data: { password: hashed },
   });
 }
+
+export async function provisionOwnerByRnc(companyRnc: string, username: string, password: string) {
+  const rnc = companyRnc.trim();
+  const uname = username.trim();
+  if (!rnc || !uname) {
+    throw { status: 400, message: 'Datos incompletos' };
+  }
+
+  const company = await prisma.company.findFirst({
+    where: { rnc: rnc, isActive: true },
+  });
+
+  if (!company) {
+    throw { status: 404, message: 'Empresa no encontrada. Verifica el RNC.' };
+  }
+
+  const hashed = await hashPassword(password);
+
+  // 1) Si ya existe un owner para la empresa, actualízalo.
+  const existingOwner = await prisma.user.findFirst({
+    where: { companyId: company.id, role: 'owner' },
+  });
+
+  if (existingOwner) {
+    // Validar que el username no esté tomado por otro usuario.
+    const clash = await prisma.user.findFirst({
+      where: { username: uname, NOT: { id: existingOwner.id } },
+    });
+    if (clash) {
+      throw { status: 409, message: 'Ese usuario ya existe. Usa otro.' };
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: existingOwner.id },
+      data: {
+        username: uname,
+        password: hashed,
+        isActive: true,
+      },
+    });
+
+    return {
+      company: { id: company.id, name: company.name, rnc: company.rnc },
+      user: { id: updated.id, username: updated.username, role: updated.role },
+    };
+  }
+
+  // 2) Si no existe, crear owner.
+  const created = await prisma.user.create({
+    data: {
+      companyId: company.id,
+      username: uname,
+      password: hashed,
+      role: 'owner',
+      isActive: true,
+    },
+  });
+
+  return {
+    company: { id: company.id, name: company.name, rnc: company.rnc },
+    user: { id: created.id, username: created.username, role: created.role },
+  };
+}

@@ -37,10 +37,7 @@ class _BootstrapLoadingScreenState extends State<BootstrapLoadingScreen> {
         logoPath: hasLogo ? logoPath : null,
       );
     } catch (_) {
-      return const _BootstrapBranding(
-        businessName: 'FULLPOS',
-        logoPath: null,
-      );
+      return const _BootstrapBranding(businessName: 'FULLPOS', logoPath: null);
     }
   }
 
@@ -92,8 +89,16 @@ class _BootstrapLoadingScreenState extends State<BootstrapLoadingScreen> {
                               fit: BoxFit.cover,
                             )
                           : Image.asset(
-                              'assets/imagen/app.icon.png',
+                              'assets/imagen/FULLPOS_icon_1024x1024_full.png',
                               fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  const Center(
+                                    child: Icon(
+                                      Icons.storefront,
+                                      size: 72,
+                                      color: AppColors.gold,
+                                    ),
+                                  ),
                             ),
                     ),
                   ),

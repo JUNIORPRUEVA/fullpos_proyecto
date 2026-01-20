@@ -62,6 +62,7 @@ class BusinessSettings {
   final List<String> cloudAllowedRoles; // admin/supervisor/cashier
   final String? cloudOwnerAppAndroidUrl;
   final String? cloudOwnerAppIosUrl;
+  final String? cloudOwnerUsername;
 
   // Metadatos
   final DateTime createdAt;
@@ -112,6 +113,7 @@ class BusinessSettings {
     this.cloudAllowedRoles = const ['admin'],
     this.cloudOwnerAppAndroidUrl,
     this.cloudOwnerAppIosUrl,
+    this.cloudOwnerUsername,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) : createdAt = createdAt ?? DateTime.now(),
@@ -186,6 +188,7 @@ class BusinessSettings {
       })(),
       cloudOwnerAppAndroidUrl: map['cloud_owner_app_android_url'] as String?,
       cloudOwnerAppIosUrl: map['cloud_owner_app_ios_url'] as String?,
+        cloudOwnerUsername: map['cloud_owner_username'] as String?,
       createdAt: map['created_at'] != null
           ? DateTime.parse(map['created_at'] as String)
           : DateTime.now(),
@@ -242,6 +245,7 @@ class BusinessSettings {
       'cloud_allowed_roles': jsonEncode(cloudAllowedRoles),
       'cloud_owner_app_android_url': cloudOwnerAppAndroidUrl,
       'cloud_owner_app_ios_url': cloudOwnerAppIosUrl,
+      'cloud_owner_username': cloudOwnerUsername,
       'created_at': createdAt.toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
     };
@@ -300,6 +304,7 @@ class BusinessSettings {
     List<String>? cloudAllowedRoles,
     String? cloudOwnerAppAndroidUrl,
     String? cloudOwnerAppIosUrl,
+    String? cloudOwnerUsername,
     DateTime? createdAt,
     DateTime? updatedAt,
     bool clearLogoPath = false,
@@ -357,6 +362,7 @@ class BusinessSettings {
       cloudOwnerAppAndroidUrl:
           cloudOwnerAppAndroidUrl ?? this.cloudOwnerAppAndroidUrl,
       cloudOwnerAppIosUrl: cloudOwnerAppIosUrl ?? this.cloudOwnerAppIosUrl,
+      cloudOwnerUsername: cloudOwnerUsername ?? this.cloudOwnerUsername,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );
@@ -415,7 +421,8 @@ class BusinessSettings {
         other.cloudApiKey == cloudApiKey &&
         listEquals(other.cloudAllowedRoles, cloudAllowedRoles) &&
         other.cloudOwnerAppAndroidUrl == cloudOwnerAppAndroidUrl &&
-        other.cloudOwnerAppIosUrl == cloudOwnerAppIosUrl;
+          other.cloudOwnerAppIosUrl == cloudOwnerAppIosUrl &&
+          other.cloudOwnerUsername == cloudOwnerUsername;
   }
 
   @override
@@ -465,6 +472,7 @@ class BusinessSettings {
       Object.hashAll(cloudAllowedRoles),
       cloudOwnerAppAndroidUrl,
       cloudOwnerAppIosUrl,
+      cloudOwnerUsername,
     ]);
   }
 }

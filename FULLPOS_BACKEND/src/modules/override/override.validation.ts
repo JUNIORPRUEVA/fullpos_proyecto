@@ -25,6 +25,11 @@ export const verifySchema = z.object({
   terminalId: z.string().optional(),
 });
 
+export const virtualProvisionSchema = z.object({
+  terminalId: z.string().min(3),
+  uid: z.string().min(6).optional(),
+});
+
 export const auditQuerySchema = z.object({
   companyId: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),

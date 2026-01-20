@@ -28,17 +28,20 @@ class AuthRepository extends StateNotifier<AuthState> {
       final tokens = data['tokens'] as Map<String, dynamic>;
       await _storage.saveToken(tokens['accessToken'], tokens['refreshToken']);
 
+      final company = data['company'] as Map<String, dynamic>?;
       state = state.copyWith(
         accessToken: tokens['accessToken'] as String?,
         refreshToken: tokens['refreshToken'] as String?,
-        companyName: (data['company']?['name'] as String?) ?? 'Empresa',
-        ownerVersion: data['company']?['version'] as String?,
+        companyName: (company?['name'] as String?) ?? 'Empresa',
+        companyId: company?['id'] as int?,
+        companyRnc: company?['rnc'] as String?,
+        ownerVersion: company?['version'] as String?,
         username: data['user']?['username'] as String?,
         loading: false,
       );
     } on DioException catch (e) {
       state = state.copyWith(loading: false);
-      throw Exception(e.response?.data?['message'] ?? 'Error de autenticación');
+      throw Exception(e.response?.data?['message'] ?? 'Error de autenticacion');
     }
   }
 
@@ -51,6 +54,8 @@ class AuthRepository extends StateNotifier<AuthState> {
       final data = response.data as Map<String, dynamic>;
       state = state.copyWith(
         companyName: data['company']?['name'] as String?,
+        companyId: data['company']?['id'] as int?,
+        companyRnc: data['company']?['rnc'] as String?,
         ownerVersion: data['company']?['version'] as String?,
         username: data['username'] as String?,
         loading: false,

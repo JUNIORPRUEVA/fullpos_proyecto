@@ -97,14 +97,28 @@ dev_dependencies:
 
   # App icons generator (Android/Windows)
   flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.1
 
 flutter_launcher_icons:
   android: true
-  ios: false
-  image_path: assets/imagen/app.icon.png
+  ios: true
+  remove_alpha_ios: true
+  image_path: assets/imagen/FULLPOS_icon_1024x1024_full.png
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/imagen/FULLPOS_icon_1024x1024_full.png
   windows:
     generate: true
-    image_path: assets/imagen/app.icon.png
+    image_path: assets/imagen/FULLPOS_icon_1024x1024_full.png
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/imagen/FULLPOS_icon_1024x1024_full.png
+  android: true
+  ios: true
+  fullscreen: true
+  android_12:
+    image: assets/imagen/FULLPOS_icon_1024x1024_full.png
+    color: "#FFFFFF"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

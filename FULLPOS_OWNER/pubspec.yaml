@@ -36,6 +36,7 @@ dependencies:
   dio: ^5.7.0
   flutter_secure_storage: ^9.2.2
   intl: ^0.20.1
+  crypto: ^3.0.5
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
   url_launcher: ^6.3.1
@@ -50,6 +51,7 @@ dev_dependencies:
   freezed: ^2.5.7
   json_serializable: ^6.8.0
   flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -62,7 +64,21 @@ flutter:
 
 flutter_launcher_icons:
   android: true
-  ios: false
-  image_path: assets/logo/logo.png
+  ios: true
+  remove_alpha_ios: true
+  windows:
+    generate: true
+    image_path: assets/logo/FULLPOS_OWNER_icon_1024x1024_full.png
+  image_path: assets/logo/FULLPOS_OWNER_icon_1024x1024_full.png
   adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: assets/logo/logo.png
+  adaptive_icon_foreground: assets/logo/FULLPOS_OWNER_icon_1024x1024_full.png
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/logo/FULLPOS_OWNER_icon_1024x1024_full.png
+  android: true
+  ios: true
+  fullscreen: true
+  android_12:
+    image: assets/logo/FULLPOS_OWNER_icon_1024x1024_full.png
+    color: "#FFFFFF"

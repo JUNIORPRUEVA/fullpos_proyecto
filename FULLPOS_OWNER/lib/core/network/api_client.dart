@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../storage/secure_storage.dart';
 import '../config/app_config.dart';
@@ -20,6 +22,21 @@ class ApiClient {
             receiveTimeout: const Duration(seconds: 10),
           ),
         ) {
+    final host = Uri.parse(baseUrl ?? defaultBaseUrl).host;
+    dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient();
+        client.badCertificateCallback = (cert, h, port) => h == host;
+        return client;
+      },
+    );
+    _refreshDio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient();
+        client.badCertificateCallback = (cert, h, port) => h == host;
+        return client;
+      },
+    );
     dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
         final token = await _storage.readToken();

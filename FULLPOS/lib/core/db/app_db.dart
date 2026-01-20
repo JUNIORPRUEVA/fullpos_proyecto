@@ -19,6 +19,9 @@ class AppDb {
   // Bump para forzar upgrade en PCs con DB creada sin columnas nuevas.
   static const int _dbVersion = 23;
 
+  /// FULLPOS DB HARDENING: exponer versión del esquema.
+  static int get schemaVersion => _dbVersion;
+
   // Por defecto usamos SIEMPRE la DB de producción.
   // Si necesitas simular migraciones localmente, ejecuta en debug con:
   // `--dart-define=USE_TEST_DB=true`
@@ -110,6 +113,10 @@ class AppDb {
     } catch (_) {}
     try {
       await db.execute('PRAGMA synchronous = NORMAL;');
+    } catch (_) {}
+    try {
+      // FULLPOS DB HARDENING: reducir errores "database is locked".
+      await db.execute('PRAGMA busy_timeout = 5000;');
     } catch (_) {}
   }
 
@@ -2734,6 +2741,8 @@ class AppDb {
   }
 
   /// Normaliza tablas y columnas clave en bases existentes
+  static Future<void> ensureSchema(DatabaseExecutor db) => _ensureSchemaIntegrity(db);
+
   static Future<void> _ensureSchemaIntegrity(DatabaseExecutor db) async {
     await _ensureSecurityTables(db);
     // Crear tablas críticas si faltan

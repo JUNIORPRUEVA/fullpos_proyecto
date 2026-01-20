@@ -152,3 +152,71 @@ class CashMovementRow with _$CashMovementRow {
 
   factory CashMovementRow.fromJson(Map<String, dynamic> json) => _$CashMovementRowFromJson(json);
 }
+
+class ExpenseRow {
+  ExpenseRow({
+    required this.id,
+    required this.amount,
+    required this.category,
+    required this.incurredAt,
+    this.note,
+    this.createdBy,
+  });
+
+  final int id;
+  final double amount;
+  final String category;
+  final DateTime incurredAt;
+  final String? note;
+  final UserInfo? createdBy;
+
+  factory ExpenseRow.fromJson(Map<String, dynamic> json) {
+    return ExpenseRow(
+      id: json['id'] as int,
+      amount: (json['amount'] as num).toDouble(),
+      category: json['category'] as String,
+      incurredAt: DateTime.parse(json['incurredAt'] as String),
+      note: json['note'] as String?,
+      createdBy: json['createdBy'] != null
+          ? UserInfo.fromJson(json['createdBy'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+}
+
+class ExpensesSummary {
+  ExpensesSummary({required this.total, required this.count});
+  final double total;
+  final int count;
+
+  factory ExpensesSummary.fromJson(Map<String, dynamic> json) {
+    return ExpensesSummary(
+      total: (json['total'] as num).toDouble(),
+      count: json['count'] as int,
+    );
+  }
+}
+
+class PaginatedExpenses {
+  PaginatedExpenses({
+    required this.data,
+    required this.page,
+    required this.pageSize,
+    required this.total,
+  });
+
+  final List<ExpenseRow> data;
+  final int page;
+  final int pageSize;
+  final int total;
+
+  factory PaginatedExpenses.fromJson(Map<String, dynamic> json) {
+    final list = (json['data'] as List).cast<Map<String, dynamic>>();
+    return PaginatedExpenses(
+      data: list.map(ExpenseRow.fromJson).toList(),
+      page: json['page'] as int,
+      pageSize: json['pageSize'] as int,
+      total: json['total'] as int,
+    );
+  }
+}

@@ -13,6 +13,9 @@ const envSchema = z.object({
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   CORS_ORIGINS: z.string().optional(),
   OVERRIDE_API_KEY: z.string().optional(),
+  // Clave maestra para derivar el secret del token virtual (TOTP) por terminal.
+  // Si no está configurada, el token virtual queda deshabilitado.
+  VIRTUAL_TOKEN_MASTER_KEY: z.string().min(16).optional(),
   OWNER_APP_ANDROID_URL: z.string().optional(),
   OWNER_APP_IOS_URL: z.string().optional(),
   OWNER_APP_VERSION: z.string().optional()

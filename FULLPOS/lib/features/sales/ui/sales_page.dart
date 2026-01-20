@@ -11,6 +11,7 @@ import '../../../core/security/scanner_input_controller.dart';
 import '../../../core/security/security_config.dart';
 import '../../../core/session/session_manager.dart';
 import '../../../core/session/ui_preferences.dart';
+import '../../../core/theme/color_utils.dart';
 import '../../cash/data/cash_repository.dart' as cash_repo;
 import '../../cash/ui/cash_open_dialog.dart';
 import '../../cash/ui/cash_panel_sheet.dart';
@@ -2149,11 +2150,12 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     required Color color,
     required VoidCallback onPressed,
   }) {
+    final contrastColor = ColorUtils.foregroundFor(color);
     return ElevatedButton(
       onPressed: onPressed,
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
-        foregroundColor: Colors.white,
+        foregroundColor: contrastColor,
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(10),
@@ -2165,17 +2167,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 22),
+          Icon(icon, size: 22, color: contrastColor),
           const SizedBox(width: 10),
           Flexible(
             child: Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
+                color: contrastColor,
                 fontSize: 15,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 0.6,
                 height: 1.1,
-                shadows: [
+                shadows: const [
                   Shadow(
                     color: Colors.black38,
                     offset: Offset(0, 1),

@@ -280,6 +280,7 @@ ${appConfigService.getReceiptFooter()}
 
 ### Para Usuarios
 - `GUIA_CONFIGURACION_NEGOCIO.md` - Cómo usar el módulo
+- `CONFIGURACION_NUBE/MANUAL_CONFIGURACION_Y_USO_NUBE.md` - Cómo configurar y usar la nube
 
 ### Para Desarrolladores
 - `RESUMEN_IMPLEMENTACION.md` - Arquitectura técnica

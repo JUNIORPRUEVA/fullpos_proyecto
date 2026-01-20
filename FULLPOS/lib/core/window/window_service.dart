@@ -485,6 +485,47 @@ class WindowService {
     }
   }
 
+  /// En Windows POS, la app puede estar en modo "always on top". Para abrir
+  /// una aplicación externa (por ejemplo WhatsApp Web/Desktop o el navegador),
+  /// conviene desactivar temporalmente el `alwaysOnTop` para que el usuario
+  /// pueda interactuar con la ventana externa.
+  ///
+  /// A diferencia de [runWithSystemDialog], este helper NO fuerza focus de
+  /// vuelta al POS al final.
+  static Future<T> runWithExternalApplication<T>(
+    Future<T> Function() action, {
+    Duration restoreDelay = const Duration(milliseconds: 900),
+  }) async {
+    if (!Platform.isWindows || !_isInitialized) {
+      return action();
+    }
+
+    // Solo aplica si estamos en modo POS (fullscreen lógico).
+    final shouldRestore = _isFullScreen;
+
+    if (shouldRestore) {
+      try {
+        await windowManager.setAlwaysOnTop(false);
+      } catch (_) {}
+      // Dar tiempo a Windows a actualizar el z-order.
+      await Future<void>.delayed(const Duration(milliseconds: 75));
+    }
+
+    try {
+      return await action();
+    } finally {
+      if (shouldRestore) {
+        // Restaurar luego de un breve delay. Si el POS fue minimizado, esto
+        // no interfiere con la app externa; al volver, recupera el comportamiento.
+        Future<void>.delayed(restoreDelay, () async {
+          try {
+            await windowManager.setAlwaysOnTop(true);
+          } catch (_) {}
+        });
+      }
+    }
+  }
+
   /// Establecer ventana siempre visible (opcional)
   static Future<void> setAlwaysOnTop(bool value) async {
     if (!_isInitialized) return;

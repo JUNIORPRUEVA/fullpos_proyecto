@@ -90,8 +90,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final business = ref.watch(businessSettingsProvider);
-    final businessName =
-        business.businessName.isNotEmpty ? business.businessName : 'FULLPOS';
+    final businessName = business.businessName.isNotEmpty
+        ? business.businessName
+        : 'FULLPOS';
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -143,8 +144,16 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           ),
                           clipBehavior: Clip.antiAlias,
                           child: Image.asset(
-                            'assets/imagen/app.icon.png',
+                            'assets/imagen/FULLPOS_icon_1024x1024_full.png',
                             fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Center(
+                                  child: Icon(
+                                    Icons.storefront,
+                                    size: 44,
+                                    color: AppColors.gold,
+                                  ),
+                                ),
                           ),
                         ),
                         const SizedBox(height: 20),
@@ -348,8 +357,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.teal700,
                               foregroundColor: Colors.white,
-                              disabledBackgroundColor:
-                                  AppColors.teal700.withOpacity(0.6),
+                              disabledBackgroundColor: AppColors.teal700
+                                  .withOpacity(0.6),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),

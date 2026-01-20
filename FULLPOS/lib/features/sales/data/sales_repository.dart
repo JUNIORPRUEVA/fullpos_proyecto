@@ -1,5 +1,6 @@
 import '../../../core/db/app_db.dart';
 import '../../../core/db/tables.dart';
+import '../../../core/db_hardening/db_hardening.dart';
 import '../../../core/utils/app_event_bus.dart';
 import '../../../core/validation/business_rules.dart';
 import 'sales_model.dart';
@@ -291,10 +292,12 @@ class SalesRepository {
     int? sessionId,
     required List<Map<String, dynamic>> items,
     bool allowNegativeStock = false,
-  }) async {
-    final db = await AppDb.database;
+  }) {
+    // FULLPOS DB HARDENING: proteger la creación completa de ventas.
+    return DbHardening.instance.runDbSafe<int>(() async {
+      final db = await AppDb.database;
 
-    return await db.transaction((txn) async {
+      return await db.transaction((txn) async {
       final now = DateTime.now().millisecondsSinceEpoch;
 
       final saleId = await txn.insert(DbTables.sales, {
@@ -465,7 +468,8 @@ class SalesRepository {
 
       return saleId;
     });
-  }
+  }, stage: 'save_sale_with_items');
+}
 
   /// Obtiene una venta con sus items
   static Future<Map<String, dynamic>?> getSaleWithItems(int saleId) async {

@@ -51,6 +51,7 @@ class BusinessSettingsRepository {
     'cloud_allowed_roles': "TEXT DEFAULT '[\"admin\"]'",
     'cloud_owner_app_android_url': 'TEXT',
     'cloud_owner_app_ios_url': 'TEXT',
+    'cloud_owner_username': 'TEXT',
     'created_at': 'TEXT DEFAULT CURRENT_TIMESTAMP',
     'updated_at': 'TEXT DEFAULT CURRENT_TIMESTAMP',
   };

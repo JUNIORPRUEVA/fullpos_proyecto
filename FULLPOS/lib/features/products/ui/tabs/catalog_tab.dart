@@ -291,60 +291,67 @@ class _CatalogTabState extends State<CatalogTab> {
       children: [
         // Barra de búsqueda y filtros
         Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Buscar por código o nombre...',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear),
-                            onPressed: () {
-                              _searchController.clear();
-                              _loadProducts();
-                            },
-                          )
-                        : null,
-                    border: const OutlineInputBorder(),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Material(
+            elevation: 1,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Buscar por codigo o nombre...',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  _loadProducts();
+                                },
+                              )
+                            : null,
+                        border: InputBorder.none,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(
+                      Icons.filter_list,
+                      color: _currentFilters?.hasFilters == true
+                          ? Colors.blue
+                          : null,
+                    ),
+                    onPressed: _showFilters,
+                    tooltip: 'Filtros',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: (_isAdmin || _permissions.canEditProducts)
+                        ? () => _showProductForm()
+                        : null,
+                    tooltip: 'Nuevo Producto',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.table_view),
+                    onPressed: _exportProductsToExcel,
+                    tooltip: 'Exportar a Excel',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.picture_as_pdf),
+                    onPressed: _exportProductsCatalogPdf,
+                    tooltip: 'Catalogo PDF',
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: Icon(
-                  Icons.filter_list,
-                  color: _currentFilters?.hasFilters == true
-                      ? Colors.blue
-                      : null,
-                ),
-                onPressed: _showFilters,
-                tooltip: 'Filtros',
-              ),
-              IconButton(
-                icon: const Icon(Icons.add),
-                onPressed: (_isAdmin || _permissions.canEditProducts)
-                    ? () => _showProductForm()
-                    : null,
-                tooltip: 'Nuevo Producto',
-              ),
-              IconButton(
-                icon: const Icon(Icons.table_view),
-                onPressed: _exportProductsToExcel,
-                tooltip: 'Exportar a Excel',
-              ),
-              IconButton(
-                icon: const Icon(Icons.picture_as_pdf),
-                onPressed: _exportProductsCatalogPdf,
-                tooltip: 'Catálogo PDF',
-              ),
-            ],
+            ),
           ),
         ),
-
         // Lista de productos
         Expanded(
           child: _isLoading

@@ -12,6 +12,7 @@ class SecurityConfig {
   final bool offlinePinEnabled;
   final bool offlineBarcodeEnabled;
   final bool remoteEnabled;
+  final bool virtualTokenEnabled;
   final bool scannerEnabled;
   final String scannerSuffix;
   final String? scannerPrefix;
@@ -19,9 +20,10 @@ class SecurityConfig {
 
   SecurityConfig({
     required this.overrideByAction,
-    this.offlinePinEnabled = true,
-    this.offlineBarcodeEnabled = true,
-    this.remoteEnabled = true,
+    this.offlinePinEnabled = false,
+    this.offlineBarcodeEnabled = false,
+    this.remoteEnabled = false,
+    this.virtualTokenEnabled = false,
     this.scannerEnabled = true,
     this.scannerSuffix = '\n',
     this.scannerPrefix,
@@ -35,9 +37,10 @@ class SecurityConfig {
     }
     return SecurityConfig(
       overrideByAction: overrideDefaults,
-      offlinePinEnabled: true,
-      offlineBarcodeEnabled: true,
-      remoteEnabled: true,
+      offlinePinEnabled: false,
+      offlineBarcodeEnabled: false,
+      remoteEnabled: false,
+      virtualTokenEnabled: false,
       scannerEnabled: true,
       scannerSuffix: '\n',
       scannerPrefix: '',
@@ -50,6 +53,7 @@ class SecurityConfig {
     bool? offlinePinEnabled,
     bool? offlineBarcodeEnabled,
     bool? remoteEnabled,
+    bool? virtualTokenEnabled,
     bool? scannerEnabled,
     String? scannerSuffix,
     String? scannerPrefix,
@@ -58,8 +62,10 @@ class SecurityConfig {
     return SecurityConfig(
       overrideByAction: overrideByAction ?? this.overrideByAction,
       offlinePinEnabled: offlinePinEnabled ?? this.offlinePinEnabled,
-      offlineBarcodeEnabled: offlineBarcodeEnabled ?? this.offlineBarcodeEnabled,
+      offlineBarcodeEnabled:
+          offlineBarcodeEnabled ?? this.offlineBarcodeEnabled,
       remoteEnabled: remoteEnabled ?? this.remoteEnabled,
+      virtualTokenEnabled: virtualTokenEnabled ?? this.virtualTokenEnabled,
       scannerEnabled: scannerEnabled ?? this.scannerEnabled,
       scannerSuffix: scannerSuffix ?? this.scannerSuffix,
       scannerPrefix: scannerPrefix ?? this.scannerPrefix,
@@ -68,15 +74,16 @@ class SecurityConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        'override_by_action': overrideByAction,
-        'offline_pin_enabled': offlinePinEnabled,
-        'offline_barcode_enabled': offlineBarcodeEnabled,
-        'remote_enabled': remoteEnabled,
-        'scanner_enabled': scannerEnabled,
-        'scanner_suffix': scannerSuffix,
-        'scanner_prefix': scannerPrefix,
-        'scanner_timeout_ms': scannerTimeoutMs,
-      };
+    'override_by_action': overrideByAction,
+    'offline_pin_enabled': offlinePinEnabled,
+    'offline_barcode_enabled': offlineBarcodeEnabled,
+    'remote_enabled': remoteEnabled,
+    'virtual_token_enabled': virtualTokenEnabled,
+    'scanner_enabled': scannerEnabled,
+    'scanner_suffix': scannerSuffix,
+    'scanner_prefix': scannerPrefix,
+    'scanner_timeout_ms': scannerTimeoutMs,
+  };
 
   factory SecurityConfig.fromJson(Map<String, dynamic> json) {
     final overrides = <String, bool>{};
@@ -88,9 +95,10 @@ class SecurityConfig {
     }
     return SecurityConfig(
       overrideByAction: overrides,
-      offlinePinEnabled: json['offline_pin_enabled'] as bool? ?? true,
-      offlineBarcodeEnabled: json['offline_barcode_enabled'] as bool? ?? true,
-      remoteEnabled: json['remote_enabled'] as bool? ?? true,
+      offlinePinEnabled: json['offline_pin_enabled'] as bool? ?? false,
+      offlineBarcodeEnabled: json['offline_barcode_enabled'] as bool? ?? false,
+      remoteEnabled: json['remote_enabled'] as bool? ?? false,
+      virtualTokenEnabled: json['virtual_token_enabled'] as bool? ?? false,
       scannerEnabled: json['scanner_enabled'] as bool? ?? true,
       scannerSuffix: json['scanner_suffix'] as String? ?? '\n',
       scannerPrefix: json['scanner_prefix'] as String?,
@@ -102,7 +110,8 @@ class SecurityConfig {
 class SecurityConfigRepository {
   SecurityConfigRepository._();
 
-  static String _configKey(int companyId) => 'security_config_company_$companyId';
+  static String _configKey(int companyId) =>
+      'security_config_company_$companyId';
   static String _scannerKey(int companyId, String terminalId) =>
       'security_scanner_${companyId}_$terminalId';
 
@@ -111,7 +120,8 @@ class SecurityConfigRepository {
     String? terminalId,
   }) async {
     final db = await AppDb.database;
-    final resolvedCompanyId = companyId ?? await SessionManager.companyId() ?? 1;
+    final resolvedCompanyId =
+        companyId ?? await SessionManager.companyId() ?? 1;
     final rows = await db.query(
       DbTables.appConfig,
       where: 'key = ?',
@@ -119,8 +129,11 @@ class SecurityConfigRepository {
       limit: 1,
     );
 
-    SecurityConfig base =
-        rows.isNotEmpty ? SecurityConfig.fromJson(jsonDecode(rows.first['value'] as String) as Map<String, dynamic>) : SecurityConfig.defaults();
+    SecurityConfig base = rows.isNotEmpty
+        ? SecurityConfig.fromJson(
+            jsonDecode(rows.first['value'] as String) as Map<String, dynamic>,
+          )
+        : SecurityConfig.defaults();
 
     if (terminalId != null && terminalId.isNotEmpty) {
       final scannerRows = await db.query(
@@ -132,13 +145,18 @@ class SecurityConfigRepository {
       if (scannerRows.isNotEmpty) {
         try {
           final scannerJson =
-              jsonDecode(scannerRows.first['value'] as String) as Map<String, dynamic>;
+              jsonDecode(scannerRows.first['value'] as String)
+                  as Map<String, dynamic>;
           base = base.copyWith(
-            scannerEnabled: scannerJson['scanner_enabled'] as bool? ?? base.scannerEnabled,
-            scannerSuffix: scannerJson['scanner_suffix'] as String? ?? base.scannerSuffix,
-            scannerPrefix: scannerJson['scanner_prefix'] as String? ?? base.scannerPrefix,
+            scannerEnabled:
+                scannerJson['scanner_enabled'] as bool? ?? base.scannerEnabled,
+            scannerSuffix:
+                scannerJson['scanner_suffix'] as String? ?? base.scannerSuffix,
+            scannerPrefix:
+                scannerJson['scanner_prefix'] as String? ?? base.scannerPrefix,
             scannerTimeoutMs:
-                scannerJson['scanner_timeout_ms'] as int? ?? base.scannerTimeoutMs,
+                scannerJson['scanner_timeout_ms'] as int? ??
+                base.scannerTimeoutMs,
           );
         } catch (_) {}
       }
@@ -155,31 +173,23 @@ class SecurityConfigRepository {
     final db = await AppDb.database;
     final now = DateTime.now().millisecondsSinceEpoch;
 
-    await db.insert(
-      DbTables.appConfig,
-      {
-        'key': _configKey(companyId),
-        'value': jsonEncode(config.toJson()),
-        'updated_at_ms': now,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert(DbTables.appConfig, {
+      'key': _configKey(companyId),
+      'value': jsonEncode(config.toJson()),
+      'updated_at_ms': now,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
 
     if (terminalId != null && terminalId.isNotEmpty) {
-      await db.insert(
-        DbTables.appConfig,
-        {
-          'key': _scannerKey(companyId, terminalId),
-          'value': jsonEncode({
-            'scanner_enabled': config.scannerEnabled,
-            'scanner_suffix': config.scannerSuffix,
-            'scanner_prefix': config.scannerPrefix,
-            'scanner_timeout_ms': config.scannerTimeoutMs,
-          }),
-          'updated_at_ms': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await db.insert(DbTables.appConfig, {
+        'key': _scannerKey(companyId, terminalId),
+        'value': jsonEncode({
+          'scanner_enabled': config.scannerEnabled,
+          'scanner_suffix': config.scannerSuffix,
+          'scanner_prefix': config.scannerPrefix,
+          'scanner_timeout_ms': config.scannerTimeoutMs,
+        }),
+        'updated_at_ms': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
   }
 
@@ -189,7 +199,13 @@ class SecurityConfigRepository {
     SecurityConfig? cached,
   }) async {
     final config =
-        cached ?? await load(companyId: companyId, terminalId: await SessionManager.terminalId() ?? await SessionManager.ensureTerminalId());
+        cached ??
+        await load(
+          companyId: companyId,
+          terminalId:
+              await SessionManager.terminalId() ??
+              await SessionManager.ensureTerminalId(),
+        );
     final override = config.overrideByAction[actionCode];
     if (override != null) return override;
     final action = AppActions.findByCode(actionCode);

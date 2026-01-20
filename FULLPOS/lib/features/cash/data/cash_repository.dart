@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import '../../../core/db/app_db.dart';
 import '../../../core/db/tables.dart';
+import '../../../core/db_hardening/db_hardening.dart';
 import 'cash_session_model.dart';
 import 'cash_movement_model.dart';
 import 'cash_summary_model.dart';
@@ -40,32 +41,35 @@ class CashRepository {
     required int userId,
     required String userName,
     required double openingAmount,
-  }) async {
-    final db = await AppDb.database;
+  }) {
+    // FULLPOS DB HARDENING: proteger la apertura de sesiones ante errores SQLite.
+    return DbHardening.instance.runDbSafe<int>(() async {
+      final db = await AppDb.database;
 
-    // Verificar que no haya otra sesión abierta
-    final existing = await getOpenSession();
-    if (existing != null) {
-      throw Exception('Ya existe una caja abierta. Ciérrela primero.');
-    }
+      // Verificar que no haya otra sesión abierta
+      final existing = await getOpenSession();
+      if (existing != null) {
+        throw Exception('Ya existe una caja abierta. Ciérrela primero.');
+      }
 
-    final now = DateTime.now().millisecondsSinceEpoch;
+      final now = DateTime.now().millisecondsSinceEpoch;
 
-    final session = CashSessionModel(
-      userId: userId,
-      userName: userName,
-      openedAtMs: now,
-      openingAmount: openingAmount,
-      status: CashSessionStatus.open,
-    );
+      final session = CashSessionModel(
+        userId: userId,
+        userName: userName,
+        openedAtMs: now,
+        openingAmount: openingAmount,
+        status: CashSessionStatus.open,
+      );
 
-    final id = await db.insert(
-      DbTables.cashSessions,
-      session.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.abort,
-    );
+      final id = await db.insert(
+        DbTables.cashSessions,
+        session.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
 
-    return id;
+      return id;
+    }, stage: 'cash_open_session');
   }
 
   /// Cerrar sesión de caja con transacción
@@ -74,27 +78,30 @@ class CashRepository {
     required double closingAmount,
     required String note,
     required CashSummaryModel summary,
-  }) async {
-    final db = await AppDb.database;
-    final now = DateTime.now().millisecondsSinceEpoch;
+  }) {
+    // FULLPOS DB HARDENING: asegurar el cierre de caja antes de comprometer cambios.
+    return DbHardening.instance.runDbSafe<void>(() async {
+      final db = await AppDb.database;
+      final now = DateTime.now().millisecondsSinceEpoch;
 
-    final difference = summary.calculateDifference(closingAmount);
+      final difference = summary.calculateDifference(closingAmount);
 
-    await db.transaction((txn) async {
-      await txn.update(
-        DbTables.cashSessions,
-        {
-          'closed_at_ms': now,
-          'closing_amount': closingAmount,
-          'expected_cash': summary.expectedCash,
-          'difference': difference,
-          'note': note,
-          'status': CashSessionStatus.closed,
-        },
-        where: 'id = ?',
-        whereArgs: [sessionId],
-      );
-    });
+      await db.transaction((txn) async {
+        await txn.update(
+          DbTables.cashSessions,
+          {
+            'closed_at_ms': now,
+            'closing_amount': closingAmount,
+            'expected_cash': summary.expectedCash,
+            'difference': difference,
+            'note': note,
+            'status': CashSessionStatus.closed,
+          },
+          where: 'id = ?',
+          whereArgs: [sessionId],
+        );
+      });
+    }, stage: 'cash_close_session');
   }
 
   /// Obtener sesión por ID
@@ -140,37 +147,40 @@ class CashRepository {
     required double amount,
     required String reason,
     required int userId,
-  }) async {
-    final db = await AppDb.database;
-    final now = DateTime.now().millisecondsSinceEpoch;
+  }) {
+    // FULLPOS DB HARDENING: reforzar el registro de movimientos críticos.
+    return DbHardening.instance.runDbSafe<int>(() async {
+      final db = await AppDb.database;
+      final now = DateTime.now().millisecondsSinceEpoch;
 
-    // Validar que el tipo sea correcto
-    if (type != CashMovementType.income && type != CashMovementType.outcome) {
-      throw Exception('Tipo de movimiento inválido: $type');
-    }
+      // Validar que el tipo sea correcto
+      if (type != CashMovementType.income && type != CashMovementType.outcome) {
+        throw Exception('Tipo de movimiento inválido: $type');
+      }
 
-    // Validar que la sesión esté abierta
-    final session = await getSessionById(sessionId);
-    if (session == null || !session.isOpen) {
-      throw Exception('La sesión de caja no está abierta.');
-    }
+      // Validar que la sesión esté abierta
+      final session = await getSessionById(sessionId);
+      if (session == null || !session.isOpen) {
+        throw Exception('La sesión de caja no está abierta.');
+      }
 
-    final movement = CashMovementModel(
-      sessionId: sessionId,
-      type: type,
-      amount: amount,
-      reason: reason,
-      createdAtMs: now,
-      userId: userId,
-    );
+      final movement = CashMovementModel(
+        sessionId: sessionId,
+        type: type,
+        amount: amount,
+        reason: reason,
+        createdAtMs: now,
+        userId: userId,
+      );
 
-    final id = await db.insert(
-      DbTables.cashMovements,
-      movement.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.abort,
-    );
+      final id = await db.insert(
+        DbTables.cashMovements,
+        movement.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
 
-    return id;
+      return id;
+    }, stage: 'cash_add_movement');
   }
 
   /// Listar movimientos de una sesión

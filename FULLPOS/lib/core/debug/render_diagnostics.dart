@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -21,10 +20,9 @@ class RenderDiagnostics {
   DateTime? _firstFrameAt;
   bool _handlersInstalled = false;
 
-  Duration? get timeToFirstFrame =>
-      (_runAppAt != null && _firstFrameAt != null)
-          ? _firstFrameAt!.difference(_runAppAt!)
-          : null;
+  Duration? get timeToFirstFrame => (_runAppAt != null && _firstFrameAt != null)
+      ? _firstFrameAt!.difference(_runAppAt!)
+      : null;
 
   Future<void> ensureInitialized() async {
     await _logger.init();
@@ -100,15 +98,13 @@ class RenderDiagnostics {
   void markFirstFramePainted({String? source}) {
     if (_firstFrameAt != null) return;
     _firstFrameAt = DateTime.now();
-    final ttffMs =
-        _runAppAt != null ? _firstFrameAt!.difference(_runAppAt!).inMilliseconds : null;
+    final ttffMs = _runAppAt != null
+        ? _firstFrameAt!.difference(_runAppAt!).inMilliseconds
+        : null;
     unawaited(
       _logger.info(
         'first_frame_painted',
-        data: {
-          'source': source,
-          if (ttffMs != null) 'ttff_ms': ttffMs,
-        },
+        data: {'source': source, if (ttffMs != null) 'ttff_ms': ttffMs},
       ),
     );
   }
@@ -120,10 +116,7 @@ class RenderDiagnostics {
   Future<void> logOverlay(String event, {Map<String, Object?>? data}) {
     return _logger.info(
       'overlay_event',
-      data: {
-        'event': event,
-        if (data != null) ...data,
-      },
+      data: {'event': event, if (data != null) ...data},
     );
   }
 
@@ -145,10 +138,7 @@ class RenderDiagnostics {
   Future<void> logRecoveryAction(String action, {int? attempt}) {
     return _logger.info(
       'render_recovery',
-      data: {
-        'action': action,
-        if (attempt != null) 'attempt': attempt,
-      },
+      data: {'action': action, if (attempt != null) 'attempt': attempt},
     );
   }
 
@@ -173,19 +163,15 @@ class RenderDiagnostics {
 }
 
 class RenderWatchdog {
-  RenderWatchdog({
-    required Duration timeout,
-    required DebugAppLogger logger,
-  })  : _timeout = timeout,
-        _logger = logger;
+  RenderWatchdog({required Duration timeout, required DebugAppLogger logger})
+    : _timeout = timeout,
+      _logger = logger;
 
   final DebugAppLogger _logger;
   Duration _timeout;
   Timer? _timer;
-  VoidCallback? _onTimeout;
 
   void start(VoidCallback onTimeout) {
-    _onTimeout = onTimeout;
     _timer?.cancel();
     _timer = Timer(_timeout, () {
       _logger.warn(

@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-const _baseUrl =
-    String.fromEnvironment('BACKEND_BASE_URL', defaultValue: 'http://localhost:4000');
+import '../../../core/config/backend_config.dart';
 
 class OwnerAppLinks {
   final String? androidUrl;
@@ -12,7 +11,7 @@ class OwnerAppLinks {
   const OwnerAppLinks({this.androidUrl, this.iosUrl, this.version});
 
   static Future<OwnerAppLinks> fetch() async {
-    final uri = Uri.parse('$_baseUrl/api/downloads/owner-app');
+    final uri = Uri.parse('$backendBaseUrl/api/downloads/owner-app');
     final res = await http.get(uri);
     if (res.statusCode != 200) {
       throw Exception('No se pudo obtener links (${res.statusCode})');

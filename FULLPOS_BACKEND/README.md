@@ -36,6 +36,7 @@ Scripts disponibles:
 - `POST /api/auth/login`: login (usuario/email + password)
 - `POST /api/auth/refresh`: refresh de tokens
 - `GET /api/auth/me`: perfil + empresa
+- `POST /api/auth/provision-owner`: crear/actualizar usuario owner por RNC (protegido por `OVERRIDE_API_KEY` si aplica)
 - `GET /api/reports/sales/summary?from&to`
 - `GET /api/reports/sales/by-day?from&to`
 - `GET /api/reports/sales/list?from&to&page=1&pageSize=20`

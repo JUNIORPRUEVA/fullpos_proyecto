@@ -19,8 +19,9 @@ class BrandedLoadingView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final business = ref.watch(businessSettingsProvider);
     final brandName = 'FULLPOS';
-    final businessName =
-        business.businessName.isNotEmpty ? business.businessName : brandName;
+    final businessName = business.businessName.isNotEmpty
+        ? business.businessName
+        : brandName;
     final showBusinessTag =
         businessName.trim().isNotEmpty && businessName != brandName;
 
@@ -44,8 +45,15 @@ class BrandedLoadingView extends ConsumerWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(20),
               child: Image.asset(
-                'assets/imagen/app.icon.png',
+                'assets/imagen/FULLPOS_icon_1024x1024_full.png',
                 fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => const Center(
+                  child: Icon(
+                    Icons.storefront,
+                    size: 72,
+                    color: AppColors.gold,
+                  ),
+                ),
               ),
             ),
           ),

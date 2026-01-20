@@ -96,14 +96,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         controller: _passCtrl,
                         obscureText: _obscure,
                         decoration: InputDecoration(
-                          labelText: 'Contraseña',
+                          labelText: 'Contrasena',
                           prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
                             onPressed: () => setState(() => _obscure = !_obscure),
                           ),
                         ),
-                        validator: (v) => v == null || v.isEmpty ? 'Ingresa tu contraseña' : null,
+                        validator: (v) => v == null || v.isEmpty ? 'Ingresa tu contrasena' : null,
                       ),
                       const SizedBox(height: 16),
                       if (_error != null)
@@ -121,12 +121,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Text('Ingresar'),
-                      ),
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: () => context.go('/settings'),
-                        icon: const Icon(Icons.cloud_outlined),
-                        label: const Text('Configurar nube'),
                       ),
                     ],
                   ),

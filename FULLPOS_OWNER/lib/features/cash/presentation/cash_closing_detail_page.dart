@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../../auth/data/auth_repository.dart';
+import '../../../core/network/unauthorized_exception.dart';
 import '../../reports/data/report_models.dart';
 import '../../reports/data/reports_repository.dart';
 
@@ -10,7 +13,8 @@ class CashClosingDetailPage extends ConsumerStatefulWidget {
   final int id;
 
   @override
-  ConsumerState<CashClosingDetailPage> createState() => _CashClosingDetailPageState();
+  ConsumerState<CashClosingDetailPage> createState() =>
+      _CashClosingDetailPageState();
 }
 
 class _CashClosingDetailPageState extends ConsumerState<CashClosingDetailPage> {
@@ -37,6 +41,16 @@ class _CashClosingDetailPageState extends ConsumerState<CashClosingDetailPage> {
         _loading = false;
       });
     } catch (e) {
+      if (e is UnauthorizedException) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sesión vencida. Entra de nuevo.')),
+          );
+        }
+        await ref.read(authRepositoryProvider.notifier).logout();
+        if (mounted) context.go('/login');
+        return;
+      }
       setState(() {
         _error = 'Error cargando cierre';
         _loading = false;
@@ -53,86 +67,145 @@ class _CashClosingDetailPageState extends ConsumerState<CashClosingDetailPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!))
-              : _detail == null
-                  ? const Center(child: Text('Sin datos'))
-                  : Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: ListView(
+          ? Center(child: Text(_error!))
+          : _detail == null
+          ? const Center(child: Text('Sin datos'))
+          : Padding(
+              padding: const EdgeInsets.all(16),
+              child: ListView(
+                children: [
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Resumen de Caja', style: Theme.of(context).textTheme.titleMedium),
-                                  const SizedBox(height: 8),
-                                  Wrap(
-                                    spacing: 12,
-                                    runSpacing: 12,
-                                    children: [
-                                      _InfoChip('Abierto', _detail!.session.openedAt != null ? fmt.format(_detail!.session.openedAt!) : 'N/D'),
-                                      _InfoChip('Cerrado', _detail!.session.closedAt != null ? fmt.format(_detail!.session.closedAt!) : 'N/D'),
-                                      _InfoChip('Inicial', number.format(_detail!.session.initialAmount ?? 0)),
-                                      _InfoChip('Cierre', number.format(_detail!.session.closingAmount ?? 0)),
-                                      _InfoChip('Esperado', number.format(_detail!.session.expectedCash ?? 0)),
-                                      _InfoChip('Diferencia', number.format(_detail!.session.difference ?? 0)),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
+                          Text(
+                            'Resumen de Caja',
+                            style: Theme.of(context).textTheme.titleMedium,
                           ),
-                          const SizedBox(height: 12),
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Ventas', style: Theme.of(context).textTheme.titleMedium),
-                                  const SizedBox(height: 8),
-                                  ..._detail!.sales.map(
-                                    (s) => ListTile(
-                                      dense: true,
-                                      title: Text('Venta #${s.id}'),
-                                      subtitle: Text(s.createdAt != null ? fmt.format(s.createdAt!) : 'N/D'),
-                                      trailing: Text(number.format(s.total)),
-                                    ),
-                                  ),
-                                ],
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              _InfoChip(
+                                'Abierto',
+                                _detail!.session.openedAt != null
+                                    ? fmt.format(_detail!.session.openedAt!)
+                                    : 'N/D',
                               ),
-                            ),
+                              _InfoChip(
+                                'Cerrado',
+                                _detail!.session.closedAt != null
+                                    ? fmt.format(_detail!.session.closedAt!)
+                                    : 'N/D',
+                              ),
+                              _InfoChip(
+                                'Inicial',
+                                number.format(
+                                  _detail!.session.initialAmount ?? 0,
+                                ),
+                              ),
+                              _InfoChip(
+                                'Cierre',
+                                number.format(
+                                  _detail!.session.closingAmount ?? 0,
+                                ),
+                              ),
+                              _InfoChip(
+                                'Esperado',
+                                number.format(
+                                  _detail!.session.expectedCash ?? 0,
+                                ),
+                              ),
+                              _InfoChip(
+                                'Diferencia',
+                                number.format(_detail!.session.difference ?? 0),
+                              ),
+                              if (_detail!.session.openedBy != null)
+                                _InfoChip(
+                                  'Cajero (apertura)',
+                                  _detail!.session.openedBy!.username,
+                                ),
+                              if (_detail!.session.closedBy != null)
+                                _InfoChip(
+                                  'Cajero (cierre)',
+                                  _detail!.session.closedBy!.username,
+                                ),
+                            ],
                           ),
-                          const SizedBox(height: 12),
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Movimientos de Caja', style: Theme.of(context).textTheme.titleMedium),
-                                  const SizedBox(height: 8),
-                                  ..._detail!.movements.map(
-                                    (m) => ListTile(
-                                      dense: true,
-                                      leading: Icon(
-                                        m.type == 'retiro' ? Icons.remove_circle_outline : Icons.add_circle_outline,
-                                        color: m.type == 'retiro' ? Colors.redAccent : Colors.greenAccent,
-                                      ),
-                                      title: Text(m.note ?? m.type),
-                                      subtitle: Text(m.createdAt != null ? fmt.format(m.createdAt!) : 'N/D'),
-                                      trailing: Text(number.format(m.amount)),
-                                    ),
-                                  ),
-                                ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Ventas',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          ..._detail!.sales.map(
+                            (s) => ListTile(
+                              dense: true,
+                              title: Text('Venta #${s.id}'),
+                              subtitle: Text(
+                                s.createdAt != null
+                                    ? fmt.format(s.createdAt!)
+                                    : 'N/D',
                               ),
+                              trailing: Text(number.format(s.total)),
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Movimientos de Caja',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          ..._detail!.movements.map(
+                            (m) => ListTile(
+                              dense: true,
+                              leading: Icon(
+                                m.type == 'retiro'
+                                    ? Icons.remove_circle_outline
+                                    : Icons.add_circle_outline,
+                                color: m.type == 'retiro'
+                                    ? Colors.redAccent
+                                    : Colors.greenAccent,
+                              ),
+                              title: Text(m.note ?? m.type),
+                              subtitle: Text(
+                                m.createdAt != null
+                                    ? fmt.format(m.createdAt!)
+                                    : 'N/D',
+                              ),
+                              trailing: Text(number.format(m.amount)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }
@@ -149,7 +222,10 @@ class _InfoChip extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 11, color: Colors.white70),
+          ),
           Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       ),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../auth/data/auth_repository.dart';
 import '../data/override_repository.dart';
 import '../data/override_models.dart';
 
@@ -30,10 +32,28 @@ class _OverrideRequestsPageState extends ConsumerState<OverrideRequestsPage> {
     });
     try {
       final repo = ref.read(overrideRepositoryProvider);
-      final data = await repo.fetchRequests();
+      final result = await repo.fetchRequests();
+      if (result.statusCode == 401) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sesión vencida. Entra de nuevo.')),
+          );
+        }
+        await ref.read(authRepositoryProvider.notifier).logout();
+        if (mounted) context.go('/login');
+        return;
+      }
+      if (result.statusCode >= 400) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _error = result.message ?? 'No se pudieron cargar las solicitudes.';
+        });
+        return;
+      }
       if (!mounted) return;
       setState(() {
-        _requests = data;
+        _requests = result.items;
         _loading = false;
       });
     } catch (e) {
@@ -49,6 +69,25 @@ class _OverrideRequestsPageState extends ConsumerState<OverrideRequestsPage> {
     try {
       final repo = ref.read(overrideRepositoryProvider);
       final result = await repo.approveRequest(item.id);
+      if (result.statusCode == 401) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sesión vencida. Entra de nuevo.')),
+          );
+        }
+        await ref.read(authRepositoryProvider.notifier).logout();
+        if (mounted) context.go('/login');
+        return;
+      }
+      if (result.statusCode >= 400 || result.token == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message ?? 'No se pudo aprobar la solicitud.'),
+          ),
+        );
+        return;
+      }
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -58,24 +97,26 @@ class _OverrideRequestsPageState extends ConsumerState<OverrideRequestsPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Solicitud: #${result.requestId}'),
+              Text('Solicitud: #${result.token!.requestId}'),
               const SizedBox(height: 6),
               SelectableText(
-                result.token,
+                result.token!.token,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 6),
-              Text('Vence: ${result.expiresAt}'),
+              Text('Vence: ${result.token!.expiresAt}'),
             ],
           ),
           actions: [
             TextButton.icon(
               onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: result.token));
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Token copiado.')),
+                await Clipboard.setData(
+                  ClipboardData(text: result.token!.token),
                 );
+                if (!mounted) return;
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('Token copiado.')));
               },
               icon: const Icon(Icons.copy),
               label: const Text('Copiar'),
@@ -88,7 +129,7 @@ class _OverrideRequestsPageState extends ConsumerState<OverrideRequestsPage> {
         ),
       );
       await _load();
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No se pudo aprobar la solicitud.')),
@@ -129,8 +170,7 @@ class _OverrideRequestsPageState extends ConsumerState<OverrideRequestsPage> {
             ],
             const SizedBox(height: 6),
             Text('Solicitado por: ${item.requestedByName ?? '-'}'),
-            if (item.terminalId != null)
-              Text('Terminal: ${item.terminalId}'),
+            if (item.terminalId != null) Text('Terminal: ${item.terminalId}'),
             if (item.resourceType != null || item.resourceId != null)
               Text(
                 'Recurso: ${item.resourceType ?? '-'} ${item.resourceId ?? ''}',
@@ -166,6 +206,11 @@ class _OverrideRequestsPageState extends ConsumerState<OverrideRequestsPage> {
             onPressed: _loading ? null : _load,
             icon: const Icon(Icons.refresh),
           ),
+          IconButton(
+            tooltip: 'Historial de tokens',
+            onPressed: () => context.go('/overrides/audit'),
+            icon: const Icon(Icons.history),
+          ),
         ],
       ),
       body: _loading
@@ -177,7 +222,8 @@ class _OverrideRequestsPageState extends ConsumerState<OverrideRequestsPage> {
           : ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: _requests.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              separatorBuilder: (context, separatorIndex) =>
+                  const SizedBox(height: 10),
               itemBuilder: (_, index) => _buildRequestCard(_requests[index]),
             ),
     );

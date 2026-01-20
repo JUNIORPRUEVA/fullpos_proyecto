@@ -104,8 +104,13 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
       final settings = appConfigService.settings;
       if (!settings.cloudEnabled) return null;
       final endpoint = settings.cloudEndpoint?.trim();
-      if (endpoint == null || endpoint.isEmpty) return null;
-      return endpoint;
+      if (endpoint != null && endpoint.isNotEmpty) return endpoint;
+      const fallback = String.fromEnvironment(
+        'BACKEND_BASE_URL',
+        defaultValue:
+            'https://fullpos-proyecto-producion-fullpos-bakend.gcdndd.easypanel.host',
+      );
+      return fallback;
     } catch (_) {
       return null;
     }
@@ -235,7 +240,9 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
         companyId: widget.companyId,
         usedByUserId: widget.requestedByUserId,
         terminalId: widget.terminalId,
-        allowRemote: widget.config.remoteEnabled && widget.isOnline,
+        allowRemote:
+            widget.isOnline &&
+            (widget.config.remoteEnabled || widget.config.virtualTokenEnabled),
         remoteBaseUrl: _resolveRemoteBaseUrl(),
         remoteApiKey: _resolveRemoteApiKey(),
         remoteRequestId: _remoteRequestId,
@@ -258,9 +265,9 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -301,7 +308,9 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
       content: SingleChildScrollView(child: content),
       actions: [
         TextButton(
-          onPressed: _isProcessing ? null : () => Navigator.of(context).pop(false),
+          onPressed: _isProcessing
+              ? null
+              : () => Navigator.of(context).pop(false),
           child: const Text('Cancelar'),
         ),
       ],
@@ -370,10 +379,7 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
                 child: Container(
                   color: Colors.white,
                   padding: const EdgeInsets.all(6),
-                  child: QrImageView(
-                    data: _lastGeneratedToken!,
-                    size: 160,
-                  ),
+                  child: QrImageView(data: _lastGeneratedToken!, size: 160),
                 ),
               ),
               if (_lastGeneratedExpiry != null)
@@ -470,8 +476,10 @@ class _AuthorizationModalState extends State<AuthorizationModal> {
                     ),
                   ),
                   TextButton.icon(
-                    onPressed: () =>
-                        _copyText('ID de solicitud', _remoteRequestId!.toString()),
+                    onPressed: () => _copyText(
+                      'ID de solicitud',
+                      _remoteRequestId!.toString(),
+                    ),
                     icon: const Icon(Icons.copy, size: 16),
                     label: const Text('Copiar'),
                   ),

@@ -8,12 +8,14 @@ import {
   requestSchema,
   requestsQuerySchema,
   verifySchema,
+  virtualProvisionSchema,
 } from './override.validation';
 import {
   approveOverride,
   createOverrideRequest,
   getOverrideRequests,
   getAudit,
+  provisionVirtualToken,
   verifyOverride,
 } from './override.service';
 
@@ -49,6 +51,26 @@ router.post('/verify', overrideKeyGuard, validate(verifySchema), async (req, res
     next(err);
   }
 });
+
+// Token virtual (TOTP): el dueño "activa" (provisiona) el secret para un terminal.
+router.post(
+  '/virtual/provision',
+  authGuard,
+  validate(virtualProvisionSchema),
+  async (req, res, next) => {
+    try {
+      const result = await provisionVirtualToken({
+        companyId: req.user!.companyId,
+        userId: req.user!.id,
+        terminalId: req.body.terminalId,
+        uid: req.body.uid,
+      });
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 router.get('/audit', authGuard, validate(auditQuerySchema, 'query'), async (req, res, next) => {
   try {

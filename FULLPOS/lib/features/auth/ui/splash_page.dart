@@ -57,8 +57,16 @@ class SplashPage extends ConsumerWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(28),
                       child: Image.asset(
-                        'assets/imagen/app.icon.png',
+                        'assets/imagen/FULLPOS_icon_1024x1024_full.png',
                         fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Center(
+                              child: Icon(
+                                Icons.storefront,
+                                size: 72,
+                                color: AppColors.gold,
+                              ),
+                            ),
                       ),
                     ),
                   ),
@@ -141,4 +149,3 @@ class SplashPage extends ConsumerWidget {
     );
   }
 }
-

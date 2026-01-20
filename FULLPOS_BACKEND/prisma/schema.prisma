@@ -27,8 +27,31 @@ model Company {
   cashSessions   CashSession[]
   cashMovements  CashMovement[]
   products       Product[]
+  expenses       Expense[]
+
+  config CompanyConfig?
 
   @@unique([name])
+}
+
+model CompanyConfig {
+  companyId     Int      @id
+  company       Company  @relation(fields: [companyId], references: [id])
+  logoUrl       String?
+  phone         String?
+  phone2        String?
+  email         String?
+  address       String?
+  city          String?
+  slogan        String?
+  website       String?
+  instagramUrl  String?
+  facebookUrl   String?
+  themeKey      String   @default("proPos")
+  primaryColor  String?
+  accentColor   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model User {
@@ -54,6 +77,7 @@ model User {
   sales             Sale[]            @relation("sale_created_by")
   cashSessionsOpened CashSession[]    @relation("session_opened_by")
   cashSessionsClosed CashSession[]    @relation("session_closed_by")
+  expensesCreated   Expense[]         @relation("expense_created_by")
 }
 
 model Terminal {
@@ -191,6 +215,22 @@ model CashMovement {
   createdAt  DateTime  @default(now())
 
   @@index([sessionId])
+}
+
+model Expense {
+  id          Int       @id @default(autoincrement())
+  companyId   Int
+  company     Company   @relation(fields: [companyId], references: [id])
+  createdById Int?
+  createdBy   User?     @relation("expense_created_by", fields: [createdById], references: [id])
+  amount      Decimal   @db.Decimal(12, 2)
+  category    String
+  note        String?
+  incurredAt  DateTime
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId, incurredAt])
 }
 
 model Product {

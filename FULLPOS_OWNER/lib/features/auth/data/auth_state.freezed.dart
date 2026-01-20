@@ -24,6 +24,8 @@ mixin _$AuthState {
   String? get accessToken => throw _privateConstructorUsedError;
   String? get refreshToken => throw _privateConstructorUsedError;
   String? get companyName => throw _privateConstructorUsedError;
+  int? get companyId => throw _privateConstructorUsedError;
+  String? get companyRnc => throw _privateConstructorUsedError;
   String? get ownerVersion => throw _privateConstructorUsedError;
   String? get username => throw _privateConstructorUsedError;
   bool get loading => throw _privateConstructorUsedError;
@@ -47,6 +49,8 @@ abstract class $AuthStateCopyWith<$Res> {
     String? accessToken,
     String? refreshToken,
     String? companyName,
+    int? companyId,
+    String? companyRnc,
     String? ownerVersion,
     String? username,
     bool loading,
@@ -71,6 +75,8 @@ class _$AuthStateCopyWithImpl<$Res, $Val extends AuthState>
     Object? accessToken = freezed,
     Object? refreshToken = freezed,
     Object? companyName = freezed,
+    Object? companyId = freezed,
+    Object? companyRnc = freezed,
     Object? ownerVersion = freezed,
     Object? username = freezed,
     Object? loading = null,
@@ -88,6 +94,14 @@ class _$AuthStateCopyWithImpl<$Res, $Val extends AuthState>
             companyName: freezed == companyName
                 ? _value.companyName
                 : companyName // ignore: cast_nullable_to_non_nullable
+                      as String?,
+            companyId: freezed == companyId
+                ? _value.companyId
+                : companyId // ignore: cast_nullable_to_non_nullable
+                      as int?,
+            companyRnc: freezed == companyRnc
+                ? _value.companyRnc
+                : companyRnc // ignore: cast_nullable_to_non_nullable
                       as String?,
             ownerVersion: freezed == ownerVersion
                 ? _value.ownerVersion
@@ -120,6 +134,8 @@ abstract class _$$AuthStateImplCopyWith<$Res>
     String? accessToken,
     String? refreshToken,
     String? companyName,
+    int? companyId,
+    String? companyRnc,
     String? ownerVersion,
     String? username,
     bool loading,
@@ -143,6 +159,8 @@ class __$$AuthStateImplCopyWithImpl<$Res>
     Object? accessToken = freezed,
     Object? refreshToken = freezed,
     Object? companyName = freezed,
+    Object? companyId = freezed,
+    Object? companyRnc = freezed,
     Object? ownerVersion = freezed,
     Object? username = freezed,
     Object? loading = null,
@@ -160,6 +178,14 @@ class __$$AuthStateImplCopyWithImpl<$Res>
         companyName: freezed == companyName
             ? _value.companyName
             : companyName // ignore: cast_nullable_to_non_nullable
+                  as String?,
+        companyId: freezed == companyId
+            ? _value.companyId
+            : companyId // ignore: cast_nullable_to_non_nullable
+                  as int?,
+        companyRnc: freezed == companyRnc
+            ? _value.companyRnc
+            : companyRnc // ignore: cast_nullable_to_non_nullable
                   as String?,
         ownerVersion: freezed == ownerVersion
             ? _value.ownerVersion
@@ -185,6 +211,8 @@ class _$AuthStateImpl implements _AuthState {
     this.accessToken,
     this.refreshToken,
     this.companyName,
+    this.companyId,
+    this.companyRnc,
     this.ownerVersion,
     this.username,
     this.loading = false,
@@ -200,6 +228,10 @@ class _$AuthStateImpl implements _AuthState {
   @override
   final String? companyName;
   @override
+  final int? companyId;
+  @override
+  final String? companyRnc;
+  @override
   final String? ownerVersion;
   @override
   final String? username;
@@ -209,7 +241,7 @@ class _$AuthStateImpl implements _AuthState {
 
   @override
   String toString() {
-    return 'AuthState(accessToken: $accessToken, refreshToken: $refreshToken, companyName: $companyName, ownerVersion: $ownerVersion, username: $username, loading: $loading)';
+    return 'AuthState(accessToken: $accessToken, refreshToken: $refreshToken, companyName: $companyName, companyId: $companyId, companyRnc: $companyRnc, ownerVersion: $ownerVersion, username: $username, loading: $loading)';
   }
 
   @override
@@ -223,6 +255,10 @@ class _$AuthStateImpl implements _AuthState {
                 other.refreshToken == refreshToken) &&
             (identical(other.companyName, companyName) ||
                 other.companyName == companyName) &&
+            (identical(other.companyId, companyId) ||
+                other.companyId == companyId) &&
+            (identical(other.companyRnc, companyRnc) ||
+                other.companyRnc == companyRnc) &&
             (identical(other.ownerVersion, ownerVersion) ||
                 other.ownerVersion == ownerVersion) &&
             (identical(other.username, username) ||
@@ -237,6 +273,8 @@ class _$AuthStateImpl implements _AuthState {
     accessToken,
     refreshToken,
     companyName,
+    companyId,
+    companyRnc,
     ownerVersion,
     username,
     loading,
@@ -261,6 +299,8 @@ abstract class _AuthState implements AuthState {
     final String? accessToken,
     final String? refreshToken,
     final String? companyName,
+    final int? companyId,
+    final String? companyRnc,
     final String? ownerVersion,
     final String? username,
     final bool loading,
@@ -275,6 +315,10 @@ abstract class _AuthState implements AuthState {
   String? get refreshToken;
   @override
   String? get companyName;
+  @override
+  int? get companyId;
+  @override
+  String? get companyRnc;
   @override
   String? get ownerVersion;
   @override
