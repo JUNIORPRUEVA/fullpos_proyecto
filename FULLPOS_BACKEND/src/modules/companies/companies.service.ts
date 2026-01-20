@@ -149,7 +149,7 @@ export async function updateCompanyConfig(companyId: number, payload: UpdateComp
   }
 
   const configCreate: Prisma.CompanyConfigCreateInput = {
-    companyId,
+    company: { connect: { id: companyId } },
     themeKey: themeKey ?? DEFAULT_THEME_KEY,
   };
 
