@@ -16,6 +16,13 @@ const envSchema = z.object({
   // Clave maestra para derivar el secret del token virtual (TOTP) por terminal.
   // Si no está configurada, el token virtual queda deshabilitado.
   VIRTUAL_TOKEN_MASTER_KEY: z.string().min(16).optional(),
+  // Uploads
+  UPLOADS_DIR: z.string().optional(),
+  PUBLIC_BASE_URL: z.string().url().optional(),
+  MAX_PRODUCT_IMAGES_PER_COMPANY: z.coerce.number().int().min(1).optional(),
+  MAX_UPLOAD_IMAGE_MB: z.coerce.number().int().min(1).optional(),
+  MAX_IMAGE_WIDTH: z.coerce.number().int().min(200).optional(),
+  MAX_IMAGE_HEIGHT: z.coerce.number().int().min(200).optional(),
   OWNER_APP_ANDROID_URL: z.string().optional(),
   OWNER_APP_IOS_URL: z.string().optional(),
   OWNER_APP_VERSION: z.string().optional()
