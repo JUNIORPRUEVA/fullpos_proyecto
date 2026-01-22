@@ -2,8 +2,19 @@ import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
-import { loginSchema, provisionOwnerSchema, refreshSchema } from './auth.validation';
-import { getProfile, login, provisionOwnerByRnc, refresh } from './auth.service';
+import {
+  loginSchema,
+  provisionOwnerSchema,
+  provisionUserSchema,
+  refreshSchema,
+} from './auth.validation';
+import {
+  getProfile,
+  login,
+  provisionAdminUser,
+  provisionOwnerByRnc,
+  refresh,
+} from './auth.service';
 
 const router = Router();
 
@@ -48,6 +59,23 @@ router.post('/provision-owner', overrideKeyGuard, validate(provisionOwnerSchema)
       companyName,
       companyCloudId,
     );
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Aprovisiona/actualiza usuarios admin para Owner (por RNC o ID interno).
+router.post('/provision-user', overrideKeyGuard, validate(provisionUserSchema), async (req, res, next) => {
+  try {
+    const { companyRnc, companyCloudId, companyName, username, password } = req.body;
+    const result = await provisionAdminUser({
+      companyRnc,
+      companyCloudId,
+      companyName,
+      username,
+      password,
+    });
     res.json(result);
   } catch (err) {
     next(err);

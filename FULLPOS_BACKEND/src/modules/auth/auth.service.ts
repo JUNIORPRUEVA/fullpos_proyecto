@@ -206,19 +206,17 @@ function normalizeCloudId(value: string) {
   return value.trim();
 }
 
-export async function provisionOwnerByRnc(
-  companyRnc: string | undefined,
-  username: string,
-  password: string,
-  companyName?: string,
-  companyCloudId?: string,
-) {
-  const rnc = companyRnc?.trim() ?? '';
-  const cloudId = companyCloudId?.trim() ?? '';
-  const uname = username.trim();
-  const cname = companyName?.trim();
-  if ((!rnc && !cloudId) || !uname) {
-    throw { status: 400, message: 'Datos incompletos' };
+async function resolveCompanyForProvision(params: {
+  companyRnc?: string;
+  companyCloudId?: string;
+  companyName?: string;
+}) {
+  const rnc = params.companyRnc?.trim() ?? '';
+  const cloudId = params.companyCloudId?.trim() ?? '';
+  const cname = params.companyName?.trim();
+
+  if (!rnc && !cloudId) {
+    throw { status: 400, message: 'RNC o ID interno requerido' };
   }
 
   let company = null as { id: number; name: string; rnc: string | null; isActive: boolean } | null;
@@ -284,6 +282,29 @@ export async function provisionOwnerByRnc(
     });
   }
 
+  return company;
+}
+
+export async function provisionOwnerByRnc(
+  companyRnc: string | undefined,
+  username: string,
+  password: string,
+  companyName?: string,
+  companyCloudId?: string,
+) {
+  const rnc = companyRnc?.trim() ?? '';
+  const cloudId = companyCloudId?.trim() ?? '';
+  const uname = username.trim();
+  const cname = companyName?.trim();
+  if ((!rnc && !cloudId) || !uname) {
+    throw { status: 400, message: 'Datos incompletos' };
+  }
+  const company = await resolveCompanyForProvision({
+    companyRnc: rnc,
+    companyCloudId: cloudId,
+    companyName: cname,
+  });
+
   const hashed = await hashPassword(password);
 
   // 1) Si ya existe un owner para la empresa, actualízalo.
@@ -322,6 +343,65 @@ export async function provisionOwnerByRnc(
       username: uname,
       password: hashed,
       role: 'owner',
+      isActive: true,
+    },
+  });
+
+  return {
+    company: { id: company.id, name: company.name, rnc: company.rnc },
+    user: { id: created.id, username: created.username, role: created.role },
+  };
+}
+
+export async function provisionAdminUser(params: {
+  companyRnc?: string;
+  companyCloudId?: string;
+  companyName?: string;
+  username: string;
+  password: string;
+}) {
+  const uname = params.username.trim();
+  if (!uname) throw { status: 400, message: 'Usuario requerido' };
+
+  const company = await resolveCompanyForProvision({
+    companyRnc: params.companyRnc,
+    companyCloudId: params.companyCloudId,
+    companyName: params.companyName,
+  });
+
+  const hashed = await hashPassword(params.password);
+
+  const existing = await prisma.user.findFirst({
+    where: { username: uname },
+    select: { id: true, companyId: true },
+  });
+
+  if (existing && existing.companyId !== company.id) {
+    throw { status: 409, message: 'Ese usuario ya existe. Usa otro.' };
+  }
+
+  if (existing) {
+    const updated = await prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        companyId: company.id,
+        password: hashed,
+        role: 'admin',
+        isActive: true,
+      },
+    });
+    return {
+      company: { id: company.id, name: company.name, rnc: company.rnc },
+      user: { id: updated.id, username: updated.username, role: updated.role },
+    };
+  }
+
+  const created = await prisma.user.create({
+    data: {
+      companyId: company.id,
+      username: uname,
+      password: hashed,
+      role: 'admin',
       isActive: true,
     },
   });
