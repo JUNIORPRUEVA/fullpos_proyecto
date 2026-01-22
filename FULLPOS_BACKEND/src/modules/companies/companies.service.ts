@@ -21,6 +21,13 @@ type UpdateCompanyConfigInput = {
 
 type CompanyWithConfig = Prisma.CompanyGetPayload<{ include: { config: true } }>;
 
+function isMissingCompanyConfigTable(err: any) {
+  if (err?.code !== 'P2021') return false;
+  const table = String(err?.meta?.table ?? '');
+  const message = String(err?.message ?? '');
+  return table.includes('CompanyConfig') || message.includes('CompanyConfig');
+}
+
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -43,17 +50,27 @@ function normalizeRequired(value?: string) {
 }
 
 async function ensureCompanyConfig(companyId: number) {
-  return prisma.companyConfig.upsert({
-    where: { companyId },
-    update: { updatedAt: new Date() },
-    create: {
-      companyId,
-      themeKey: DEFAULT_THEME_KEY,
-    },
-  });
+  try {
+    return await prisma.companyConfig.upsert({
+      where: { companyId },
+      update: { updatedAt: new Date() },
+      create: {
+        companyId,
+        themeKey: DEFAULT_THEME_KEY,
+      },
+    });
+  } catch (err) {
+    if (isMissingCompanyConfigTable(err)) {
+      console.warn(
+        '[cloud_sync] CompanyConfig table missing (run migrations). Returning defaults.',
+      );
+      return null;
+    }
+    throw err;
+  }
 }
 
-function mapConfigResponse(company: CompanyWithConfig | null) {
+function mapConfigResponse(company: any | null) {
   if (!company) return null;
   const config = company.config ?? {
     companyId: company.id,
@@ -96,17 +113,30 @@ function mapConfigResponse(company: CompanyWithConfig | null) {
 }
 
 export async function getCompanyConfig(companyId: number) {
-  await ensureCompanyConfig(companyId);
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    include: { config: true },
-  });
+  try {
+    await ensureCompanyConfig(companyId);
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      include: { config: true },
+    });
 
-  if (!company) {
-    throw { status: 404, message: 'Compa\u00f1\u00eda no encontrada' };
+    if (!company) {
+      throw { status: 404, message: 'Compa\u00f1\u00eda no encontrada' };
+    }
+
+    return mapConfigResponse(company);
+  } catch (err) {
+    if (isMissingCompanyConfigTable(err)) {
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+      });
+      if (!company) {
+        throw { status: 404, message: 'Compa\u00f1\u00eda no encontrada' };
+      }
+      return mapConfigResponse({ ...company, config: null } as CompanyWithConfig);
+    }
+    throw err;
   }
-
-  return mapConfigResponse(company);
 }
 
 export async function updateCompanyConfig(companyId: number, payload: UpdateCompanyConfigInput) {
@@ -171,13 +201,29 @@ export async function updateCompanyConfig(companyId: number, payload: UpdateComp
   if (normalized.facebookUrl !== undefined)
     configCreate.facebookUrl = normalized.facebookUrl;
 
-  await prisma.companyConfig.upsert({
-    where: { companyId },
-    update: configUpdate,
-    create: configCreate,
-  });
+  try {
+    await prisma.companyConfig.upsert({
+      where: { companyId },
+      update: configUpdate,
+      create: configCreate,
+    });
 
-  return getCompanyConfig(companyId);
+    return getCompanyConfig(companyId);
+  } catch (err) {
+    if (isMissingCompanyConfigTable(err)) {
+      console.warn(
+        '[cloud_sync] CompanyConfig table missing (run migrations). Skipping config upsert.',
+      );
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+      });
+      if (!company) {
+        throw { status: 404, message: 'Compa\u00f1\u00eda no encontrada' };
+      }
+      return mapConfigResponse({ ...company, config: null } as CompanyWithConfig);
+    }
+    throw err;
+  }
 }
 
 export async function updateCompanyConfigByRnc(

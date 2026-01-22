@@ -10,6 +10,14 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
     });
   }
 
+  // Common upload validation errors
+  if (err?.message === 'Solo imágenes') {
+    return res.status(400).json({ message: 'Solo imágenes' });
+  }
+  if (err?.name === 'MulterError') {
+    return res.status(400).json({ message: err.message ?? 'Upload error' });
+  }
+
   if (err?.status) {
     return res.status(err.status).json({ message: err.message ?? 'Request error' });
   }
