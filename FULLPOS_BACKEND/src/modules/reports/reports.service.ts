@@ -1,5 +1,6 @@
 import { prisma } from '../../config/prisma';
 import { parseRange, ensureRangeWithinDays } from '../../utils/date';
+import { format } from 'date-fns';
 import { buildPagination } from '../../utils/pagination';
 
 const MAX_RANGE_DAYS = 365;
@@ -23,7 +24,13 @@ export async function getReportsStatus(companyId: number, from: string, to: stri
         select: { id: true, name: true, rnc: true, cloudCompanyId: true },
       }),
       prisma.sale.count({
-        where: { companyId, status: { not: 'cancelled' }, createdAt: { gte: fromDate, lte: toDate } },
+        where: {
+          companyId,
+          kind: { in: ['invoice', 'sale'] },
+          status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+          deletedAt: null,
+          createdAt: { gte: fromDate, lte: toDate },
+        },
       }),
       prisma.cashSession.count({
         where: { companyId, status: 'CLOSED', closedAt: { gte: fromDate, lte: toDate } },
@@ -93,7 +100,9 @@ export async function getSalesSummary(companyId: number, from: string, to: strin
     _count: { _all: true },
     where: {
       companyId,
-      status: { not: 'cancelled' },
+      kind: { in: ['invoice', 'sale'] },
+      status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+      deletedAt: null,
       createdAt: { gte: fromDate, lte: toDate },
     },
   });
@@ -112,7 +121,9 @@ export async function getSalesByDay(companyId: number, from: string, to: string)
   const sales = await prisma.sale.findMany({
     where: {
       companyId,
-      status: { not: 'cancelled' },
+      kind: { in: ['invoice', 'sale'] },
+      status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+      deletedAt: null,
       createdAt: { gte: fromDate, lte: toDate },
     },
     select: { id: true, total: true, createdAt: true },
@@ -121,7 +132,8 @@ export async function getSalesByDay(companyId: number, from: string, to: string)
 
   const byDay = new Map<string, { total: number; count: number }>();
   for (const sale of sales) {
-    const key = sale.createdAt.toISOString().substring(0, 10);
+    // Usar fecha local del servidor para que coincida con el rango (parseRange usa start/endOfDay local).
+    const key = format(sale.createdAt, 'yyyy-MM-dd');
     const entry = byDay.get(key) ?? { total: 0, count: 0 };
     entry.total += toNumber(sale.total);
     entry.count += 1;
@@ -150,14 +162,18 @@ export async function getSalesList(
     prisma.sale.count({
       where: {
         companyId,
-        status: { not: 'cancelled' },
+        kind: { in: ['invoice', 'sale'] },
+        status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+        deletedAt: null,
         createdAt: { gte: fromDate, lte: toDate },
       },
     }),
     prisma.sale.findMany({
       where: {
         companyId,
-        status: { not: 'cancelled' },
+        kind: { in: ['invoice', 'sale'] },
+        status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+        deletedAt: null,
         createdAt: { gte: fromDate, lte: toDate },
       },
       include: {
