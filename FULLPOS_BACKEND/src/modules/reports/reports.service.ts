@@ -1,9 +1,10 @@
 import { prisma } from '../../config/prisma';
 import { parseRange, ensureRangeWithinDays } from '../../utils/date';
-import { format } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 import { buildPagination } from '../../utils/pagination';
 
 const MAX_RANGE_DAYS = 365;
+const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
 
 function toNumber(value: any) {
   if (value === null || value === undefined) return 0;
@@ -111,7 +112,23 @@ export async function getSalesSummary(companyId: number, from: string, to: strin
   const count = result._count._all;
   const average = count > 0 ? total / count : 0;
 
-  return { total, count, average };
+  // Total cost of goods sold (COGS) based on SaleItem snapshots.
+  const costRows = await prisma.$queryRaw<{ totalCost: any }[]>`
+    SELECT COALESCE(SUM(si."purchasePriceSnapshot" * si."qty"), 0) AS "totalCost"
+    FROM "SaleItem" si
+    INNER JOIN "Sale" s ON s.id = si."saleId"
+    WHERE s."companyId" = ${companyId}
+      AND s."deletedAt" IS NULL
+      AND s."kind" IN ('invoice','sale')
+      AND s."status" IN ('completed','PAID','PARTIAL_REFUND')
+      AND s."createdAt" >= ${fromDate}
+      AND s."createdAt" <= ${toDate}
+  `;
+
+  const totalCost = toNumber(costRows?.[0]?.totalCost);
+  const profit = total - totalCost;
+
+  return { total, count, average, totalCost, profit };
 }
 
 export async function getSalesByDay(companyId: number, from: string, to: string) {
@@ -132,8 +149,8 @@ export async function getSalesByDay(companyId: number, from: string, to: string)
 
   const byDay = new Map<string, { total: number; count: number }>();
   for (const sale of sales) {
-    // Usar fecha local del servidor para que coincida con el rango (parseRange usa start/endOfDay local).
-    const key = format(sale.createdAt, 'yyyy-MM-dd');
+    // Agrupar por día en timezone de negocio (no depende del timezone del servidor).
+    const key = formatInTimeZone(sale.createdAt, REPORTS_TIMEZONE, 'yyyy-MM-dd');
     const entry = byDay.get(key) ?? { total: 0, count: 0 };
     entry.total += toNumber(sale.total);
     entry.count += 1;
