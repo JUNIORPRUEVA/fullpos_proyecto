@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import jwt, { JwtPayload, Secret, SignOptions } from 'jsonwebtoken';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import env from '../../config/env';
 import { verifyPassword, hashPassword } from '../../utils/password';
@@ -46,13 +47,24 @@ async function createRefreshToken(userId: number) {
   const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
   const expiresAt = new Date(Date.now() + parseDurationToMs(env.JWT_REFRESH_EXPIRES_IN));
 
-  await prisma.refreshToken.create({
-    data: {
-      tokenHash,
-      userId,
-      expiresAt,
-    },
-  });
+  try {
+    await prisma.refreshToken.create({
+      data: {
+        tokenHash,
+        userId,
+        expiresAt,
+      },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2021') {
+      throw {
+        status: 503,
+        message:
+          'Base de datos sin migraciones (RefreshToken). Ejecuta "prisma migrate deploy" en el backend.',
+      };
+    }
+    throw err;
+  }
 
   return { token: rawToken, expiresAt };
 }
@@ -89,7 +101,7 @@ export async function login(identifier: string, password: string) {
     include: { company: true },
   });
 
-  if (!user || !user.company.isActive) {
+  if (!user || !user.company || !user.company.isActive) {
     throw { status: 401, message: 'Credenciales inv\u00e1lidas' };
   }
 
@@ -147,7 +159,13 @@ export async function refresh(refreshToken: string) {
     },
   });
 
-  if (!stored || stored.expiresAt.getTime() < Date.now() || stored.user.isActive === false) {
+  if (
+    !stored ||
+    !stored.user ||
+    !stored.user.company ||
+    stored.expiresAt.getTime() < Date.now() ||
+    stored.user.isActive === false
+  ) {
     throw { status: 401, message: 'Token de refresh inv\u00e1lido' };
   }
 
@@ -184,7 +202,7 @@ export async function getProfile(userId: number) {
     include: { company: true },
   });
 
-  if (!user || !user.company.isActive) {
+  if (!user || !user.company || !user.company.isActive) {
     throw { status: 401, message: 'Usuario no encontrado o inactivo' };
   }
 
