@@ -40,6 +40,11 @@ router.put(
   async (req, res, next) => {
     try {
       const { companyRnc, companyCloudId, ...payload } = req.body;
+      console.info('[cloud_sync] companies.config.by-rnc', {
+        companyRnc: companyRnc ?? null,
+        companyCloudId: companyCloudId ?? null,
+        companyName: payload?.companyName ?? null,
+      });
       const updated = await updateCompanyConfigByRnc(companyRnc, {
         ...payload,
         companyCloudId,

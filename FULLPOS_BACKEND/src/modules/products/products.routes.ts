@@ -11,6 +11,33 @@ import { createProduct, listProducts, syncProductsByRnc } from './products.servi
 
 const router = Router();
 
+// Sync de productos desde FULLPOS (por RNC o ID interno).
+// No requiere JWT (POS no tiene login), solo overrideKeyGuard.
+router.post(
+  '/sync/by-rnc',
+  overrideKeyGuard,
+  validate(syncProductsByRncSchema),
+  async (req, res, next) => {
+    try {
+      const { companyRnc, companyCloudId, products } = req.body;
+      console.info('[cloud_sync] products.sync.by-rnc', {
+        companyRnc: companyRnc ?? null,
+        companyCloudId: companyCloudId ?? null,
+        count: Array.isArray(products) ? products.length : 0,
+      });
+      const result = await syncProductsByRnc(
+        companyRnc,
+        products ?? [],
+        companyCloudId,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// Endpoints de administración (Owner) sí requieren JWT.
 router.use(authGuard);
 
 router.get('/', validate(listProductsSchema, 'query'), async (req, res, next) => {
@@ -31,25 +58,5 @@ router.post('/', validate(createProductSchema), async (req, res, next) => {
     next(err);
   }
 });
-
-// Sync de productos desde FULLPOS (por RNC)
-router.post(
-  '/sync/by-rnc',
-  overrideKeyGuard,
-  validate(syncProductsByRncSchema),
-  async (req, res, next) => {
-    try {
-      const { companyRnc, companyCloudId, products } = req.body;
-      const result = await syncProductsByRnc(
-        companyRnc,
-        products ?? [],
-        companyCloudId,
-      );
-      res.json(result);
-    } catch (err) {
-      next(err);
-    }
-  },
-);
 
 export default router;
