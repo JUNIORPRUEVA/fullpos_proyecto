@@ -40,12 +40,9 @@ function safeDeleteUploadByUrl(url: string) {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: (env.MAX_UPLOAD_IMAGE_MB ?? 5) * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) {
-      return cb(new Error('Solo imágenes'));
-    }
-    return cb(null, true);
-  },
+  // NOTE: Some clients (Flutter/Windows/Android) may send `application/octet-stream`.
+  // We accept the upload here and later validate by decoding with `sharp`.
+  fileFilter: (_req, _file, cb) => cb(null, true),
 });
 
 function normalizeRnc(value: string) {
@@ -119,11 +116,16 @@ router.post('/product-image', overrideKeyGuard, upload.single('file'), async (re
 
     const width = env.MAX_IMAGE_WIDTH ?? 1600;
     const height = env.MAX_IMAGE_HEIGHT ?? 1600;
-    const processed = await sharp(file.buffer)
-      .rotate()
-      .resize({ width, height, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 90 })
-      .toBuffer();
+    let processed: Buffer;
+    try {
+      processed = await sharp(file.buffer)
+        .rotate()
+        .resize({ width, height, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+    } catch (_) {
+      return res.status(400).json({ message: 'Solo imágenes' });
+    }
 
     const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.jpg`;
     const fullPath = path.join(productsDir, filename);
