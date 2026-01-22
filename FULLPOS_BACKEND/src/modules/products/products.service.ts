@@ -19,6 +19,7 @@ export type SyncProductInput = {
   name: string;
   description?: string;
   price: number;
+  cost?: number;
   stock?: number;
   imageUrl?: string | null;
 };
@@ -68,6 +69,7 @@ export async function listProducts(
       name: p.name,
       description: p.description,
       price: toNumber(p.price),
+      cost: toNumber(p.cost),
       stock: toNumber(p.stock),
       imageUrl: p.imageUrl,
       isDemo: p.isDemo,
@@ -86,6 +88,7 @@ export async function createProduct(companyId: number, input: CreateProductInput
     name: input.name,
     description: input.description,
     price: input.price,
+    cost: input.cost ?? 0,
     stock: input.stock ?? 0,
     imageUrl: input.imageUrl,
     isDemo: input.isDemo ?? false,
@@ -109,6 +112,7 @@ export async function createProduct(companyId: number, input: CreateProductInput
       name: created.name,
       description: created.description,
       price: toNumber(created.price),
+      cost: toNumber(created.cost),
       stock: toNumber(created.stock),
       imageUrl: created.imageUrl,
       isDemo: created.isDemo,
@@ -177,11 +181,13 @@ export async function syncProductsByRnc(
     const description = item.description?.trim();
     const imageUrl = item.imageUrl === undefined ? undefined : (item.imageUrl?.trim() || null);
     const stock = item.stock ?? 0;
+    const cost = item.cost ?? 0;
 
     const updateData: any = {
       name,
       description: description?.length ? description : null,
       price: item.price,
+      cost,
       stock,
       isDemo: false,
     };
@@ -200,6 +206,7 @@ export async function syncProductsByRnc(
         name,
         description: description?.length ? description : null,
         price: item.price,
+        cost,
         stock,
         imageUrl: imageUrl ?? null,
         isDemo: false,
