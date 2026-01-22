@@ -93,7 +93,23 @@ export async function login(identifier: string, password: string) {
     throw { status: 401, message: 'Credenciales inv\u00e1lidas' };
   }
 
-  const passwordMatches = await verifyPassword(password, user.password);
+  let passwordMatches = false;
+  try {
+    passwordMatches = await verifyPassword(password, user.password);
+  } catch {
+    // Legacy DB: password stored in plain text (or invalid hash). If it matches,
+    // allow login and upgrade to bcrypt.
+    if (user.password === password) {
+      passwordMatches = true;
+      const hashed = await hashPassword(password);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { password: hashed },
+      });
+    } else {
+      passwordMatches = false;
+    }
+  }
   if (!passwordMatches) {
     throw { status: 401, message: 'Credenciales inv\u00e1lidas' };
   }
