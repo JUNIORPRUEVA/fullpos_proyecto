@@ -7,6 +7,9 @@ import productRoutes from '../modules/products/products.routes';
 import companiesRoutes from '../modules/companies/companies.routes';
 import expensesRoutes from '../modules/expenses/expenses.routes';
 import uploadsRoutes from '../modules/uploads/uploads.routes';
+import salesRoutes from '../modules/sales/sales.routes';
+import cashRoutes from '../modules/cash/cash.routes';
+import quotesRoutes from '../modules/quotes/quotes.routes';
 
 const router = Router();
 
@@ -15,6 +18,9 @@ router.use('/reports', reportRoutes);
 router.use('/downloads', downloadRoutes);
 router.use('/override', overrideRoutes);
 router.use('/products', productRoutes);
+router.use('/sales', salesRoutes);
+router.use('/cash', cashRoutes);
+router.use('/quotes', quotesRoutes);
 router.use('/companies', companiesRoutes);
 router.use('/expenses', expensesRoutes);
 router.use('/uploads', uploadsRoutes);
