@@ -16,12 +16,17 @@ type UpdateCompanyConfigInput = {
   instagramUrl?: string | null;
   facebookUrl?: string | null;
   themeKey?: string;
+  companyCloudId?: string;
 };
 
 type CompanyWithConfig = Prisma.CompanyGetPayload<{ include: { config: true } }>;
 
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function normalizeCloudId(value: string) {
+  return value.trim();
 }
 
 function normalizeNullable(value?: string | null) {
@@ -176,26 +181,48 @@ export async function updateCompanyConfig(companyId: number, payload: UpdateComp
 }
 
 export async function updateCompanyConfigByRnc(
-  companyRnc: string,
+  companyRnc: string | undefined,
   payload: UpdateCompanyConfigInput,
 ) {
-  const trimmed = companyRnc.trim();
-  const normalized = normalizeRnc(trimmed);
+  const trimmedRnc = companyRnc?.trim() ?? '';
+  const cloudId = payload.companyCloudId?.trim() ?? '';
   const companyName = normalizeRequired(payload.companyName);
-  let company = await prisma.company.findFirst({
-    where: { rnc: trimmed },
-    select: { id: true, rnc: true, name: true, isActive: true },
-  });
 
-  if (!company && normalized.length > 0) {
-    const candidates = await prisma.company.findMany({
-      where: { rnc: { not: null } },
+  if (!trimmedRnc && !cloudId) {
+    throw { status: 400, message: 'RNC o ID interno requerido' };
+  }
+
+  let company = null as {
+    id: number;
+    rnc: string | null;
+    name: string;
+    isActive: boolean;
+  } | null;
+
+  if (cloudId) {
+    company = await prisma.company.findFirst({
+      where: { cloudCompanyId: cloudId },
       select: { id: true, rnc: true, name: true, isActive: true },
     });
-    company =
-      candidates.find(
-        (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-      ) ?? null;
+  }
+
+  if (!company && trimmedRnc) {
+    const normalized = normalizeRnc(trimmedRnc);
+    company = await prisma.company.findFirst({
+      where: { rnc: trimmedRnc },
+      select: { id: true, rnc: true, name: true, isActive: true },
+    });
+
+    if (!company && normalized.length > 0) {
+      const candidates = await prisma.company.findMany({
+        where: { rnc: { not: null } },
+        select: { id: true, rnc: true, name: true, isActive: true },
+      });
+      company =
+        candidates.find(
+          (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
+        ) ?? null;
+    }
   }
 
   if (company && !company.isActive) {
@@ -207,17 +234,28 @@ export async function updateCompanyConfigByRnc(
   }
 
   if (!company) {
-    let resolvedName = companyName ?? `Empresa ${trimmed}`;
+    const nameSeed = trimmedRnc || cloudId;
+    let resolvedName = companyName ?? `Empresa ${nameSeed}`;
     const nameClash = await prisma.company.findFirst({
       where: { name: resolvedName },
       select: { id: true },
     });
     if (nameClash) {
-      resolvedName = `Empresa ${trimmed}`;
+      resolvedName = `Empresa ${nameSeed}`;
     }
     company = await prisma.company.create({
-      data: { name: resolvedName, rnc: trimmed, isActive: true },
+      data: {
+        name: resolvedName,
+        rnc: trimmedRnc || null,
+        cloudCompanyId: cloudId || null,
+        isActive: true,
+      },
       select: { id: true, rnc: true, name: true, isActive: true },
+    });
+  } else if (cloudId) {
+    await prisma.company.update({
+      where: { id: company.id },
+      data: { cloudCompanyId: normalizeCloudId(cloudId) },
     });
   }
 

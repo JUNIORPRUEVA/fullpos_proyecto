@@ -15,3 +15,26 @@ export const createProductSchema = z.object({
   imageUrl: z.string().url().optional(),
   isDemo: z.boolean().optional(),
 });
+
+export const syncProductsByRncSchema = z
+  .object({
+    companyRnc: z.string().trim().min(3).optional(),
+    companyCloudId: z.string().trim().min(6).optional(),
+    products: z
+      .array(
+        z.object({
+          code: z.string().trim().min(1, 'El codigo es requerido'),
+          name: z.string().trim().min(1, 'El nombre es requerido'),
+          description: z.string().trim().max(500).optional(),
+          price: z.coerce.number().nonnegative(),
+          stock: z.coerce.number().nonnegative().optional(),
+          imageUrl: z.string().url().optional().nullable(),
+        }),
+      )
+      .max(2000)
+      .default([]),
+  })
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });

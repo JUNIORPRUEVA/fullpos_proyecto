@@ -40,8 +40,14 @@ router.get('/me', authGuard, async (req, res, next) => {
 // Se protege con OVERRIDE_API_KEY si está configurada (x-override-key o x-cloud-key).
 router.post('/provision-owner', overrideKeyGuard, validate(provisionOwnerSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyName, username, password } = req.body;
-    const result = await provisionOwnerByRnc(companyRnc, username, password, companyName);
+    const { companyRnc, companyCloudId, companyName, username, password } = req.body;
+    const result = await provisionOwnerByRnc(
+      companyRnc,
+      username,
+      password,
+      companyName,
+      companyCloudId,
+    );
     res.json(result);
   } catch (err) {
     next(err);

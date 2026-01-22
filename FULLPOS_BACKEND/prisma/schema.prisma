@@ -11,6 +11,7 @@ model Company {
   id                 Int              @id @default(autoincrement())
   name               String
   rnc                String?
+  cloudCompanyId     String?          @unique
   isActive           Boolean          @default(true)
   ownerAppAndroidUrl String?
   ownerAppIosUrl     String?

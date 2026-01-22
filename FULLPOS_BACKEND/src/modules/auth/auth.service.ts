@@ -202,34 +202,51 @@ function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function normalizeCloudId(value: string) {
+  return value.trim();
+}
+
 export async function provisionOwnerByRnc(
-  companyRnc: string,
+  companyRnc: string | undefined,
   username: string,
   password: string,
   companyName?: string,
+  companyCloudId?: string,
 ) {
-  const rnc = companyRnc.trim();
+  const rnc = companyRnc?.trim() ?? '';
+  const cloudId = companyCloudId?.trim() ?? '';
   const uname = username.trim();
   const cname = companyName?.trim();
-  if (!rnc || !uname) {
+  if ((!rnc && !cloudId) || !uname) {
     throw { status: 400, message: 'Datos incompletos' };
   }
 
-  const normalized = normalizeRnc(rnc);
-  let company = await prisma.company.findFirst({
-    where: { rnc: rnc },
-    select: { id: true, name: true, rnc: true, isActive: true },
-  });
+  let company = null as { id: number; name: string; rnc: string | null; isActive: boolean } | null;
 
-  if (!company && normalized.length > 0) {
-    const candidates = await prisma.company.findMany({
-      where: { rnc: { not: null } },
+  if (cloudId) {
+    company = await prisma.company.findFirst({
+      where: { cloudCompanyId: cloudId },
       select: { id: true, name: true, rnc: true, isActive: true },
     });
-    company =
-      candidates.find(
-        (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-      ) ?? null;
+  }
+
+  if (!company && rnc) {
+    const normalized = normalizeRnc(rnc);
+    company = await prisma.company.findFirst({
+      where: { rnc: rnc },
+      select: { id: true, name: true, rnc: true, isActive: true },
+    });
+
+    if (!company && normalized.length > 0) {
+      const candidates = await prisma.company.findMany({
+        where: { rnc: { not: null } },
+        select: { id: true, name: true, rnc: true, isActive: true },
+      });
+      company =
+        candidates.find(
+          (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
+        ) ?? null;
+    }
   }
 
   if (company && !company.isActive) {
@@ -241,22 +258,29 @@ export async function provisionOwnerByRnc(
   }
 
   if (!company) {
-    let resolvedName = cname && cname.length > 1 ? cname : `Empresa ${rnc}`;
+    const nameSeed = rnc || cloudId;
+    let resolvedName = cname && cname.length > 1 ? cname : `Empresa ${nameSeed}`;
     const nameClash = await prisma.company.findFirst({
       where: { name: resolvedName },
       select: { id: true },
     });
     if (nameClash) {
-      resolvedName = `Empresa ${rnc}`;
+      resolvedName = `Empresa ${nameSeed}`;
     }
 
     company = await prisma.company.create({
       data: {
         name: resolvedName,
-        rnc: rnc,
+        rnc: rnc || null,
+        cloudCompanyId: cloudId || null,
         isActive: true,
       },
       select: { id: true, name: true, rnc: true, isActive: true },
+    });
+  } else if (cloudId) {
+    await prisma.company.update({
+      where: { id: company.id },
+      data: { cloudCompanyId: normalizeCloudId(cloudId) },
     });
   }
 

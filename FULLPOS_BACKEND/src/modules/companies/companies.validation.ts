@@ -15,6 +15,12 @@ export const updateCompanyConfigSchema = z.object({
   themeKey: z.enum(['original', 'azulBlancoNegro', 'proPos']).optional(),
 });
 
-export const updateCompanyConfigByRncSchema = updateCompanyConfigSchema.extend({
-  companyRnc: z.string().min(3, 'RNC requerido'),
-});
+export const updateCompanyConfigByRncSchema = updateCompanyConfigSchema
+  .extend({
+    companyRnc: z.string().min(3).optional(),
+    companyCloudId: z.string().min(6).optional(),
+  })
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });

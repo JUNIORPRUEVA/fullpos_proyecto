@@ -39,8 +39,11 @@ router.put(
   validate(updateCompanyConfigByRncSchema),
   async (req, res, next) => {
     try {
-      const { companyRnc, ...payload } = req.body;
-      const updated = await updateCompanyConfigByRnc(companyRnc, payload);
+      const { companyRnc, companyCloudId, ...payload } = req.body;
+      const updated = await updateCompanyConfigByRnc(companyRnc, {
+        ...payload,
+        companyCloudId,
+      });
       res.json(updated);
     } catch (err) {
       next(err);
