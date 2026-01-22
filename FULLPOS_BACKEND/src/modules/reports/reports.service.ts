@@ -12,6 +12,78 @@ function toNumber(value: any) {
   return Number(value);
 }
 
+export async function getReportsStatus(companyId: number, from: string, to: string) {
+  const { fromDate, toDate } = parseRange(from, to);
+  ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
+
+  const [company, salesCount, cashClosingsCount, cashMovementsCount, expensesCount, quotesCount, lastSale, lastCashClosing, lastCashMovement, lastExpense, lastQuote] =
+    await Promise.all([
+      prisma.company.findUnique({
+        where: { id: companyId },
+        select: { id: true, name: true, rnc: true, cloudCompanyId: true },
+      }),
+      prisma.sale.count({
+        where: { companyId, status: { not: 'cancelled' }, createdAt: { gte: fromDate, lte: toDate } },
+      }),
+      prisma.cashSession.count({
+        where: { companyId, status: 'CLOSED', closedAt: { gte: fromDate, lte: toDate } },
+      }),
+      prisma.cashMovement.count({
+        where: { companyId, createdAt: { gte: fromDate, lte: toDate } },
+      }),
+      prisma.expense.count({
+        where: { companyId, incurredAt: { gte: fromDate, lte: toDate } },
+      }),
+      prisma.quote.count({
+        where: { companyId, createdAt: { gte: fromDate, lte: toDate } },
+      }),
+      prisma.sale.findFirst({
+        where: { companyId, status: { not: 'cancelled' } },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.cashSession.findFirst({
+        where: { companyId, status: 'CLOSED' },
+        select: { closedAt: true },
+        orderBy: { closedAt: 'desc' },
+      }),
+      prisma.cashMovement.findFirst({
+        where: { companyId },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.expense.findFirst({
+        where: { companyId },
+        select: { incurredAt: true },
+        orderBy: { incurredAt: 'desc' },
+      }),
+      prisma.quote.findFirst({
+        where: { companyId },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+  return {
+    company: company ?? { id: companyId, name: 'Empresa', rnc: null, cloudCompanyId: null },
+    range: { from: fromDate, to: toDate },
+    counts: {
+      sales: salesCount,
+      cashClosings: cashClosingsCount,
+      cashMovements: cashMovementsCount,
+      expenses: expensesCount,
+      quotes: quotesCount,
+    },
+    last: {
+      saleAt: lastSale?.createdAt ?? null,
+      cashClosingAt: lastCashClosing?.closedAt ?? null,
+      cashMovementAt: lastCashMovement?.createdAt ?? null,
+      expenseAt: lastExpense?.incurredAt ?? null,
+      quoteAt: lastQuote?.createdAt ?? null,
+    },
+  };
+}
+
 export async function getSalesSummary(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);

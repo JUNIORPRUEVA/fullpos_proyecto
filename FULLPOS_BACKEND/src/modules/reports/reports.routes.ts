@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { validate } from '../../middlewares/validate';
-import { getCashClosingDetail, getCashClosings, getSalesByDay, getSalesList, getSalesSummary } from './reports.service';
+import { getCashClosingDetail, getCashClosings, getReportsStatus, getSalesByDay, getSalesList, getSalesSummary } from './reports.service';
 import { idParamSchema, rangeQuerySchema, salesListQuerySchema } from './reports.validation';
 import { listExpensesSchema } from '../expenses/expenses.validation';
 import { listExpenses, getExpensesSummary } from '../expenses/expenses.service';
@@ -12,6 +12,16 @@ router.get('/sales/summary', authGuard, validate(rangeQuerySchema, 'query'), asy
   try {
     const { from, to } = req.query as any;
     const result = await getSalesSummary(req.user!.companyId, from, to);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/status', authGuard, validate(rangeQuerySchema, 'query'), async (req, res, next) => {
+  try {
+    const { from, to } = req.query as any;
+    const result = await getReportsStatus(req.user!.companyId, from, to);
     res.json(result);
   } catch (err) {
     next(err);
