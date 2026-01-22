@@ -1,5 +1,5 @@
 import { isAfter, isBefore } from 'date-fns';
-import { zonedTimeToUtc } from 'date-fns-tz';
+import { fromZonedTime } from 'date-fns-tz';
 
 function getReportsTimeZone() {
   return process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
@@ -9,8 +9,8 @@ export function parseRange(from: string, to: string) {
   // Interpret YYYY-MM-DD as a business-local date (not server local timezone).
   // This keeps ranges consistent across deployments/servers.
   const timeZone = getReportsTimeZone();
-  const fromDate = zonedTimeToUtc(`${from}T00:00:00.000`, timeZone);
-  const toDate = zonedTimeToUtc(`${to}T23:59:59.999`, timeZone);
+  const fromDate = fromZonedTime(`${from}T00:00:00.000`, timeZone);
+  const toDate = fromZonedTime(`${to}T23:59:59.999`, timeZone);
 
   if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
     throw new Error('Rango de fechas inv\u00e1lido');

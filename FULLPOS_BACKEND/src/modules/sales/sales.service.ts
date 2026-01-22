@@ -1,4 +1,11 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
+
+function toNumber(value: Prisma.Decimal | number | null | undefined) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return value;
+  return value.toNumber();
+}
 
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -173,18 +180,48 @@ export async function syncSalesByRnc(
 
       await tx.saleItem.deleteMany({ where: { saleId: upserted.id } });
       if (sale.items && sale.items.length > 0) {
+        const codes = Array.from(
+          new Set(
+            sale.items
+              .map((i) => i.productCodeSnapshot?.trim())
+              .filter((v): v is string => !!v),
+          ),
+        );
+
+        const products =
+          codes.length === 0
+            ? []
+            : await tx.product.findMany({
+                where: { companyId, code: { in: codes } },
+                select: { id: true, code: true, cost: true },
+              });
+
+        const productMap = new Map<string, { id: number; cost: number }>();
+        for (const p of products) {
+          productMap.set(p.code, { id: p.id, cost: toNumber(p.cost) });
+        }
+
         await tx.saleItem.createMany({
-          data: sale.items.map((i) => ({
-            saleId: upserted.id,
-            productCodeSnapshot: i.productCodeSnapshot ?? null,
+          data: sale.items.map((i) => {
+            const code = i.productCodeSnapshot?.trim() ?? null;
+            const product = code ? productMap.get(code) : null;
+            const providedCost = i.purchasePriceSnapshot ?? 0;
+            const resolvedCost =
+              providedCost > 0 ? providedCost : product?.cost ?? 0;
+
+            return {
+              productId: product?.id ?? null,
+              saleId: upserted.id,
+              productCodeSnapshot: code,
             productNameSnapshot: i.productNameSnapshot,
             qty: i.qty,
             unitPrice: i.unitPrice,
-            purchasePriceSnapshot: i.purchasePriceSnapshot ?? 0,
+              purchasePriceSnapshot: resolvedCost,
             discountLine: i.discountLine ?? 0,
             totalLine: i.totalLine,
             createdAt: i.createdAt ? new Date(i.createdAt) : new Date(createdAt),
-          })),
+            };
+          }),
         });
       }
     }
