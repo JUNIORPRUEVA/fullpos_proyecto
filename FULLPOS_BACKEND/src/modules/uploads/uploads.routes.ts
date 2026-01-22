@@ -89,8 +89,20 @@ router.post('/product-image', overrideKeyGuard, upload.single('file'), async (re
     const file = req.file;
     if (!file) return res.status(400).json({ message: 'Archivo requerido' });
 
+    console.info('[cloud_sync] uploads.product-image', {
+      mimetype: file.mimetype,
+      size: file.size,
+      companyRnc: req.body?.companyRnc ?? null,
+      companyCloudId: req.body?.companyCloudId ?? null,
+      hasOldImageUrl: typeof req.body?.oldImageUrl === 'string' && req.body.oldImageUrl.trim().length > 0,
+    });
+
     const companyId = await resolveCompanyId(req.body?.companyRnc, req.body?.companyCloudId);
     if (!companyId) {
+      console.warn('[cloud_sync] uploads.product-image company not resolved', {
+        companyRnc: req.body?.companyRnc ?? null,
+        companyCloudId: req.body?.companyCloudId ?? null,
+      });
       return res.status(400).json({ message: 'Empresa requerida' });
     }
 

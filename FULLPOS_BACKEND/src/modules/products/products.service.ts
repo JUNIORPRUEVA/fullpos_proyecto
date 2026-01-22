@@ -175,18 +175,24 @@ export async function syncProductsByRnc(
     const code = item.code.trim();
     const name = item.name.trim();
     const description = item.description?.trim();
-    const imageUrl = item.imageUrl?.trim() || null;
+    const imageUrl = item.imageUrl === undefined ? undefined : (item.imageUrl?.trim() || null);
     const stock = item.stock ?? 0;
+
+    const updateData: any = {
+      name,
+      description: description?.length ? description : null,
+      price: item.price,
+      stock,
+      isDemo: false,
+    };
+    if (imageUrl !== undefined) {
+      updateData.imageUrl = imageUrl;
+    }
 
     return prisma.product.upsert({
       where: { companyId_code: { companyId: company.id, code } },
       update: {
-        name,
-        description: description?.length ? description : null,
-        price: item.price,
-        stock,
-        imageUrl,
-        isDemo: false,
+        ...updateData,
       },
       create: {
         companyId: company.id,
@@ -195,7 +201,7 @@ export async function syncProductsByRnc(
         description: description?.length ? description : null,
         price: item.price,
         stock,
-        imageUrl,
+        imageUrl: imageUrl ?? null,
         isDemo: false,
       },
     });
