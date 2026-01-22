@@ -2,6 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import env from '../config/env';
 
 export function overrideKeyGuard(req: Request, res: Response, next: NextFunction) {
+  if (env.ALLOW_PUBLIC_CLOUD === true) {
+    return next();
+  }
+
   const apiKey = env.OVERRIDE_API_KEY?.trim();
   if (!apiKey) {
     return next();
