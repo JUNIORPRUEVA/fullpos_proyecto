@@ -1,8 +1,15 @@
 import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
+import { dangerRateLimit } from '../../middlewares/dangerRateLimit';
 import { validate } from '../../middlewares/validate';
-import { getCompanyConfig, updateCompanyConfig, updateCompanyConfigByRnc } from './companies.service';
+import env from '../../config/env';
+import {
+  dangerousCompanyAction,
+  getCompanyConfig,
+  updateCompanyConfig,
+  updateCompanyConfigByRnc,
+} from './companies.service';
 import { updateCompanyConfigByRncSchema, updateCompanyConfigSchema } from './companies.validation';
 
 const router = Router();
@@ -55,5 +62,34 @@ router.put(
     }
   },
 );
+
+router.post('/actions', overrideKeyGuard, dangerRateLimit, async (req, res, next) => {
+  try {
+    const { action, phrase, adminPin, companyRnc, companyCloudId } = req.body ?? {};
+    if (!action || !phrase || !adminPin) {
+      return res.status(400).json({ message: 'action, phrase y adminPin requeridos' });
+    }
+    const pin = env.DANGER_ACTION_PIN?.trim();
+    if (!pin || pin !== String(adminPin).trim()) {
+      return res.status(403).json({ message: 'PIN invalido' });
+    }
+    if (action !== 'RESET' && action !== 'DELETE') {
+      return res.status(400).json({ message: 'Accion invalida' });
+    }
+    const expectedPhrase = action === 'RESET' ? 'RESETEAR EMPRESA' : 'BORRAR TODO FULLPOS';
+    if (String(phrase).trim().toUpperCase() !== expectedPhrase) {
+      return res.status(400).json({ message: 'Frase de confirmacion invalida' });
+    }
+
+    const result = await dangerousCompanyAction({
+      action,
+      companyRnc,
+      companyCloudId,
+    });
+    return res.json(result);
+  } catch (err) {
+    return next(err);
+  }
+});
 
 export default router;

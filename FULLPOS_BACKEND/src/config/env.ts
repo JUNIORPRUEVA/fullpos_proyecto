@@ -24,9 +24,13 @@ const envSchema = z.object({
   MAX_UPLOAD_IMAGE_MB: z.coerce.number().int().min(1).optional(),
   MAX_IMAGE_WIDTH: z.coerce.number().int().min(200).optional(),
   MAX_IMAGE_HEIGHT: z.coerce.number().int().min(200).optional(),
+  MAX_BACKUP_MB: z.coerce.number().int().min(10).optional(),
+  BACKUPS_DIR: z.string().optional(),
+  BACKUPS_TMP_DIR: z.string().optional(),
   OWNER_APP_ANDROID_URL: z.string().optional(),
   OWNER_APP_IOS_URL: z.string().optional(),
-  OWNER_APP_VERSION: z.string().optional()
+  OWNER_APP_VERSION: z.string().optional(),
+  DANGER_ACTION_PIN: z.string().min(4).optional()
 });
 
 const env = envSchema.parse(process.env);

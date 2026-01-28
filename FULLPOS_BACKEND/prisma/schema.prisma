@@ -30,10 +30,26 @@ model Company {
   products       Product[]
   expenses       Expense[]
   quotes         Quote[]
+  cloudBackups   CloudBackup[]
 
   config CompanyConfig?
 
   @@unique([name])
+}
+
+model CloudBackup {
+  id          String   @id @default(uuid())
+  companyId   Int
+  company     Company  @relation(fields: [companyId], references: [id])
+  createdAt   DateTime @default(now())
+  sizeBytes   Int
+  sha256      String
+  dbVersion   Int
+  appVersion  String
+  storagePath String
+  status      String   @default("SUCCESS")
+
+  @@index([companyId, createdAt])
 }
 
 model CompanyConfig {

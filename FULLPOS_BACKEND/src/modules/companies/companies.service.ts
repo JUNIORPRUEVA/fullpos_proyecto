@@ -307,3 +307,101 @@ export async function updateCompanyConfigByRnc(
 
   return updateCompanyConfig(company.id, payload);
 }
+
+type DangerActionType = 'RESET' | 'DELETE';
+
+async function resolveCompanyIdForDanger(companyRnc?: string, companyCloudId?: string) {
+  const rnc = companyRnc?.trim() ?? '';
+  const cloudId = companyCloudId?.trim() ?? '';
+  if (!rnc && !cloudId) return null;
+
+  if (cloudId) {
+    const byCloud = await prisma.company.findFirst({
+      where: { cloudCompanyId: cloudId },
+      select: { id: true },
+    });
+    if (byCloud) return byCloud.id;
+  }
+
+  if (!rnc) return null;
+  const byRnc = await prisma.company.findFirst({
+    where: { rnc },
+    select: { id: true },
+  });
+  if (byRnc) return byRnc.id;
+
+  const normalized = normalizeRnc(rnc);
+  if (!normalized) return null;
+  const candidates = await prisma.company.findMany({
+    where: { rnc: { not: null } },
+    select: { id: true, rnc: true },
+  });
+  const match = candidates.find(
+    (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
+  );
+  return match?.id ?? null;
+}
+
+export async function dangerousCompanyAction({
+  action,
+  companyRnc,
+  companyCloudId,
+}: {
+  action: DangerActionType;
+  companyRnc?: string;
+  companyCloudId?: string;
+}) {
+  const companyId = await resolveCompanyIdForDanger(companyRnc, companyCloudId);
+  if (!companyId) {
+    throw { status: 400, message: 'Empresa requerida' };
+  }
+
+  if (action === 'RESET') {
+    await prisma.$transaction([
+      prisma.saleItem.deleteMany({ where: { sale: { companyId } } }),
+      prisma.sale.deleteMany({ where: { companyId } }),
+      prisma.quoteItem.deleteMany({ where: { quote: { companyId } } }),
+      prisma.quote.deleteMany({ where: { companyId } }),
+      prisma.cashMovement.deleteMany({ where: { companyId } }),
+      prisma.cashSession.deleteMany({ where: { companyId } }),
+      prisma.expense.deleteMany({ where: { companyId } }),
+      prisma.product.deleteMany({ where: { companyId } }),
+      prisma.cloudBackup.deleteMany({ where: { companyId } }),
+    ]);
+  } else {
+    await prisma.$transaction([
+      prisma.saleItem.deleteMany({ where: { sale: { companyId } } }),
+      prisma.sale.deleteMany({ where: { companyId } }),
+      prisma.quoteItem.deleteMany({ where: { quote: { companyId } } }),
+      prisma.quote.deleteMany({ where: { companyId } }),
+      prisma.cashMovement.deleteMany({ where: { companyId } }),
+      prisma.cashSession.deleteMany({ where: { companyId } }),
+      prisma.expense.deleteMany({ where: { companyId } }),
+      prisma.product.deleteMany({ where: { companyId } }),
+      prisma.cloudBackup.deleteMany({ where: { companyId } }),
+      prisma.companyConfig.deleteMany({ where: { companyId } }),
+      prisma.terminal.deleteMany({ where: { companyId } }),
+      prisma.overrideToken.deleteMany({ where: { companyId } }),
+      prisma.overrideRequest.deleteMany({ where: { companyId } }),
+      prisma.auditLog.deleteMany({ where: { companyId } }),
+      prisma.user.deleteMany({ where: { companyId } }),
+      prisma.company.delete({ where: { id: companyId } }),
+    ]);
+  }
+
+  await prisma.auditLog.create({
+    data: {
+      companyId,
+      actionCode: action === 'RESET' ? 'DANGER_RESET' : 'DANGER_DELETE',
+      result: 'SUCCESS',
+      method: 'API',
+      createdAt: new Date(),
+      meta: {
+        companyRnc: companyRnc ?? null,
+        companyCloudId: companyCloudId ?? null,
+      },
+    },
+  });
+
+  return { ok: true };
+}
