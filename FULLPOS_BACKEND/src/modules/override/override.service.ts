@@ -107,6 +107,13 @@ function verifyTotp({
   return null;
 }
 
+async function safeAuditLogCreate(data: Parameters<typeof prisma.auditLog.create>[0]['data']) {
+  try {
+    await prisma.auditLog.create({ data });
+  } catch {
+  }
+}
+
 export async function createOverrideRequest(body: {
   companyId: number;
   actionCode: string;
@@ -231,6 +238,14 @@ export async function verifyOverride(body: {
   terminalId?: string;
 }) {
   try {
+    const company = await prisma.company.findUnique({
+      where: { id: body.companyId },
+      select: { id: true },
+    });
+    if (!company) {
+      throw new Error('Empresa no encontrada');
+    }
+
     const result = await prisma.$transaction(async (trx) => {
       const tokenHash = hashToken(body.token);
       const token = await trx.overrideToken.findFirst({
@@ -345,19 +360,17 @@ export async function verifyOverride(body: {
 
     return { ok: true, tokenId: result.id };
   } catch (e: any) {
-    await prisma.auditLog.create({
-      data: {
-        companyId: body.companyId,
-        actionCode: body.actionCode,
-        resourceType: body.resourceType,
-        resourceId: body.resourceId,
-        requestedById: body.usedById,
-        approvedById: null,
-        method: 'remote',
-        result: 'rejected',
-        terminalId: body.terminalId,
-        meta: { error: e.message },
-      },
+    await safeAuditLogCreate({
+      companyId: body.companyId,
+      actionCode: body.actionCode,
+      resourceType: body.resourceType,
+      resourceId: body.resourceId,
+      requestedById: body.usedById,
+      approvedById: null,
+      method: 'remote',
+      result: 'rejected',
+      terminalId: body.terminalId,
+      meta: { error: e?.message ?? String(e) },
     });
     throw { status: 400, message: e.message ?? 'No autorizado' };
   }
