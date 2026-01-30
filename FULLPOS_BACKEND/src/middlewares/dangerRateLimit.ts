@@ -5,7 +5,11 @@ const maxHits = 3;
 const hits = new Map<string, number[]>();
 
 export function dangerRateLimit(req: Request, res: Response, next: NextFunction) {
-  const key = (req.headers['x-cloud-key'] as string | undefined) ?? req.ip;
+  const headerKey = req.headers['x-cloud-key'];
+  let key: string = req.ip || 'unknown';
+  if (typeof headerKey === 'string' && headerKey.length > 0) {
+    key = headerKey;
+  }
   const now = Date.now();
   const list = hits.get(key) ?? [];
   const filtered = list.filter((t) => now - t < windowMs);
