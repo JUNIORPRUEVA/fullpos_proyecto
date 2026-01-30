@@ -1,14 +1,33 @@
 import { z } from 'zod';
 
 export const requestSchema = z.object({
-  companyId: z.number().int().positive(),
+  // Preferido (cloud)
+  cloudCompanyId: z.string().min(3).optional(),
+  // Back-compat
+  companyId: z.number().int().positive().optional(),
+  companyRnc: z.string().min(3).optional(),
+  companyCloudId: z.string().min(3).optional(),
   actionCode: z.string().min(3),
   resourceType: z.string().optional(),
   resourceId: z.string().optional(),
-  requestedById: z.number().int().positive(),
+  // Preferido (cloud)
+  cloudUserId: z.number().int().positive().optional(),
+  // Back-compat (a veces viene localId)
+  requestedById: z.number().int().positive().optional(),
+  userUsername: z.string().min(3).optional(),
+  userEmail: z.string().email().optional(),
   terminalId: z.string().optional(),
+  cloudTerminalId: z.union([z.number().int().positive(), z.string().min(3)]).optional(),
   meta: z.record(z.any()).optional(),
-});
+})
+  .refine((v) => Boolean(v.cloudCompanyId || v.companyId || v.companyRnc || v.companyCloudId), {
+    message: 'cloudCompanyId, companyId, companyRnc o companyCloudId requerido',
+    path: ['cloudCompanyId'],
+  })
+  .refine((v) => Boolean(v.cloudUserId || v.requestedById || v.userUsername || v.userEmail), {
+    message: 'cloudUserId, requestedById, userUsername o userEmail requerido',
+    path: ['cloudUserId'],
+  });
 
 export const approveSchema = z.object({
   requestId: z.number().int().positive(),
@@ -17,6 +36,11 @@ export const approveSchema = z.object({
 
 export const verifySchema = z
   .object({
+    // Preferido (cloud)
+    cloudCompanyId: z.string().min(3).optional(),
+    cloudUserId: z.number().int().positive().optional(),
+    cloudTerminalId: z.union([z.number().int().positive(), z.string().min(3)]).optional(),
+    // Back-compat
     companyId: z.number().int().positive().optional(),
     companyRnc: z.string().min(3).optional(),
     companyCloudId: z.string().min(3).optional(),
@@ -24,12 +48,37 @@ export const verifySchema = z
     actionCode: z.string().min(3),
     resourceType: z.string().optional(),
     resourceId: z.string().optional(),
-    usedById: z.number().int().positive(),
+    usedById: z.number().int().positive().optional(),
+    userUsername: z.string().min(3).optional(),
+    userEmail: z.string().email().optional(),
     terminalId: z.string().optional(),
+    meta: z.record(z.any()).optional(),
   })
-  .refine((v) => Boolean(v.companyId || v.companyRnc || v.companyCloudId), {
-    message: 'companyId, companyRnc o companyCloudId requerido',
-    path: ['companyId'],
+  .refine((v) => Boolean(v.cloudCompanyId || v.companyId || v.companyRnc || v.companyCloudId), {
+    message: 'cloudCompanyId, companyId, companyRnc o companyCloudId requerido',
+    path: ['cloudCompanyId'],
+  })
+  .refine((v) => Boolean(v.cloudUserId || v.usedById || v.userUsername || v.userEmail), {
+    message: 'cloudUserId, usedById, userUsername o userEmail requerido',
+    path: ['cloudUserId'],
+  });
+
+export const resolveIdsSchema = z
+  .object({
+    cloudCompanyId: z.string().min(3).optional(),
+    companyId: z.number().int().positive().optional(),
+    companyRnc: z.string().min(3).optional(),
+    companyCloudId: z.string().min(3).optional(),
+    cloudUserId: z.number().int().positive().optional(),
+    userIdCandidate: z.number().int().positive().optional(),
+    userUsername: z.string().min(3).optional(),
+    userEmail: z.string().email().optional(),
+    cloudTerminalId: z.union([z.number().int().positive(), z.string().min(3)]).optional(),
+    terminalId: z.string().min(3).optional(),
+  })
+  .refine((v) => Boolean(v.cloudCompanyId || v.companyId || v.companyRnc || v.companyCloudId), {
+    message: 'cloudCompanyId, companyId, companyRnc o companyCloudId requerido',
+    path: ['cloudCompanyId'],
   });
 
 export const virtualProvisionSchema = z.object({

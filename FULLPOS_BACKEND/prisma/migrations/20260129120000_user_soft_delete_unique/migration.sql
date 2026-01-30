@@ -1,0 +1,6 @@
+-- NOTE: This migration directory existed but the SQL file was missing.
+-- The current Prisma schema does not contain a soft-delete column for User,
+-- and username/email uniqueness is still enforced by the original schema.
+--
+-- Therefore, this migration is intentionally a NO-OP to preserve migration chain integrity.
+-- (Keeping it empty is valid for Prisma migrate deploy.)

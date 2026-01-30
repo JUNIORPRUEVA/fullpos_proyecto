@@ -7,6 +7,7 @@ import {
   auditQuerySchema,
   requestSchema,
   requestsQuerySchema,
+  resolveIdsSchema,
   verifySchema,
   virtualProvisionSchema,
 } from './override.validation';
@@ -16,6 +17,7 @@ import {
   getOverrideRequests,
   getAudit,
   provisionVirtualToken,
+  resolveOverrideIds,
   verifyOverride,
 } from './override.service';
 
@@ -51,6 +53,21 @@ router.post('/verify', overrideKeyGuard, validate(verifySchema), async (req, res
     next(err);
   }
 });
+
+// Resolver de IDs (local->cloud) sin escribir en BD.
+router.post(
+  '/resolveIds',
+  overrideKeyGuard,
+  validate(resolveIdsSchema),
+  async (req, res, next) => {
+    try {
+      const result = await resolveOverrideIds(req.body);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // Token virtual (TOTP): el dueño "activa" (provisiona) el secret para un terminal.
 router.post(

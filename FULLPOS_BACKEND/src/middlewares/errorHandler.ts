@@ -6,6 +6,7 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
   if (err instanceof ZodError) {
     return res.status(400).json({
       message: 'Validation error',
+      errorCode: 'VALIDATION_ERROR',
       issues: err.issues.map((issue) => ({ path: issue.path, message: issue.message })),
     });
   }
@@ -19,7 +20,10 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
   }
 
   if (err?.status) {
-    return res.status(err.status).json({ message: err.message ?? 'Request error' });
+    const payload: any = { message: err.message ?? 'Request error' };
+    if (err.errorCode) payload.errorCode = err.errorCode;
+    if (err.details) payload.details = err.details;
+    return res.status(err.status).json(payload);
   }
 
   console.error(err);

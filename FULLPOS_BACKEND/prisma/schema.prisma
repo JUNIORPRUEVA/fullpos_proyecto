@@ -145,6 +145,7 @@ model OverrideToken {
   requestedById Int
   approvedById  Int?
   expiresAt     DateTime
+  revokedAt     DateTime?
   usedAt        DateTime?
   usedById      Int?
   terminalId    String?
@@ -159,6 +160,7 @@ model OverrideToken {
   approvedBy    User?     @relation("token_approved_by", fields: [approvedById], references: [id])
 
   @@index([companyId, actionCode, expiresAt])
+  @@unique([companyId, tokenHash, method])
 }
 
 model AuditLog {

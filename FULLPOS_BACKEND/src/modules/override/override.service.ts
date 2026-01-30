@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import env from '../../config/env';
 
@@ -7,6 +8,43 @@ const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function hashToken(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+type ApiError = {
+  status: number;
+  message: string;
+  errorCode: string;
+  details?: Record<string, unknown>;
+};
+
+function apiError(
+  errorCode: string,
+  message: string,
+  status = 400,
+  details?: Record<string, unknown>,
+): ApiError {
+  return { status, message, errorCode, details };
+}
+
+function tokenHashPrefix(hash: string | null | undefined) {
+  if (!hash) return 'null';
+  return hash.slice(0, 10);
+}
+
+function logOverride(level: 'info' | 'warn' | 'error', message: string, meta?: any) {
+  // En prod: info/warn sin stack; stack solo en debug.
+  const isProd = env.NODE_ENV === 'production';
+  const line = meta ? `${message} ${JSON.stringify(meta)}` : message;
+  if (level === 'error') {
+    if (isProd) console.warn(line);
+    else console.error(line);
+    return;
+  }
+  if (level === 'warn') {
+    console.warn(line);
+    return;
+  }
+  console.info(line);
 }
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -89,7 +127,135 @@ async function resolveCompanyIdForOverride(input: {
     if (company) return company.id;
   }
 
-  throw new Error('Empresa no encontrada');
+  throw apiError('OVERRIDE_COMPANY_NOT_FOUND', 'Datos no válidos (empresa no registrada en la nube)', 400, {
+    companyId: input.companyId ?? null,
+    companyRnc: input.companyRnc ?? null,
+    companyCloudId: input.companyCloudId ?? null,
+  });
+}
+
+async function resolveCloudUserIdForOverride(input: {
+  companyId: number;
+  cloudUserId?: number;
+  // Back-compat: algunos clientes mandan usedById/requestedById pero a veces es localId.
+  userIdCandidate?: number;
+  userUsername?: string;
+  userEmail?: string;
+}) {
+  const idCandidates = [input.cloudUserId, input.userIdCandidate].filter(
+    (v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0,
+  );
+
+  for (const id of idCandidates) {
+    const user = await prisma.user.findFirst({
+      where: { id, companyId: input.companyId, isActive: true },
+      select: { id: true },
+    });
+    if (user) return user.id;
+  }
+
+  const email = input.userEmail?.trim().toLowerCase() ?? '';
+  const username = input.userUsername?.trim() ?? '';
+
+  if (email || username) {
+    const user = await prisma.user.findFirst({
+      where: {
+        companyId: input.companyId,
+        isActive: true,
+        OR: [
+          email ? { email } : undefined,
+          username ? { username } : undefined,
+        ].filter(Boolean) as any,
+      },
+      select: { id: true },
+    });
+    if (user) return user.id;
+  }
+
+  if (idCandidates.length > 0) {
+    throw apiError(
+      'OVERRIDE_USER_NOT_FOUND',
+      `Datos no válidos (usuario no registrado en la nube): id=${idCandidates[0]}`,
+      400,
+      { companyId: input.companyId, providedIds: idCandidates, userEmail: email || null, userUsername: username || null },
+    );
+  }
+
+  throw apiError(
+    'OVERRIDE_USER_NOT_FOUND',
+    'Datos no válidos (usuario no registrado en la nube)',
+    400,
+    { companyId: input.companyId, userEmail: email || null, userUsername: username || null },
+  );
+}
+
+async function resolveTerminalDeviceIdForOverride(input: {
+  companyId: number;
+  cloudTerminalId?: number | string;
+  terminalId?: string;
+  required?: boolean;
+}) {
+  const raw = input.cloudTerminalId ?? input.terminalId;
+  if (raw == null || raw === '') {
+    if (input.required) {
+      throw apiError('OVERRIDE_TERMINAL_REQUIRED', 'Datos no válidos (terminal no registrada en la nube)', 400, {
+        companyId: input.companyId,
+      });
+    }
+    return null;
+  }
+
+  if (typeof raw === 'number') {
+    const terminal = await prisma.terminal.findFirst({
+      where: { id: raw, companyId: input.companyId, isActive: true },
+      select: { deviceId: true },
+    });
+    if (!terminal) {
+      throw apiError(
+        'OVERRIDE_TERMINAL_NOT_FOUND',
+        `Datos no válidos (terminal no registrada en la nube): id=${raw}`,
+        400,
+        { companyId: input.companyId, providedTerminalId: raw },
+      );
+    }
+    return terminal.deviceId;
+  }
+
+  const terminalKey = String(raw).trim();
+  if (!terminalKey) {
+    if (input.required) {
+      throw apiError('OVERRIDE_TERMINAL_REQUIRED', 'Datos no válidos (terminal no registrada en la nube)', 400, {
+        companyId: input.companyId,
+      });
+    }
+    return null;
+  }
+
+  // Si viene numérico como string, intentar por id primero.
+  if (/^\d+$/.test(terminalKey)) {
+    const asId = Number(terminalKey);
+    if (Number.isSafeInteger(asId)) {
+      const byId = await prisma.terminal.findFirst({
+        where: { id: asId, companyId: input.companyId, isActive: true },
+        select: { deviceId: true },
+      });
+      if (byId) return byId.deviceId;
+    }
+  }
+
+  const terminal = await prisma.terminal.findFirst({
+    where: { deviceId: terminalKey, companyId: input.companyId, isActive: true },
+    select: { deviceId: true },
+  });
+  if (!terminal) {
+    throw apiError(
+      'OVERRIDE_TERMINAL_NOT_FOUND',
+      `Datos no válidos (terminal no registrada en la nube): deviceId=${terminalKey}`,
+      400,
+      { companyId: input.companyId, providedTerminalId: terminalKey },
+    );
+  }
+  return terminal.deviceId;
 }
 
 function randomToken(length: number) {
@@ -175,37 +341,65 @@ async function safeAuditLogCreate(data: Parameters<typeof prisma.auditLog.create
 }
 
 export async function createOverrideRequest(body: {
-  companyId: number;
+  companyId?: number;
+  companyRnc?: string;
+  companyCloudId?: string;
+  cloudCompanyId?: string;
   actionCode: string;
   resourceType?: string;
   resourceId?: string;
-  requestedById: number;
+  requestedById?: number;
+  cloudUserId?: number;
+  userUsername?: string;
+  userEmail?: string;
   terminalId?: string;
+  cloudTerminalId?: number | string;
   meta?: Record<string, unknown>;
 }) {
+  const resolvedCompanyId = await resolveCompanyIdForOverride({
+    companyId: body.companyId,
+    companyRnc: body.companyRnc,
+    companyCloudId: body.cloudCompanyId ?? body.companyCloudId,
+  });
+
+  const requestedById = await resolveCloudUserIdForOverride({
+    companyId: resolvedCompanyId,
+    cloudUserId: body.cloudUserId,
+    userIdCandidate: body.requestedById,
+    userUsername: body.userUsername,
+    userEmail: body.userEmail,
+  });
+
+  const terminalDeviceId = await resolveTerminalDeviceIdForOverride({
+    companyId: resolvedCompanyId,
+    cloudTerminalId: body.cloudTerminalId,
+    terminalId: body.terminalId,
+    required: false,
+  });
+
   const created = await prisma.overrideRequest.create({
     data: {
-      companyId: body.companyId,
+      companyId: resolvedCompanyId,
       actionCode: body.actionCode,
       resourceType: body.resourceType,
       resourceId: body.resourceId,
-      requestedById: body.requestedById,
-      terminalId: body.terminalId,
+      requestedById,
+      terminalId: terminalDeviceId ?? null,
       meta: body.meta as any,
     },
   });
 
   await prisma.auditLog.create({
     data: {
-      companyId: body.companyId,
+      companyId: resolvedCompanyId,
       actionCode: body.actionCode,
       resourceType: body.resourceType,
       resourceId: body.resourceId,
-      requestedById: body.requestedById,
+      requestedById,
       approvedById: null,
       method: 'remote',
       result: 'requested',
-      terminalId: body.terminalId,
+      terminalId: terminalDeviceId ?? null,
       meta: body.meta as any,
     },
   });
@@ -292,46 +486,89 @@ export async function verifyOverride(body: {
   companyId?: number;
   companyRnc?: string;
   companyCloudId?: string;
+  cloudCompanyId?: string;
   token: string;
   actionCode: string;
   resourceType?: string;
   resourceId?: string;
-  usedById: number;
+  // Preferidos (cloud)
+  cloudUserId?: number;
+  cloudTerminalId?: number | string;
+  // Back-compat
+  usedById?: number;
+  userUsername?: string;
+  userEmail?: string;
   terminalId?: string;
+  meta?: Record<string, unknown>;
 }) {
   let resolvedCompanyId: number | null = null;
+  let resolvedUsedById: number | null = null;
+  let resolvedTerminalDeviceId: string | null = null;
   try {
     resolvedCompanyId = await resolveCompanyIdForOverride({
       companyId: body.companyId,
       companyRnc: body.companyRnc,
-      companyCloudId: body.companyCloudId,
+      companyCloudId: body.cloudCompanyId ?? body.companyCloudId,
+    });
+
+    const usedById = await resolveCloudUserIdForOverride({
+      companyId: resolvedCompanyId,
+      cloudUserId: body.cloudUserId,
+      userIdCandidate: body.usedById,
+      userUsername: body.userUsername,
+      userEmail: body.userEmail,
+    });
+    resolvedUsedById = usedById;
+
+    const terminalDeviceId = await resolveTerminalDeviceIdForOverride({
+      companyId: resolvedCompanyId,
+      cloudTerminalId: body.cloudTerminalId,
+      terminalId: body.terminalId,
+      required: false,
+    });
+    resolvedTerminalDeviceId = terminalDeviceId;
+
+    const tokenHashForRequest = hashToken(body.token);
+    logOverride('info', 'override.verify attempt', {
+      companyId: resolvedCompanyId,
+      actionCode: body.actionCode,
+      tokenHashPrefix: tokenHashPrefix(tokenHashForRequest),
+      usedById,
+      terminalId: terminalDeviceId,
     });
 
     const result = await prisma.$transaction(async (trx) => {
-      const tokenHash = hashToken(body.token);
+      const now = new Date();
       const token = await trx.overrideToken.findFirst({
         where: {
           companyId: resolvedCompanyId!,
           actionCode: body.actionCode,
-          tokenHash,
+          tokenHash: tokenHashForRequest,
+          method: 'remote',
         },
       });
 
       // Fallback: token virtual (TOTP) por terminal si el token no existe.
       if (!token) {
         if (!virtualTokenEnabled()) {
-          throw new Error('Token inv\u00e1lido');
+          throw apiError('OVERRIDE_TOKEN_INVALID', 'Token incorrecto', 400);
         }
-        const terminalId = body.terminalId?.trim();
+
+        const terminalId = await resolveTerminalDeviceIdForOverride({
+          companyId: resolvedCompanyId!,
+          cloudTerminalId: body.cloudTerminalId,
+          terminalId: body.terminalId,
+          required: true,
+        });
+
         if (!terminalId) {
-          throw new Error('Token inv\u00e1lido');
+          throw apiError('OVERRIDE_TERMINAL_REQUIRED', 'Datos no válidos (terminal no registrada en la nube)', 400);
         }
 
         const secret = virtualSecretFor(resolvedCompanyId!, terminalId);
-        const now = Date.now();
-        const match = verifyTotp({ secret, token: body.token, timeMs: now, window: 1 });
+        const match = verifyTotp({ secret, token: body.token, timeMs: now.getTime(), window: 1 });
         if (!match) {
-          throw new Error('Token inv\u00e1lido');
+          throw apiError('OVERRIDE_TOKEN_INVALID', 'Token incorrecto', 400);
         }
 
         const usedWindowHash = crypto
@@ -347,30 +584,49 @@ export async function verifyOverride(body: {
           },
         });
         if (existing) {
-          throw new Error('Token ya usado');
+          throw apiError('OVERRIDE_TOKEN_USED', 'Token ya fue usado', 400, {
+            method: 'virtual',
+            tokenHashPrefix: tokenHashPrefix(usedWindowHash),
+          });
         }
 
         const expiresAt = new Date((match.counter + 1) * VIRTUAL_PERIOD_SECONDS * 1000);
 
-        const created = await trx.overrideToken.create({
-          data: {
-            companyId: resolvedCompanyId!,
-            actionCode: body.actionCode,
-            resourceType: body.resourceType,
-            resourceId: body.resourceId,
-            tokenHash: usedWindowHash,
-            method: 'virtual',
-            nonce: randomToken(8),
-            requestedById: body.usedById,
-            approvedById: null,
-            expiresAt,
-            usedAt: new Date(),
-            usedById: body.usedById,
-            terminalId,
-            result: 'approved',
-            meta: { counter: match.counter, periodSeconds: VIRTUAL_PERIOD_SECONDS },
-          },
-        });
+        let created;
+        try {
+          created = await trx.overrideToken.create({
+            data: {
+              companyId: resolvedCompanyId!,
+              actionCode: body.actionCode,
+              resourceType: body.resourceType,
+              resourceId: body.resourceId,
+              tokenHash: usedWindowHash,
+              method: 'virtual',
+              nonce: randomToken(8),
+              requestedById: usedById,
+              approvedById: null,
+              expiresAt,
+              usedAt: now,
+              usedById,
+              terminalId,
+              result: 'approved',
+              meta: {
+                counter: match.counter,
+                periodSeconds: VIRTUAL_PERIOD_SECONDS,
+                clientMeta: (body.meta ?? null) as any,
+              },
+            },
+          });
+        } catch (e: any) {
+          // Si la ventana ya fue consumida por otro request concurrente.
+          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+            throw apiError('OVERRIDE_TOKEN_USED', 'Token ya fue usado', 400, {
+              method: 'virtual',
+              tokenHashPrefix: tokenHashPrefix(usedWindowHash),
+            });
+          }
+          throw e;
+        }
 
         await trx.auditLog.create({
           data: {
@@ -378,29 +634,82 @@ export async function verifyOverride(body: {
             actionCode: body.actionCode,
             resourceType: body.resourceType,
             resourceId: body.resourceId,
-            requestedById: body.usedById,
+            requestedById: usedById,
             approvedById: null,
             method: 'virtual',
             result: 'approved',
             terminalId: terminalId,
-            meta: { counter: match.counter, periodSeconds: VIRTUAL_PERIOD_SECONDS },
+            meta: {
+              counter: match.counter,
+              periodSeconds: VIRTUAL_PERIOD_SECONDS,
+              clientMeta: (body.meta ?? null) as any,
+            },
           },
         });
 
         return created;
       }
 
-      if (token.usedAt) throw new Error('Token ya usado');
-      if (token.expiresAt.getTime() < Date.now()) throw new Error('Token vencido');
+      if (token.revokedAt) throw apiError('OVERRIDE_TOKEN_REVOKED', 'Token revocado', 400);
+      if (token.usedAt || token.usedById)
+        throw apiError('OVERRIDE_TOKEN_USED', 'Token ya fue usado', 400, {
+          tokenId: token.id,
+          usedAt: token.usedAt?.toISOString() ?? null,
+          usedById: token.usedById ?? null,
+        });
+      if (token.expiresAt.getTime() <= now.getTime())
+        throw apiError('OVERRIDE_TOKEN_EXPIRED', 'Token expirado', 400, {
+          tokenId: token.id,
+          expiresAt: token.expiresAt.toISOString(),
+        });
       if (token.resourceType && body.resourceType && token.resourceType !== body.resourceType)
-        throw new Error('Token no coincide con el recurso');
+        throw apiError('OVERRIDE_TOKEN_RESOURCE_MISMATCH', 'Token no coincide con el recurso', 400, {
+          tokenId: token.id,
+          expectedResourceType: token.resourceType,
+          providedResourceType: body.resourceType,
+        });
       if (token.resourceId && body.resourceId && token.resourceId !== body.resourceId)
-        throw new Error('Token no coincide con el recurso');
+        throw apiError('OVERRIDE_TOKEN_RESOURCE_MISMATCH', 'Token no coincide con el recurso', 400, {
+          tokenId: token.id,
+          expectedResourceId: token.resourceId,
+          providedResourceId: body.resourceId,
+        });
 
-      await trx.overrideToken.update({
-        where: { id: token.id },
-        data: { usedAt: new Date(), usedById: body.usedById, result: 'approved' },
+      // Consumo atómico (concurrency-safe): solo actualiza si todavía está disponible.
+      const consumed = await trx.overrideToken.updateMany({
+        where: {
+          id: token.id,
+          usedById: null,
+          usedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: {
+          usedAt: now,
+          usedById,
+          terminalId: terminalDeviceId ?? token.terminalId ?? null,
+          result: 'approved',
+        },
       });
+
+      if (consumed.count !== 1) {
+        const current = await trx.overrideToken.findUnique({ where: { id: token.id } });
+        if (!current) throw apiError('OVERRIDE_TOKEN_INVALID', 'Token incorrecto', 400);
+        if (current.revokedAt) throw apiError('OVERRIDE_TOKEN_REVOKED', 'Token revocado', 400);
+        if (current.usedAt || current.usedById)
+          throw apiError('OVERRIDE_TOKEN_USED', 'Token ya fue usado', 400, {
+            tokenId: current.id,
+            usedAt: current.usedAt?.toISOString() ?? null,
+            usedById: current.usedById ?? null,
+          });
+        if (current.expiresAt.getTime() <= now.getTime())
+          throw apiError('OVERRIDE_TOKEN_EXPIRED', 'Token expirado', 400, {
+            tokenId: current.id,
+            expiresAt: current.expiresAt.toISOString(),
+          });
+
+        throw apiError('OVERRIDE_TOKEN_CONFLICT', 'No autorizado', 409, { tokenId: token.id });
+      }
 
       await trx.auditLog.create({
         data: {
@@ -409,10 +718,11 @@ export async function verifyOverride(body: {
           resourceType: token.resourceType,
           resourceId: token.resourceId,
           requestedById: token.requestedById,
-          approvedById: body.usedById,
+          approvedById: usedById,
           method: token.method,
           result: 'approved',
-          terminalId: body.terminalId,
+          terminalId: terminalDeviceId ?? null,
+          meta: body.meta as any,
         },
       });
 
@@ -422,21 +732,76 @@ export async function verifyOverride(body: {
     return { ok: true, tokenId: result.id };
   } catch (e: any) {
     if (resolvedCompanyId != null) {
+      const errorCode = e?.errorCode ?? 'OVERRIDE_REJECTED';
       await safeAuditLogCreate({
         companyId: resolvedCompanyId,
         actionCode: body.actionCode,
         resourceType: body.resourceType,
         resourceId: body.resourceId,
-        requestedById: body.usedById,
+        requestedById: resolvedUsedById,
         approvedById: null,
         method: 'remote',
         result: 'rejected',
-        terminalId: body.terminalId,
-        meta: { error: e?.message ?? String(e) },
+        terminalId: resolvedTerminalDeviceId ?? body.terminalId ?? null,
+        meta: {
+          errorCode,
+          error: e?.message ?? String(e),
+          tokenHashPrefix: tokenHashPrefix(body.token ? hashToken(body.token) : null),
+        },
+      });
+
+      logOverride('warn', 'override.verify rejected', {
+        companyId: resolvedCompanyId,
+        actionCode: body.actionCode,
+        errorCode,
+        message: e?.message ?? String(e),
       });
     }
-    throw { status: 400, message: e.message ?? 'No autorizado' };
+    if (e?.status && e?.errorCode) throw e;
+    throw { status: 400, message: e?.message ?? 'No autorizado', errorCode: e?.errorCode ?? 'OVERRIDE_REJECTED' };
   }
+}
+
+export async function resolveOverrideIds(body: {
+  companyId?: number;
+  companyRnc?: string;
+  companyCloudId?: string;
+  cloudCompanyId?: string;
+  cloudUserId?: number;
+  userIdCandidate?: number;
+  userUsername?: string;
+  userEmail?: string;
+  cloudTerminalId?: number | string;
+  terminalId?: string;
+}) {
+  const companyId = await resolveCompanyIdForOverride({
+    companyId: body.companyId,
+    companyRnc: body.companyRnc,
+    companyCloudId: body.cloudCompanyId ?? body.companyCloudId,
+  });
+
+  const userId =
+    body.cloudUserId || body.userIdCandidate || body.userEmail || body.userUsername
+      ? await resolveCloudUserIdForOverride({
+          companyId,
+          cloudUserId: body.cloudUserId,
+          userIdCandidate: body.userIdCandidate,
+          userUsername: body.userUsername,
+          userEmail: body.userEmail,
+        })
+      : null;
+
+  const terminalDeviceId =
+    body.cloudTerminalId || body.terminalId
+      ? await resolveTerminalDeviceIdForOverride({
+          companyId,
+          cloudTerminalId: body.cloudTerminalId,
+          terminalId: body.terminalId,
+          required: false,
+        })
+      : null;
+
+  return { companyId, userId, terminalDeviceId };
 }
 
 export async function provisionVirtualToken(body: {
