@@ -515,6 +515,222 @@ export async function approveOverride(body: {
   }
 }
 
+export async function approveOverrideDirect(body: {
+  companyId: number;
+  requestId: number;
+  approvedById: number;
+}) {
+  try {
+    const updated = await prisma.$transaction(async (trx) => {
+      const request = await trx.overrideRequest.findFirst({
+        where: { id: body.requestId, companyId: body.companyId },
+      });
+      if (!request) {
+        throw apiError('OVERRIDE_REQUEST_NOT_FOUND', 'Solicitud no encontrada', 404, {
+          requestId: body.requestId,
+        });
+      }
+      if (request.status !== 'pending') {
+        throw apiError('OVERRIDE_REQUEST_ALREADY_RESOLVED', 'Solicitud ya resuelta', 409, {
+          requestId: body.requestId,
+          status: request.status,
+        });
+      }
+
+      const updated = await trx.overrideRequest.update({
+        where: { id: body.requestId },
+        data: {
+          status: 'approved',
+          approvedById: body.approvedById,
+          resolvedAt: new Date(),
+          // No generamos tokenHash/overrideToken en flujo directo.
+        },
+      });
+
+      await trx.auditLog.create({
+        data: {
+          companyId: body.companyId,
+          actionCode: updated.actionCode,
+          resourceType: updated.resourceType,
+          resourceId: updated.resourceId,
+          requestedById: updated.requestedById,
+          approvedById: body.approvedById,
+          method: 'remote',
+          result: 'approved',
+          terminalId: updated.terminalId,
+          meta: { requestId: updated.id, mode: 'direct' } as any,
+        },
+      });
+
+      return updated;
+    });
+
+    return {
+      requestId: updated.id,
+      status: updated.status,
+      resolvedAt: updated.resolvedAt,
+    };
+  } catch (e: any) {
+    if (e?.status && e?.errorCode) throw e;
+    throw apiError('OVERRIDE_APPROVE_FAILED', e?.message ?? 'No se pudo aprobar la solicitud', 400);
+  }
+}
+
+export async function consumeApprovedOverrideRequest(body: {
+  requestId: number;
+  // company identity
+  companyId?: number;
+  companyRnc?: string;
+  companyCloudId?: string;
+  cloudCompanyId?: string;
+  // action identity
+  actionCode: string;
+  resourceType?: string;
+  resourceId?: string;
+  // user identity
+  cloudUserId?: number;
+  usedById?: number;
+  userUsername?: string;
+  userEmail?: string;
+  // terminal
+  terminalId?: string;
+  cloudTerminalId?: number | string;
+  meta?: Record<string, unknown>;
+}) {
+  const resolvedCompanyId = await resolveCompanyIdForOverride({
+    companyId: body.companyId,
+    companyRnc: body.companyRnc,
+    companyCloudId: body.companyCloudId ?? body.companyCloudId,
+  });
+
+  const usedById = await resolveCloudUserIdForOverride({
+    companyId: resolvedCompanyId,
+    cloudUserId: body.cloudUserId,
+    userIdCandidate: body.usedById,
+    userUsername: body.userUsername,
+    userEmail: body.userEmail,
+  });
+
+  const terminalDeviceId = await resolveTerminalDeviceIdForOverride({
+    companyId: resolvedCompanyId,
+    cloudTerminalId: body.cloudTerminalId,
+    terminalId: body.terminalId,
+    required: false,
+  });
+
+  const now = new Date();
+
+  try {
+    const updated = await prisma.$transaction(async (trx) => {
+      const request = await trx.overrideRequest.findFirst({
+        where: { id: body.requestId, companyId: resolvedCompanyId },
+      });
+      if (!request) {
+        throw apiError('OVERRIDE_REQUEST_NOT_FOUND', 'Solicitud no encontrada', 404, {
+          requestId: body.requestId,
+        });
+      }
+
+      if (request.status === 'pending') {
+        throw apiError('OVERRIDE_REQUEST_PENDING', 'Aún esperando aprobación', 409, {
+          requestId: body.requestId,
+        });
+      }
+      if (request.status === 'rejected') {
+        throw apiError('OVERRIDE_REQUEST_REJECTED', 'Solicitud rechazada', 403, {
+          requestId: body.requestId,
+        });
+      }
+      if (request.status === 'consumed') {
+        throw apiError('OVERRIDE_REQUEST_CONSUMED', 'Solicitud ya fue utilizada', 409, {
+          requestId: body.requestId,
+        });
+      }
+      if (request.status !== 'approved') {
+        throw apiError('OVERRIDE_REQUEST_INVALID_STATE', 'Solicitud no disponible', 409, {
+          requestId: body.requestId,
+          status: request.status,
+        });
+      }
+
+      if (request.expiresAt && request.expiresAt <= now) {
+        const expired = await trx.overrideRequest.update({
+          where: { id: request.id },
+          data: { status: 'expired' },
+        });
+        throw apiError('OVERRIDE_REQUEST_EXPIRED', 'La autorización venció. Solicita nuevamente.', 400, {
+          requestId: expired.id,
+        });
+      }
+
+      // Enforzar que el request corresponde a la acción y al usuario.
+      if (request.actionCode !== body.actionCode) {
+        throw apiError('OVERRIDE_REQUEST_ACTION_MISMATCH', 'La autorización no corresponde a esta acción', 400, {
+          requestId: request.id,
+          expected: request.actionCode,
+          got: body.actionCode,
+        });
+      }
+      if ((request.resourceType ?? null) !== (body.resourceType ?? null)) {
+        throw apiError('OVERRIDE_REQUEST_RESOURCE_MISMATCH', 'La autorización no corresponde a este recurso', 400, {
+          requestId: request.id,
+        });
+      }
+      if ((request.resourceId ?? null) !== (body.resourceId ?? null)) {
+        throw apiError('OVERRIDE_REQUEST_RESOURCE_MISMATCH', 'La autorización no corresponde a este recurso', 400, {
+          requestId: request.id,
+        });
+      }
+      if (request.requestedById !== usedById) {
+        throw apiError('OVERRIDE_REQUEST_USER_MISMATCH', 'La autorización no corresponde a este usuario', 403, {
+          requestId: request.id,
+          requestedById: request.requestedById,
+          usedById,
+        });
+      }
+
+      const existingMeta = (request.meta as any) ?? {};
+      const mergedMeta = {
+        ...existingMeta,
+        ...(body.meta ?? {}),
+        consumedAt: now.toISOString(),
+        consumedById: usedById,
+        consumedTerminalId: terminalDeviceId ?? null,
+      };
+
+      const updated = await trx.overrideRequest.update({
+        where: { id: request.id },
+        data: {
+          status: 'consumed',
+          meta: mergedMeta as any,
+        },
+      });
+
+      await trx.auditLog.create({
+        data: {
+          companyId: resolvedCompanyId,
+          actionCode: request.actionCode,
+          resourceType: request.resourceType,
+          resourceId: request.resourceId,
+          requestedById: request.requestedById,
+          approvedById: request.approvedById,
+          method: 'remote',
+          result: 'consumed',
+          terminalId: terminalDeviceId ?? request.terminalId ?? null,
+          meta: { requestId: request.id } as any,
+        },
+      });
+
+      return updated;
+    });
+
+    return { ok: true, requestId: updated.id, status: updated.status };
+  } catch (e: any) {
+    if (e?.status && e?.errorCode) throw e;
+    throw apiError('OVERRIDE_REQUEST_CONSUME_FAILED', e?.message ?? 'No se pudo completar la autorización', 400);
+  }
+}
+
 export async function verifyOverride(body: {
   companyId?: number;
   companyRnc?: string;

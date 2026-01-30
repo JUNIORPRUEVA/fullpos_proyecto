@@ -4,7 +4,9 @@ import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
 import {
   approveSchema,
+  approveDirectSchema,
   auditQuerySchema,
+  consumeRequestSchema,
   requestSchema,
   requestsQuerySchema,
   resolveIdsSchema,
@@ -13,6 +15,8 @@ import {
 } from './override.validation';
 import {
   approveOverride,
+  approveOverrideDirect,
+  consumeApprovedOverrideRequest,
   createOverrideRequest,
   getOverrideRequests,
   getAudit,
@@ -44,6 +48,35 @@ router.post('/approve', authGuard, validate(approveSchema), async (req, res, nex
     next(err);
   }
 });
+
+// Aprobar sin token (el POS puede continuar sin ingresar código)
+router.post('/approve-direct', authGuard, validate(approveDirectSchema), async (req, res, next) => {
+  try {
+    const result = await approveOverrideDirect({
+      requestId: req.body.requestId,
+      companyId: req.user!.companyId,
+      approvedById: req.user!.id,
+    });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Consumir una solicitud aprobada (sin token), para habilitar la acción en el POS.
+router.post(
+  '/request/consume',
+  overrideKeyGuard,
+  validate(consumeRequestSchema),
+  async (req, res, next) => {
+    try {
+      const result = await consumeApprovedOverrideRequest(req.body);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 router.post('/verify', overrideKeyGuard, validate(verifySchema), async (req, res, next) => {
   try {

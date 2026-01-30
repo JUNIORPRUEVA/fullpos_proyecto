@@ -34,6 +34,47 @@ export const approveSchema = z.object({
   expiresInSeconds: z.number().int().min(30).max(600).optional(),
 });
 
+// Aprobar sin generar token (flujo "en vivo" / sin que el cajero escriba token).
+export const approveDirectSchema = z.object({
+  requestId: z.number().int().positive(),
+});
+
+// Consumir una solicitud ya aprobada (sin token), para que el POS pueda continuar.
+export const consumeRequestSchema = z
+  .object({
+    requestId: z.number().int().positive(),
+    // Identidad empresa
+    cloudCompanyId: z.string().min(3).optional(),
+    companyId: z.number().int().positive().optional(),
+    companyRnc: z.string().min(3).optional(),
+    companyCloudId: z.string().min(3).optional(),
+
+    // Acción esperada (para evitar reutilizar el mismo request en otra cosa)
+    actionCode: z.string().min(3),
+    resourceType: z.string().optional(),
+    resourceId: z.string().optional(),
+
+    // Usuario (debe coincidir con requestedById del request)
+    cloudUserId: z.number().int().positive().optional(),
+    usedById: z.number().int().positive().optional(),
+    userUsername: z.string().min(3).optional(),
+    userEmail: z.string().email().optional(),
+
+    // Terminal
+    terminalId: z.string().optional(),
+    cloudTerminalId: z.union([z.number().int().positive(), z.string().min(3)]).optional(),
+
+    meta: z.record(z.any()).optional(),
+  })
+  .refine((v) => Boolean(v.cloudCompanyId || v.companyId || v.companyRnc || v.companyCloudId), {
+    message: 'cloudCompanyId, companyId, companyRnc o companyCloudId requerido',
+    path: ['cloudCompanyId'],
+  })
+  .refine((v) => Boolean(v.cloudUserId || v.usedById || v.userUsername || v.userEmail), {
+    message: 'cloudUserId, usedById, userUsername o userEmail requerido',
+    path: ['cloudUserId'],
+  });
+
 export const verifySchema = z
   .object({
     // Preferido (cloud)
