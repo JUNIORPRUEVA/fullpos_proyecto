@@ -47,6 +47,13 @@ async function resolveCompanyIdForOverride(input: {
       select: { id: true },
     });
     if (company) return company.id;
+
+    const asCloudId = String(input.companyId);
+    const byCloud = await prisma.company.findFirst({
+      where: { cloudCompanyId: asCloudId },
+      select: { id: true },
+    });
+    if (byCloud) return byCloud.id;
   }
 
   const cloudId = input.companyCloudId?.trim() ?? '';
