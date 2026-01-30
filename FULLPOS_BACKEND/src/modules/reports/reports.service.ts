@@ -14,6 +14,30 @@ function toNumber(value: any) {
   return Number(value);
 }
 
+function toNullableNumber(value: any): number | null {
+  if (value === null || value === undefined) return null;
+  return toNumber(value);
+}
+
+function normalizeKey(value: any): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function isCashPaymentMethod(paymentMethod: string | null | undefined): boolean {
+  const key = normalizeKey(paymentMethod);
+  return key === 'cash' || key === 'efectivo' || key === 'contado';
+}
+
+function isMovementIn(type: string | null | undefined): boolean {
+  const key = normalizeKey(type);
+  return key === 'in' || key === 'entrada' || key === 'deposito' || key === 'depósito';
+}
+
+function isMovementOut(type: string | null | undefined): boolean {
+  const key = normalizeKey(type);
+  return key === 'out' || key === 'retiro' || key === 'salida';
+}
+
 export async function getReportsStatus(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
@@ -274,9 +298,9 @@ export async function getCashClosings(companyId: number, from: string, to: strin
       closedBy: session.closedBy,
       totalSales,
       salesCount,
-      closingAmount: toNumber(session.closingAmount),
-      expectedCash: toNumber(session.expectedCash),
-      difference: toNumber(session.difference),
+      closingAmount: toNullableNumber(session.closingAmount),
+      expectedCash: toNullableNumber(session.expectedCash),
+      difference: toNullableNumber(session.difference),
     };
   });
 }
@@ -311,6 +335,29 @@ export async function getCashClosingDetail(companyId: number, closingId: number)
     }),
   ]);
 
+  // Calcular esperado/diferencia si el POS aún no lo sincronizó.
+  // Aproximación: inicial + ventas en efectivo + neto movimientos.
+  const openingAmount = toNumber(session.initialAmount);
+  const cashSalesTotal = sales.reduce((sum, sale) => {
+    if (!isCashPaymentMethod(sale.paymentMethod)) return sum;
+    return sum + toNumber(sale.total);
+  }, 0);
+  const movementsInTotal = movements.reduce((sum, mov) => {
+    if (!isMovementIn(mov.type)) return sum;
+    return sum + toNumber(mov.amount);
+  }, 0);
+  const movementsOutTotal = movements.reduce((sum, mov) => {
+    if (!isMovementOut(mov.type)) return sum;
+    return sum + toNumber(mov.amount);
+  }, 0);
+  const computedExpectedCash = openingAmount + cashSalesTotal + movementsInTotal - movementsOutTotal;
+
+  const closingAmount = toNullableNumber(session.closingAmount);
+  const storedExpectedCash = toNullableNumber(session.expectedCash);
+  const expectedCash = storedExpectedCash ?? computedExpectedCash;
+  const storedDifference = toNullableNumber(session.difference);
+  const difference = storedDifference ?? (closingAmount != null ? closingAmount - expectedCash : null);
+
   const paymentBreakdown = sales.reduce<Record<string, number>>((acc, sale) => {
     const key = sale.paymentMethod ?? 'otros';
     acc[key] = (acc[key] ?? 0) + toNumber(sale.total);
@@ -325,9 +372,9 @@ export async function getCashClosingDetail(companyId: number, closingId: number)
       openedAt: session.openedAt,
       closedAt: session.closedAt,
       initialAmount: toNumber(session.initialAmount),
-      closingAmount: toNumber(session.closingAmount),
-      expectedCash: toNumber(session.expectedCash),
-      difference: toNumber(session.difference),
+      closingAmount,
+      expectedCash,
+      difference,
       status: session.status,
       note: session.note,
       openedBy: session.openedBy,
