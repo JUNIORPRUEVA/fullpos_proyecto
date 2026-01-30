@@ -247,15 +247,48 @@ async function resolveTerminalDeviceIdForOverride(input: {
     where: { deviceId: terminalKey, companyId: input.companyId, isActive: true },
     select: { deviceId: true },
   });
-  if (!terminal) {
+  if (terminal) return terminal.deviceId;
+
+  // Auto-registrar la terminal en la nube (solo rutas protegidas por overrideKeyGuard).
+  // Evita bloquear operaciones por primera vez en un equipo nuevo.
+  const existingByDevice = await prisma.terminal.findFirst({
+    where: { deviceId: terminalKey },
+    select: { companyId: true, deviceId: true },
+  });
+  if (existingByDevice && existingByDevice.companyId !== input.companyId) {
     throw apiError(
-      'OVERRIDE_TERMINAL_NOT_FOUND',
-      `Datos no válidos (terminal no registrada en la nube): deviceId=${terminalKey}`,
+      'OVERRIDE_TERMINAL_CONFLICT',
+      `Datos no válidos (terminal pertenece a otra empresa): deviceId=${terminalKey}`,
       400,
-      { companyId: input.companyId, providedTerminalId: terminalKey },
+      {
+        companyId: input.companyId,
+        providedTerminalId: terminalKey,
+        existingCompanyId: existingByDevice.companyId,
+      },
     );
   }
-  return terminal.deviceId;
+
+  try {
+    const created = await prisma.terminal.create({
+      data: {
+        companyId: input.companyId,
+        deviceId: terminalKey,
+        isActive: true,
+      },
+      select: { deviceId: true },
+    });
+    return created.deviceId;
+  } catch (err: any) {
+    // Concurrencia: otra petición la creó.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const created = await prisma.terminal.findFirst({
+        where: { deviceId: terminalKey, companyId: input.companyId },
+        select: { deviceId: true },
+      });
+      if (created) return created.deviceId;
+    }
+    throw err;
+  }
 }
 
 function randomToken(length: number) {

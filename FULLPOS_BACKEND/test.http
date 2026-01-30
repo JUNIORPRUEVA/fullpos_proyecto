@@ -1,5 +1,8 @@
 @host = http://localhost:4000
 @token = {{access_token}}
+@cloudKey = {{cloud_key}}
+@companyRnc = {{company_rnc}}
+@companyCloudId = {{company_cloud_id}}
 
 ### Login
 POST {{host}}/api/auth/login
@@ -44,3 +47,20 @@ Authorization: Bearer {{token}}
 
 ### Descarga app owner (p\u00fablico)
 GET {{host}}/api/downloads/owner-app
+
+### Sync users (POS -> Cloud)
+# Requiere header x-cloud-key (o x-override-key) con el mismo API key configurado en la nube.
+# Cambia companyRnc/companyCloudId seg\u00fan tu empresa.
+POST {{host}}/api/auth/sync-users
+Content-Type: application/json
+x-cloud-key: {{cloudKey}}
+
+{
+  "companyRnc": "{{companyRnc}}",
+  "companyCloudId": "{{companyCloudId}}",
+  "companyName": "FULLPOS",
+  "users": [
+    { "username": "caja1", "role": "cashier", "displayName": "Caja 1" },
+    { "username": "admin1", "role": "admin", "displayName": "Admin" }
+  ]
+}
