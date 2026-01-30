@@ -15,15 +15,22 @@ export const approveSchema = z.object({
   expiresInSeconds: z.number().int().min(30).max(600).optional(),
 });
 
-export const verifySchema = z.object({
-  companyId: z.number().int().positive(),
-  token: z.string().min(4),
-  actionCode: z.string().min(3),
-  resourceType: z.string().optional(),
-  resourceId: z.string().optional(),
-  usedById: z.number().int().positive(),
-  terminalId: z.string().optional(),
-});
+export const verifySchema = z
+  .object({
+    companyId: z.number().int().positive().optional(),
+    companyRnc: z.string().min(3).optional(),
+    companyCloudId: z.string().min(3).optional(),
+    token: z.string().min(4),
+    actionCode: z.string().min(3),
+    resourceType: z.string().optional(),
+    resourceId: z.string().optional(),
+    usedById: z.number().int().positive(),
+    terminalId: z.string().optional(),
+  })
+  .refine((v) => Boolean(v.companyId || v.companyRnc || v.companyCloudId), {
+    message: 'companyId, companyRnc o companyCloudId requerido',
+    path: ['companyId'],
+  });
 
 export const virtualProvisionSchema = z.object({
   terminalId: z.string().min(3),

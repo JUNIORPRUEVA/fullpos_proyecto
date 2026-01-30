@@ -32,6 +32,59 @@ function base32Encode(buf: Buffer) {
   return output;
 }
 
+function normalizeRnc(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+async function resolveCompanyIdForOverride(input: {
+  companyId?: number;
+  companyRnc?: string;
+  companyCloudId?: string;
+}) {
+  if (input.companyId) {
+    const company = await prisma.company.findUnique({
+      where: { id: input.companyId },
+      select: { id: true },
+    });
+    if (company) return company.id;
+  }
+
+  const cloudId = input.companyCloudId?.trim() ?? '';
+  if (cloudId) {
+    const company = await prisma.company.findFirst({
+      where: { cloudCompanyId: cloudId },
+      select: { id: true, rnc: true },
+    });
+    if (company) return company.id;
+  }
+
+  const rnc = input.companyRnc?.trim() ?? '';
+  if (rnc) {
+    let company = await prisma.company.findFirst({
+      where: { rnc },
+      select: { id: true, rnc: true },
+    });
+
+    if (!company) {
+      const normalized = normalizeRnc(rnc);
+      if (normalized.length > 0) {
+        const candidates = await prisma.company.findMany({
+          where: { rnc: { not: null } },
+          select: { id: true, rnc: true },
+        });
+        company =
+          candidates.find(
+            (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
+          ) ?? null;
+      }
+    }
+
+    if (company) return company.id;
+  }
+
+  throw new Error('Empresa no encontrada');
+}
+
 function randomToken(length: number) {
   return Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join(
     '',
@@ -229,7 +282,9 @@ export async function approveOverride(body: {
 }
 
 export async function verifyOverride(body: {
-  companyId: number;
+  companyId?: number;
+  companyRnc?: string;
+  companyCloudId?: string;
   token: string;
   actionCode: string;
   resourceType?: string;
@@ -237,20 +292,19 @@ export async function verifyOverride(body: {
   usedById: number;
   terminalId?: string;
 }) {
+  let resolvedCompanyId: number | null = null;
   try {
-    const company = await prisma.company.findUnique({
-      where: { id: body.companyId },
-      select: { id: true },
+    resolvedCompanyId = await resolveCompanyIdForOverride({
+      companyId: body.companyId,
+      companyRnc: body.companyRnc,
+      companyCloudId: body.companyCloudId,
     });
-    if (!company) {
-      throw new Error('Empresa no encontrada');
-    }
 
     const result = await prisma.$transaction(async (trx) => {
       const tokenHash = hashToken(body.token);
       const token = await trx.overrideToken.findFirst({
         where: {
-          companyId: body.companyId,
+          companyId: resolvedCompanyId!,
           actionCode: body.actionCode,
           tokenHash,
         },
@@ -266,7 +320,7 @@ export async function verifyOverride(body: {
           throw new Error('Token inv\u00e1lido');
         }
 
-        const secret = virtualSecretFor(body.companyId, terminalId);
+        const secret = virtualSecretFor(resolvedCompanyId!, terminalId);
         const now = Date.now();
         const match = verifyTotp({ secret, token: body.token, timeMs: now, window: 1 });
         if (!match) {
@@ -275,12 +329,12 @@ export async function verifyOverride(body: {
 
         const usedWindowHash = crypto
           .createHash('sha256')
-          .update(`virtual|${body.companyId}|${terminalId}|${match.counter}`)
+          .update(`virtual|${resolvedCompanyId!}|${terminalId}|${match.counter}`)
           .digest('hex');
 
         const existing = await trx.overrideToken.findFirst({
           where: {
-            companyId: body.companyId,
+            companyId: resolvedCompanyId!,
             tokenHash: usedWindowHash,
             method: 'virtual',
           },
@@ -293,7 +347,7 @@ export async function verifyOverride(body: {
 
         const created = await trx.overrideToken.create({
           data: {
-            companyId: body.companyId,
+            companyId: resolvedCompanyId!,
             actionCode: body.actionCode,
             resourceType: body.resourceType,
             resourceId: body.resourceId,
@@ -313,7 +367,7 @@ export async function verifyOverride(body: {
 
         await trx.auditLog.create({
           data: {
-            companyId: body.companyId,
+            companyId: resolvedCompanyId!,
             actionCode: body.actionCode,
             resourceType: body.resourceType,
             resourceId: body.resourceId,
@@ -343,7 +397,7 @@ export async function verifyOverride(body: {
 
       await trx.auditLog.create({
         data: {
-          companyId: body.companyId,
+          companyId: resolvedCompanyId!,
           actionCode: token.actionCode,
           resourceType: token.resourceType,
           resourceId: token.resourceId,
@@ -360,18 +414,20 @@ export async function verifyOverride(body: {
 
     return { ok: true, tokenId: result.id };
   } catch (e: any) {
-    await safeAuditLogCreate({
-      companyId: body.companyId,
-      actionCode: body.actionCode,
-      resourceType: body.resourceType,
-      resourceId: body.resourceId,
-      requestedById: body.usedById,
-      approvedById: null,
-      method: 'remote',
-      result: 'rejected',
-      terminalId: body.terminalId,
-      meta: { error: e?.message ?? String(e) },
-    });
+    if (resolvedCompanyId != null) {
+      await safeAuditLogCreate({
+        companyId: resolvedCompanyId,
+        actionCode: body.actionCode,
+        resourceType: body.resourceType,
+        resourceId: body.resourceId,
+        requestedById: body.usedById,
+        approvedById: null,
+        method: 'remote',
+        result: 'rejected',
+        terminalId: body.terminalId,
+        meta: { error: e?.message ?? String(e) },
+      });
+    }
     throw { status: 400, message: e.message ?? 'No autorizado' };
   }
 }
