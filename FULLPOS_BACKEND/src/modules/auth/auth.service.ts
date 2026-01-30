@@ -92,6 +92,13 @@ async function generateTokenPair(user: JwtUser): Promise<TokenPair> {
   };
 }
 
+function isCloudRoleAllowed(role: string) {
+  // FULLPOS Owner (cloud) debe permitir solo usuarios elevados.
+  // Permitimos 'admin' y 'owner' para no bloquear el setup inicial.
+  const r = (role ?? '').toLowerCase();
+  return r === 'admin' || r === 'owner';
+}
+
 export async function login(identifier: string, password: string) {
   const user = await prisma.user.findFirst({
     where: {
@@ -103,6 +110,16 @@ export async function login(identifier: string, password: string) {
 
   if (!user || !user.company || !user.company.isActive) {
     throw { status: 401, message: 'Credenciales inv\u00e1lidas' };
+  }
+
+  // Cloud Owner app: bloquear login de cajeros/usuarios no admin.
+  if (!isCloudRoleAllowed(user.role)) {
+    throw {
+      status: 403,
+      message: 'Acceso denegado (solo administradores)',
+      errorCode: 'AUTH_ROLE_NOT_ALLOWED',
+      details: { role: user.role, userId: user.id, companyId: user.companyId },
+    };
   }
 
   let passwordMatches = false;
@@ -167,6 +184,15 @@ export async function refresh(refreshToken: string) {
     stored.user.isActive === false
   ) {
     throw { status: 401, message: 'Token de refresh inv\u00e1lido' };
+  }
+
+  if (!isCloudRoleAllowed(stored.user.role)) {
+    throw {
+      status: 403,
+      message: 'Acceso denegado (solo administradores)',
+      errorCode: 'AUTH_ROLE_NOT_ALLOWED',
+      details: { role: stored.user.role, userId: stored.user.id, companyId: stored.user.companyId },
+    };
   }
 
   // Rotate token
@@ -443,5 +469,154 @@ export async function provisionAdminUser(params: {
   return {
     company: { id: company.id, name: company.name, rnc: company.rnc },
     user: { id: created.id, username: created.username, role: created.role },
+  };
+}
+
+type SyncUserInput = {
+  username: string;
+  email?: string;
+  displayName?: string;
+  role?: string;
+  isActive?: boolean;
+};
+
+function normalizeRoleForSync(role?: string) {
+  const r = (role ?? 'cashier').trim().toLowerCase();
+  return r.length ? r : 'cashier';
+}
+
+function normalizeEmailForSync(email?: string) {
+  const e = (email ?? '').trim().toLowerCase();
+  return e.length ? e : undefined;
+}
+
+export async function syncUsers(params: {
+  companyRnc?: string;
+  companyCloudId?: string;
+  companyName?: string;
+  users: SyncUserInput[];
+}) {
+  const company = await resolveCompanyForProvision({
+    companyRnc: params.companyRnc,
+    companyCloudId: params.companyCloudId,
+    companyName: params.companyName,
+  });
+
+  const results: Array<{
+    username: string;
+    email?: string;
+    cloudUserId?: number;
+    status: 'upserted' | 'skipped' | 'conflict';
+    reason?: string;
+  }> = [];
+
+  for (const u of params.users) {
+    const username = u.username.trim();
+    const email = normalizeEmailForSync(u.email);
+    const role = normalizeRoleForSync(u.role);
+    const isActive = u.isActive ?? true;
+
+    // No permitimos sync de 'owner' desde POS para evitar escalamiento accidental.
+    if (role === 'owner') {
+      results.push({ username, email, status: 'skipped', reason: 'role_owner_not_allowed' });
+      continue;
+    }
+
+    // 1) Buscar por username (estable)
+    const byUsername = await prisma.user.findFirst({
+      where: { username },
+      select: { id: true, companyId: true, username: true, email: true },
+    });
+
+    if (byUsername && byUsername.companyId !== company.id) {
+      results.push({
+        username,
+        email,
+        status: 'conflict',
+        reason: 'username_taken_by_other_company',
+      });
+      continue;
+    }
+
+    // 2) Si no existe por username y viene email, intentar por email
+    const byEmail =
+      !byUsername && email
+        ? await prisma.user.findFirst({
+            where: { email },
+            select: { id: true, companyId: true, username: true, email: true },
+          })
+        : null;
+
+    if (byEmail && byEmail.companyId !== company.id) {
+      results.push({
+        username,
+        email,
+        status: 'conflict',
+        reason: 'email_taken_by_other_company',
+      });
+      continue;
+    }
+
+    const existing = byUsername ?? byEmail;
+
+    if (existing) {
+      // Actualizar sin tocar password
+      // Si lo encontramos por email y el username difiere, intentar alinearlo.
+      if (existing.username !== username) {
+        const usernameClash = await prisma.user.findFirst({
+          where: { username, NOT: { id: existing.id } },
+          select: { id: true },
+        });
+        if (usernameClash) {
+          results.push({
+            username,
+            email,
+            cloudUserId: existing.id,
+            status: 'conflict',
+            reason: 'username_taken_when_aligning',
+          });
+          continue;
+        }
+      }
+
+      const updated = await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          username,
+          email: email ?? null,
+          displayName: u.displayName ?? undefined,
+          role,
+          isActive,
+        },
+        select: { id: true },
+      });
+
+      results.push({ username, email, cloudUserId: updated.id, status: 'upserted' });
+      continue;
+    }
+
+    // Crear usuario sin password real (no se permite login si no es admin/owner).
+    const tempPassword = `sync_${company.id}_${username}_${Date.now()}`;
+    const hashed = await hashPassword(tempPassword);
+    const created = await prisma.user.create({
+      data: {
+        companyId: company.id,
+        username,
+        email: email ?? null,
+        password: hashed,
+        role,
+        isActive,
+        displayName: u.displayName ?? null,
+      },
+      select: { id: true },
+    });
+
+    results.push({ username, email, cloudUserId: created.id, status: 'upserted' });
+  }
+
+  return {
+    company: { id: company.id, name: company.name, rnc: company.rnc },
+    syncedCount: results.filter((r) => r.status === 'upserted').length,
+    results,
   };
 }

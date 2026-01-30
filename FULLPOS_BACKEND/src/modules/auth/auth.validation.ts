@@ -35,3 +35,26 @@ export const provisionUserSchema = z
     message: 'RNC o ID interno requerido',
     path: ['companyRnc'],
   });
+
+export const syncUsersSchema = z
+  .object({
+    companyRnc: z.string().min(3).optional(),
+    companyCloudId: z.string().min(6).optional(),
+    companyName: z.string().min(2).optional(),
+    users: z
+      .array(
+        z.object({
+          username: z.string().min(3),
+          email: z.string().email().optional(),
+          displayName: z.string().min(2).optional(),
+          role: z.string().min(3).optional(),
+          isActive: z.boolean().optional(),
+        }),
+      )
+      .min(1)
+      .max(500),
+  })
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });

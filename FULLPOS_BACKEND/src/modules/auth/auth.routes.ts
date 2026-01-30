@@ -6,6 +6,7 @@ import {
   loginSchema,
   provisionOwnerSchema,
   provisionUserSchema,
+  syncUsersSchema,
   refreshSchema,
 } from './auth.validation';
 import {
@@ -13,6 +14,7 @@ import {
   login,
   provisionAdminUser,
   provisionOwnerByRnc,
+  syncUsers,
   refresh,
 } from './auth.service';
 
@@ -76,6 +78,17 @@ router.post('/provision-user', overrideKeyGuard, validate(provisionUserSchema), 
       username,
       password,
     });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Sincroniza TODOS los usuarios a la nube (para FK/override), pero NO implica que puedan loguearse.
+router.post('/sync-users', overrideKeyGuard, validate(syncUsersSchema), async (req, res, next) => {
+  try {
+    const { companyRnc, companyCloudId, companyName, users } = req.body;
+    const result = await syncUsers({ companyRnc, companyCloudId, companyName, users });
     res.json(result);
   } catch (err) {
     next(err);
