@@ -35,6 +35,7 @@ export const syncProductsByRncSchema = z
       )
       .max(2000)
       .default([]),
+    deletedProducts: z.array(z.string().trim().min(1)).max(2000).default([]),
   })
   .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
     message: 'RNC o ID interno requerido',

@@ -130,6 +130,7 @@ export async function syncProductsByRnc(
   companyRnc: string | undefined,
   products: SyncProductInput[],
   companyCloudId?: string,
+  deletedProducts?: string[],
 ) {
   const rnc = companyRnc?.trim() ?? '';
   const cloudId = companyCloudId?.trim() ?? '';
@@ -170,6 +171,9 @@ export async function syncProductsByRnc(
   if (!company) {
     throw { status: 404, message: 'Empresa no encontrada' };
   }
+
+  const cleanedDeleted = (deletedProducts ?? []).map((code) => code.trim()).filter((code) => code.length > 0);
+  const uniqueDeletedCodes = Array.from(new Set(cleanedDeleted));
 
   if (!products || products.length == 0) {
     return { ok: true, upserted: 0, companyId: company.id };
@@ -214,7 +218,23 @@ export async function syncProductsByRnc(
     });
   });
 
+  if (uniqueDeletedCodes.length > 0) {
+    ops.push(
+      prisma.product.deleteMany({
+        where: {
+          companyId: company.id,
+          code: { in: uniqueDeletedCodes },
+        },
+      }),
+    );
+  }
+
   await prisma.$transaction(ops);
 
-  return { ok: true, upserted: products.length, companyId: company.id };
+  return {
+    ok: true,
+    upserted: products.length,
+    deleted: uniqueDeletedCodes.length,
+    companyId: company.id,
+  };
 }
