@@ -24,6 +24,31 @@ function randomToken(len = 10) {
   );
 }
 
+const VIRTUAL_PERIOD_SECONDS = 30;
+const VIRTUAL_DIGITS = 6;
+
+function virtualSecretFor(companyId: number, terminalId: string) {
+  const masterKey = (process.env.VIRTUAL_TOKEN_MASTER_KEY ?? '').trim();
+  if (!masterKey) return null;
+
+  const h = crypto.createHmac('sha256', masterKey).update(`${companyId}|${terminalId}`).digest();
+  return h.subarray(0, 20);
+}
+
+function totpAt(secret: Buffer, timeMs: number) {
+  const counter = Math.floor(timeMs / 1000 / VIRTUAL_PERIOD_SECONDS);
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(counter));
+
+  const hmac = crypto.createHmac('sha1', secret).update(msg).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const binary = (hmac.readUInt32BE(offset) & 0x7fffffff) >>> 0;
+  const mod = 10 ** VIRTUAL_DIGITS;
+  const code = String(binary % mod).padStart(VIRTUAL_DIGITS, '0');
+
+  return { code, counter };
+}
+
 async function callVerify(payload: any) {
   try {
     const ok = await verifyOverride(payload);
@@ -163,6 +188,33 @@ async function main() {
   console.log('--- Non-existent user (precheck, should not write) ---');
   const badUser = await callVerify({ ...payload, cloudUserId: 999999999 });
   console.log('BadUser:', badUser);
+
+  console.log('--- Virtual token (TOTP) ---');
+  if (!terminalDeviceId) {
+    console.log('Virtual: skipped (no terminalDeviceId found)');
+  } else {
+    const secret = virtualSecretFor(company.id, terminalDeviceId);
+    if (!secret) {
+      console.log('Virtual: skipped (VIRTUAL_TOKEN_MASTER_KEY not set)');
+    } else {
+      // Use current window token.
+      const { code } = totpAt(secret, Date.now());
+
+      // For virtual path, remote token must not exist; use a different actionCode.
+      const virtualPayload = {
+        cloudCompanyId,
+        token: code,
+        actionCode: 'TEST_OVERRIDE_VIRTUAL',
+        cloudUserId: user.id,
+        cloudTerminalId: terminalDeviceId,
+        meta: { smoke: true, virtual: true },
+      };
+
+      const [v1, v2] = await Promise.all([callVerify(virtualPayload), callVerify(virtualPayload)]);
+      console.log('Virtual A:', v1);
+      console.log('Virtual B:', v2);
+    }
+  }
 
   // Cleanup best-effort
   await prisma.overrideToken.deleteMany({ where: { id: created.id } });
