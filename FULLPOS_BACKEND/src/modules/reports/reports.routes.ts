@@ -1,7 +1,16 @@
 import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { validate } from '../../middlewares/validate';
-import { getCashClosingDetail, getCashClosings, getReportsStatus, getSalesByDay, getSalesList, getSalesSummary } from './reports.service';
+import {
+  getCashClosingDetail,
+  getCashClosings,
+  getExpensesByCategory,
+  getReportsStatus,
+  getSalesByDay,
+  getSalesByPaymentMethod,
+  getSalesList,
+  getSalesSummary,
+} from './reports.service';
 import { idParamSchema, rangeQuerySchema, salesListQuerySchema } from './reports.validation';
 import { listExpensesSchema } from '../expenses/expenses.validation';
 import { listExpenses, getExpensesSummary } from '../expenses/expenses.service';
@@ -17,6 +26,21 @@ router.get('/sales/summary', authGuard, validate(rangeQuerySchema, 'query'), asy
     next(err);
   }
 });
+
+router.get(
+  '/sales/by-payment-method',
+  authGuard,
+  validate(rangeQuerySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const { from, to } = req.query as any;
+      const result = await getSalesByPaymentMethod(req.user!.companyId, from, to);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 router.get('/status', authGuard, validate(rangeQuerySchema, 'query'), async (req, res, next) => {
   try {
@@ -92,6 +116,21 @@ router.get(
     try {
       const { from, to } = req.query as any;
       const result = await getExpensesSummary(req.user!.companyId, from, to);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.get(
+  '/expenses/by-category',
+  authGuard,
+  validate(rangeQuerySchema, 'query'),
+  async (req, res, next) => {
+    try {
+      const { from, to } = req.query as any;
+      const result = await getExpensesByCategory(req.user!.companyId, from, to);
       res.json(result);
     } catch (err) {
       next(err);

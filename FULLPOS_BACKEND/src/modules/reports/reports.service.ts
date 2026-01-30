@@ -155,6 +155,55 @@ export async function getSalesSummary(companyId: number, from: string, to: strin
   return { total, count, average, totalCost, profit };
 }
 
+export async function getSalesByPaymentMethod(companyId: number, from: string, to: string) {
+  const { fromDate, toDate } = parseRange(from, to);
+  ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
+
+  const rows = await prisma.sale.groupBy({
+    by: ['paymentMethod'],
+    _sum: { total: true },
+    _count: { _all: true },
+    where: {
+      companyId,
+      kind: { in: ['invoice', 'sale'] },
+      status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+      deletedAt: null,
+      createdAt: { gte: fromDate, lte: toDate },
+    },
+  });
+
+  return rows
+    .map((r) => ({
+      paymentMethod: r.paymentMethod ?? 'N/D',
+      total: toNumber(r._sum.total),
+      count: r._count._all,
+    }))
+    .sort((a, b) => b.total - a.total);
+}
+
+export async function getExpensesByCategory(companyId: number, from: string, to: string) {
+  const { fromDate, toDate } = parseRange(from, to);
+  ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
+
+  const rows = await prisma.expense.groupBy({
+    by: ['category'],
+    _sum: { amount: true },
+    _count: { _all: true },
+    where: {
+      companyId,
+      incurredAt: { gte: fromDate, lte: toDate },
+    },
+  });
+
+  return rows
+    .map((r) => ({
+      category: r.category,
+      total: toNumber(r._sum.amount),
+      count: r._count._all,
+    }))
+    .sort((a, b) => b.total - a.total);
+}
+
 export async function getSalesByDay(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
@@ -271,24 +320,71 @@ export async function getCashClosings(companyId: number, from: string, to: strin
   });
 
   const sessionIds = sessions.map((s) => s.id);
-  const salesBySession =
+  const [salesBySession, salesBySessionAndPayment, movementsBySessionAndType] =
     sessionIds.length === 0
-      ? []
-      : await prisma.sale.groupBy({
-          by: ['sessionId'],
-          _sum: { total: true },
-          _count: { _all: true },
-          where: {
-            companyId,
-            sessionId: { in: sessionIds },
-            status: { not: 'cancelled' },
-          },
-        });
+      ? [[], [], []]
+      : await Promise.all([
+          prisma.sale.groupBy({
+            by: ['sessionId'],
+            _sum: { total: true },
+            _count: { _all: true },
+            where: {
+              companyId,
+              sessionId: { in: sessionIds },
+              status: { not: 'cancelled' },
+            },
+          }),
+          prisma.sale.groupBy({
+            by: ['sessionId', 'paymentMethod'],
+            _sum: { total: true },
+            where: {
+              companyId,
+              sessionId: { in: sessionIds },
+              status: { not: 'cancelled' },
+            },
+          }),
+          prisma.cashMovement.groupBy({
+            by: ['sessionId', 'type'],
+            _sum: { amount: true },
+            where: {
+              companyId,
+              sessionId: { in: sessionIds },
+            },
+          }),
+        ]);
+
+  const cashSalesBySessionId = new Map<number, number>();
+  for (const row of salesBySessionAndPayment as any[]) {
+    const sessionId = row.sessionId as number;
+    const pm = row.paymentMethod as string | null | undefined;
+    if (!isCashPaymentMethod(pm)) continue;
+    const prev = cashSalesBySessionId.get(sessionId) ?? 0;
+    cashSalesBySessionId.set(sessionId, prev + toNumber(row._sum?.total));
+  }
+
+  const movementsInBySessionId = new Map<number, number>();
+  const movementsOutBySessionId = new Map<number, number>();
+  for (const row of movementsBySessionAndType as any[]) {
+    const sessionId = row.sessionId as number;
+    const type = row.type as string | null | undefined;
+    const amount = toNumber(row._sum?.amount);
+    if (isMovementIn(type)) {
+      movementsInBySessionId.set(sessionId, (movementsInBySessionId.get(sessionId) ?? 0) + amount);
+    } else if (isMovementOut(type)) {
+      movementsOutBySessionId.set(sessionId, (movementsOutBySessionId.get(sessionId) ?? 0) + amount);
+    }
+  }
 
   return sessions.map((session) => {
     const saleAggregate = salesBySession.find((s) => s.sessionId === session.id);
     const totalSales = toNumber(saleAggregate?._sum.total);
     const salesCount = saleAggregate?._count._all ?? 0;
+
+    const cashSalesTotal = cashSalesBySessionId.get(session.id) ?? 0;
+
+    // Movimientos IN/OUT
+    const movementsInTotal = movementsInBySessionId.get(session.id) ?? 0;
+    const movementsOutTotal = movementsOutBySessionId.get(session.id) ?? 0;
     return {
       id: session.id,
       openedAt: session.openedAt,
@@ -297,7 +393,10 @@ export async function getCashClosings(companyId: number, from: string, to: strin
       openedBy: session.openedBy,
       closedBy: session.closedBy,
       totalSales,
+      cashSalesTotal,
       salesCount,
+      movementsInTotal,
+      movementsOutTotal,
       closingAmount: toNullableNumber(session.closingAmount),
       expectedCash: toNullableNumber(session.expectedCash),
       difference: toNullableNumber(session.difference),
