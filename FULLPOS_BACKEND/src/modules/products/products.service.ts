@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, PrismaPromise } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { buildPagination } from '../../utils/pagination';
 import { createProductSchema } from './products.validation';
@@ -179,7 +179,7 @@ export async function syncProductsByRnc(
     return { ok: true, upserted: 0, companyId: company.id };
   }
 
-  const ops = products.map((item) => {
+  const ops: PrismaPromise<any>[] = products.map((item) => {
     const code = item.code.trim();
     const name = item.name.trim();
     const description = item.description?.trim();
