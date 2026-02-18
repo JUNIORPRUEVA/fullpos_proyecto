@@ -17,4 +17,4 @@ cmds = [
 ]
 
 [start]
-cmd = "npm run migrate && npm run start"
+cmd = "npm run start"

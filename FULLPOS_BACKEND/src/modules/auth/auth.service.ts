@@ -620,3 +620,45 @@ export async function syncUsers(params: {
     results,
   };
 }
+
+export async function usernameAvailable(params: {
+  companyRnc?: string;
+  companyCloudId?: string;
+  username: string;
+}) {
+  const uname = params.username.trim();
+  if (!uname) throw { status: 400, message: 'Usuario requerido' };
+
+  const existing = await prisma.user.findFirst({
+    where: { username: uname },
+    select: { id: true, companyId: true },
+  });
+  if (!existing) {
+    return { available: true };
+  }
+
+  // Si podemos resolver la compañía, permitimos si el username ya pertenece a esa misma empresa.
+  let companyId: number | null = null;
+  const rnc = params.companyRnc?.trim() ?? '';
+  const cloudId = params.companyCloudId?.trim() ?? '';
+  if (cloudId) {
+    const c = await prisma.company.findFirst({
+      where: { cloudCompanyId: cloudId },
+      select: { id: true },
+    });
+    companyId = c?.id ?? null;
+  }
+  if (!companyId && rnc) {
+    const c = await prisma.company.findFirst({
+      where: { rnc },
+      select: { id: true },
+    });
+    companyId = c?.id ?? null;
+  }
+
+  if (companyId != null && existing.companyId === companyId) {
+    return { available: true };
+  }
+
+  return { available: false, reason: 'username_taken' };
+}

@@ -58,3 +58,14 @@ export const syncUsersSchema = z
     message: 'RNC o ID interno requerido',
     path: ['companyRnc'],
   });
+
+export const usernameAvailableSchema = z
+  .object({
+    companyRnc: z.string().min(3).optional(),
+    companyCloudId: z.string().min(6).optional(),
+    username: z.string().min(3, 'Usuario requerido'),
+  })
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });

@@ -8,6 +8,7 @@ import {
   provisionUserSchema,
   syncUsersSchema,
   refreshSchema,
+  usernameAvailableSchema,
 } from './auth.validation';
 import {
   getProfile,
@@ -16,6 +17,7 @@ import {
   provisionOwnerByRnc,
   syncUsers,
   refresh,
+  usernameAvailable,
 } from './auth.service';
 
 const router = Router();
@@ -94,5 +96,21 @@ router.post('/sync-users', overrideKeyGuard, validate(syncUsersSchema), async (r
     next(err);
   }
 });
+
+// Valida disponibilidad de username en la nube (para evitar choques entre empresas).
+router.post(
+  '/username-available',
+  overrideKeyGuard,
+  validate(usernameAvailableSchema),
+  async (req, res, next) => {
+    try {
+      const { companyRnc, companyCloudId, username } = req.body;
+      const result = await usernameAvailable({ companyRnc, companyCloudId, username });
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 export default router;
