@@ -22,6 +22,10 @@ app.use(
 );
 app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
+app.get('/', (_req, res) => {
+  res.status(200).json({ ok: true, service: 'fullpos-backend' });
+});
+
 app.get('/health', (_req, res) => {
   res.status(200).json({ ok: true });
 });
