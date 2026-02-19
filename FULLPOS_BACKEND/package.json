@@ -6,8 +6,9 @@
     "scripts":  {
                     "dev":  "ts-node-dev --respawn --transpile-only src/server.ts",
                     "build":  "prisma generate \u0026\u0026 tsc -p tsconfig.json",
-                    "start":  "npm run migrate \u0026\u0026 node dist/server.js",
+                    "start":  "node dist/server.js",
                     "migrate":  "prisma migrate deploy",
+                    "start:migrate":  "npm run migrate \u0026\u0026 node dist/server.js",
                     "migrate:dev":  "prisma migrate dev",
                     "generate":  "prisma generate",
                     "seed":  "ts-node prisma/seed.ts",

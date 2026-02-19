@@ -6,6 +6,7 @@ import cors from 'cors';
 import routes from './routes';
 import { errorHandler, notFound } from './middlewares/errorHandler';
 import env, { corsOrigins } from './config/env';
+import { prisma } from './config/prisma';
 
 const app = express();
 
@@ -20,6 +21,23 @@ app.use(
   }),
 );
 app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+app.get('/health', (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
+app.get('/api/health/db', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.status(200).json({ ok: true, db: true });
+  } catch {
+    res.status(503).json({ ok: false, db: false });
+  }
+});
 
 app.use('/api', routes);
 
