@@ -27,6 +27,8 @@ const envSchema = z.object({
   MAX_BACKUP_MB: z.coerce.number().int().min(10).optional(),
   BACKUPS_DIR: z.string().optional(),
   BACKUPS_TMP_DIR: z.string().optional(),
+  SUPPORT_LOGS_DIR: z.string().optional(),
+  MAX_SUPPORT_LOG_MB: z.coerce.number().int().min(1).optional(),
   OWNER_APP_ANDROID_URL: z.string().optional(),
   OWNER_APP_IOS_URL: z.string().optional(),
   OWNER_APP_VERSION: z.string().optional(),
