@@ -14,6 +14,8 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().optional(),
   OVERRIDE_API_KEY: z.string().optional(),
   ALLOW_PUBLIC_CLOUD: z.coerce.boolean().optional(),
+  // Optional pepper for hashing integration tokens (recommended in prod)
+  INTEGRATION_TOKEN_PEPPER: z.string().optional(),
   // Clave maestra para derivar el secret del token virtual (TOTP) por terminal.
   // Si no está configurada, el token virtual queda deshabilitado.
   VIRTUAL_TOKEN_MASTER_KEY: z.string().min(16).optional(),

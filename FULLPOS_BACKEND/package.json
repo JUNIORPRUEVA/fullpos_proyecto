@@ -12,6 +12,8 @@
                     "migrate:dev":  "prisma migrate dev",
                     "generate":  "prisma generate",
                     "seed":  "ts-node prisma/seed.ts",
+                    "token:integration:create":  "ts-node --files tools/create_integration_token.ts",
+                    "test:integration:products":  "ts-node --files tools/test_integration_products_tenant_isolation.ts",
                     "lint":  "echo \"No linter configured\""
                 },
     "prisma":  {
@@ -40,7 +42,9 @@
                             "@types/morgan":  "^1.9.7",
                             "@types/multer":  "^1.4.12",
                             "@types/node":  "^22.7.5",
+                            "@types/supertest":  "^6.0.2",
                             "prisma":  "^5.11.0",
+                            "supertest":  "^7.0.0",
                             "ts-node":  "^10.9.2",
                             "ts-node-dev":  "^2.0.0",
                             "typescript":  "^5.6.3"

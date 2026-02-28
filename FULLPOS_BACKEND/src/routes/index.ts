@@ -12,6 +12,7 @@ import cashRoutes from '../modules/cash/cash.routes';
 import quotesRoutes from '../modules/quotes/quotes.routes';
 import backupsRoutes from '../modules/backups/backups.routes';
 import supportRoutes from '../modules/support/support.routes';
+import integrationsRoutes from '../modules/integrations/integrations.routes';
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.use('/expenses', expensesRoutes);
 router.use('/uploads', uploadsRoutes);
 router.use('/backups', backupsRoutes);
 router.use('/support', supportRoutes);
+router.use('/integrations', integrationsRoutes);
 
 export default router;
