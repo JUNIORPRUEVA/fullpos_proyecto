@@ -18,7 +18,27 @@ if (!fs.existsSync(productsDir)) {
 }
 
 function resolveBaseUrl(req: any) {
-  return env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get('host')}`;
+  const raw = env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get('host')}`;
+  try {
+    const u = new URL(raw);
+    const path = (u.pathname || '').trim();
+    // Common misconfig: setting PUBLIC_BASE_URL to "https://host/api".
+    // Uploads are served at "/uploads" (root), not under "/api".
+    if (path === '/api' || path.startsWith('/api/')) {
+      u.pathname = '';
+    } else if (path && path !== '/') {
+      // Be conservative: if any path is provided, drop it so we always return a root base URL.
+      u.pathname = '';
+    }
+    u.search = '';
+    u.hash = '';
+    const normalized = u.toString();
+    return normalized.endsWith('/') ? normalized.substring(0, normalized.length - 1) : normalized;
+  } catch (_) {
+    // Fallback: basic string normalization
+    const withoutApi = raw.replace(/\/?api\/?$/, '');
+    return withoutApi.endsWith('/') ? withoutApi.substring(0, withoutApi.length - 1) : withoutApi;
+  }
 }
 
 function safeDeleteUploadByUrl(url: string) {
