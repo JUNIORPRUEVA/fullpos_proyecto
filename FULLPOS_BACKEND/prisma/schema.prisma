@@ -31,12 +31,67 @@ model Company {
   expenses       Expense[]
   quotes         Quote[]
   cloudBackups   CloudBackup[]
+  clients        Client[]
+  categories     Category[]
+  suppliers      Supplier[]
 
   integrationTokens IntegrationToken[]
 
   config CompanyConfig?
 
   @@unique([name])
+}
+
+model Client {
+  id         Int      @id @default(autoincrement())
+  companyId  Int
+  company    Company  @relation(fields: [companyId], references: [id])
+  localId    Int?
+  nombre     String
+  telefono   String?
+  direccion  String?
+  rnc        String?
+  cedula     String?
+  isActive   Boolean  @default(true)
+  hasCredit  Boolean  @default(false)
+  deletedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([companyId, localId])
+  @@index([companyId, updatedAt])
+}
+
+model Category {
+  id         Int      @id @default(autoincrement())
+  companyId  Int
+  company    Company  @relation(fields: [companyId], references: [id])
+  localId    Int?
+  name       String
+  isActive   Boolean  @default(true)
+  deletedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([companyId, localId])
+  @@index([companyId, updatedAt])
+}
+
+model Supplier {
+  id         Int      @id @default(autoincrement())
+  companyId  Int
+  company    Company  @relation(fields: [companyId], references: [id])
+  localId    Int?
+  name       String
+  phone      String?
+  note       String?
+  isActive   Boolean  @default(true)
+  deletedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([companyId, localId])
+  @@index([companyId, updatedAt])
 }
 
 model CloudBackup {
