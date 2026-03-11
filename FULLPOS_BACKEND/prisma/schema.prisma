@@ -388,6 +388,7 @@ model Product {
   code       String
   name       String
   description String?
+  category   String?
   price      Decimal   @db.Decimal(12, 2)
   cost       Decimal   @default(0) @db.Decimal(12, 2)
   stock      Decimal   @default(0) @db.Decimal(12, 3)
