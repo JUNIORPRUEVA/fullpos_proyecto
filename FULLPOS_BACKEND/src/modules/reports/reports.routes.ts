@@ -6,6 +6,7 @@ import {
   getCashClosings,
   getExpensesByCategory,
   getReportsStatus,
+  getSaleDetail,
   getSalesByDay,
   getSalesByPaymentMethod,
   getSalesList,
@@ -72,6 +73,16 @@ router.get('/sales/list', authGuard, validate(salesListQuerySchema, 'query'), as
       page ? Number(page) : 1,
       pageSize ? Number(pageSize) : 20,
     );
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/sales/:id', authGuard, validate(idParamSchema, 'params'), async (req, res, next) => {
+  try {
+    const { id } = req.params as any;
+    const result = await getSaleDetail(req.user!.companyId, Number(id));
     res.json(result);
   } catch (err) {
     next(err);

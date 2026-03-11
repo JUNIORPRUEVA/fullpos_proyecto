@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { parseRange, ensureRangeWithinDays } from '../../utils/date';
 import { buildPagination } from '../../utils/pagination';
+import { emitQuoteEvent } from '../../realtime/realtime.gateway';
 
 const MAX_RANGE_DAYS = 365;
 
@@ -15,6 +16,30 @@ function toNumber(value: any) {
 
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function sameDate(a: Date | null | undefined, b: Date | null | undefined) {
+  return (a?.getTime() ?? null) === (b?.getTime() ?? null);
+}
+
+function toQuoteRealtimePayload(quote: {
+  id: number;
+  localId: number;
+  clientNameSnapshot: string;
+  total: number | Prisma.Decimal;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: quote.id,
+    localId: quote.localId,
+    clientNameSnapshot: quote.clientNameSnapshot,
+    total: toNumber(quote.total),
+    status: quote.status,
+    createdAt: quote.createdAt,
+    updatedAt: quote.updatedAt,
+  };
 }
 
 async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
@@ -166,10 +191,32 @@ export async function syncQuotesByRnc(
     return { ok: true, upserted: 0, companyId };
   }
 
+  const localIds = Array.from(new Set(quotes.map((quote) => quote.localId)));
+  const existingQuotes =
+    localIds.length === 0
+      ? []
+      : await prisma.quote.findMany({
+          where: { companyId, localId: { in: localIds } },
+          select: {
+            id: true,
+            localId: true,
+            clientNameSnapshot: true,
+            total: true,
+            status: true,
+            updatedAt: true,
+          },
+        });
+  const existingQuoteMap = new Map(existingQuotes.map((quote) => [quote.localId, quote]));
+  const realtimeEvents: Array<{
+    type: 'quote.created' | 'quote.updated';
+    quote: ReturnType<typeof toQuoteRealtimePayload>;
+  }> = [];
+
   await prisma.$transaction(async (tx) => {
     for (const q of quotes) {
       const createdAt = new Date(q.createdAt);
       const updatedAt = new Date(q.updatedAt);
+      const previous = existingQuoteMap.get(q.localId) ?? null;
 
       const upserted = await tx.quote.upsert({
         where: { companyId_localId: { companyId, localId: q.localId } },
@@ -206,8 +253,30 @@ export async function syncQuotesByRnc(
           createdAt,
           updatedAt,
         },
-        select: { id: true },
+        select: {
+          id: true,
+          localId: true,
+          clientNameSnapshot: true,
+          total: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
       });
+
+      const changed =
+        !previous ||
+        previous.clientNameSnapshot !== upserted.clientNameSnapshot ||
+        toNumber(previous.total) !== toNumber(upserted.total) ||
+        previous.status !== upserted.status ||
+        !sameDate(previous.updatedAt, upserted.updatedAt);
+
+      if (changed) {
+        realtimeEvents.push({
+          type: previous == null ? 'quote.created' : 'quote.updated',
+          quote: toQuoteRealtimePayload(upserted),
+        });
+      }
 
       await tx.quoteItem.deleteMany({ where: { quoteId: upserted.id } });
       if (q.items && q.items.length > 0) {
@@ -229,6 +298,14 @@ export async function syncQuotesByRnc(
       }
     }
   });
+
+  for (const event of realtimeEvents) {
+    emitQuoteEvent({
+      companyId,
+      type: event.type,
+      quote: event.quote,
+    });
+  }
 
   return { ok: true, upserted: quotes.length, companyId };
 }

@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma';
+import { emitCashEvent } from '../../realtime/realtime.gateway';
 
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -87,11 +88,43 @@ export async function syncCashByRnc(
     throw { status: 404, message: 'Empresa sin usuario (no se puede sincronizar caja)' };
   }
 
+  const existingSessions = await prisma.cashSession.findMany({
+    where: { companyId, localId: { in: Array.from(new Set((sessions ?? []).map((item) => item.localId))) } },
+    select: {
+      id: true,
+      localId: true,
+      status: true,
+      closedAt: true,
+      expectedCash: true,
+      difference: true,
+      updatedAt: true,
+    },
+  });
+  const sessionMapBefore = new Map(existingSessions.map((session) => [session.localId, session]));
+
+  const existingMovements = await prisma.cashMovement.findMany({
+    where: { companyId, localId: { in: Array.from(new Set((movements ?? []).map((item) => item.localId))) } },
+    select: {
+      id: true,
+      localId: true,
+      type: true,
+      amount: true,
+      createdAt: true,
+      sessionId: true,
+    },
+  });
+  const movementMapBefore = new Map(existingMovements.map((movement) => [movement.localId, movement]));
+
+  const realtimeCashEvents: Array<{
+    type: 'cash.session.updated' | 'cash.movement.updated';
+    cash: Record<string, unknown>;
+  }> = [];
+
   await prisma.$transaction(async (tx) => {
     for (const s of sessions ?? []) {
       const openedAt = new Date(s.openedAt);
       const closedAt = s.closedAt ? new Date(s.closedAt) : null;
-      await tx.cashSession.upsert({
+      const upserted = await tx.cashSession.upsert({
         where: { companyId_localId: { companyId, localId: s.localId } },
         update: {
           userName: s.openedByUserName,
@@ -119,7 +152,39 @@ export async function syncCashByRnc(
           status: s.status,
           note: s.note ?? null,
         },
+        select: {
+          id: true,
+          localId: true,
+          status: true,
+          closedAt: true,
+          expectedCash: true,
+          difference: true,
+          updatedAt: true,
+        },
       });
+
+      const previous = sessionMapBefore.get(s.localId) ?? null;
+      const changed =
+        !previous ||
+        previous.status !== upserted.status ||
+        (previous.closedAt?.getTime() ?? null) !== (upserted.closedAt?.getTime() ?? null) ||
+        Number(previous.expectedCash ?? 0) !== Number(upserted.expectedCash ?? 0) ||
+        Number(previous.difference ?? 0) !== Number(upserted.difference ?? 0) ||
+        (previous.updatedAt?.getTime() ?? null) !== (upserted.updatedAt?.getTime() ?? null);
+      if (changed) {
+        realtimeCashEvents.push({
+          type: 'cash.session.updated',
+          cash: {
+            sessionId: upserted.id,
+            localId: upserted.localId,
+            status: upserted.status,
+            closedAt: upserted.closedAt,
+            expectedCash: upserted.expectedCash,
+            difference: upserted.difference,
+            updatedAt: upserted.updatedAt,
+          },
+        });
+      }
     }
 
     // Re-cargar mapping de sesiones para asociar movimientos.
@@ -139,7 +204,7 @@ export async function syncCashByRnc(
     for (const m of movements ?? []) {
       const sessionId = sessionMap.get(m.sessionLocalId);
       if (!sessionId) continue;
-      await tx.cashMovement.upsert({
+      const upserted = await tx.cashMovement.upsert({
         where: { companyId_localId: { companyId, localId: m.localId } },
         update: {
           sessionId,
@@ -157,9 +222,46 @@ export async function syncCashByRnc(
           note: m.note ?? null,
           createdAt: new Date(m.createdAt),
         },
+        select: {
+          id: true,
+          localId: true,
+          type: true,
+          amount: true,
+          createdAt: true,
+          sessionId: true,
+        },
       });
+
+      const previous = movementMapBefore.get(m.localId) ?? null;
+      const changed =
+        !previous ||
+        previous.type !== upserted.type ||
+        Number(previous.amount) !== Number(upserted.amount) ||
+        previous.sessionId !== upserted.sessionId ||
+        previous.createdAt.getTime() !== upserted.createdAt.getTime();
+      if (changed) {
+        realtimeCashEvents.push({
+          type: 'cash.movement.updated',
+          cash: {
+            movementId: upserted.id,
+            localId: upserted.localId,
+            sessionId: upserted.sessionId,
+            type: upserted.type,
+            amount: upserted.amount,
+            createdAt: upserted.createdAt,
+          },
+        });
+      }
     }
   });
+
+  for (const event of realtimeCashEvents) {
+    emitCashEvent({
+      companyId,
+      type: event.type,
+      cash: event.cash,
+    });
+  }
 
   return {
     ok: true,

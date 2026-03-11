@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
+import { emitSaleEvent } from '../../realtime/realtime.gateway';
 
 function toNumber(value: Prisma.Decimal | number | null | undefined) {
   if (value === null || value === undefined) return 0;
@@ -9,6 +10,38 @@ function toNumber(value: Prisma.Decimal | number | null | undefined) {
 
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function sameDate(a: Date | null | undefined, b: Date | null | undefined) {
+  const left = a?.getTime() ?? null;
+  const right = b?.getTime() ?? null;
+  return left === right;
+}
+
+function toSaleRealtimePayload(sale: {
+  id: number;
+  localCode: string;
+  kind: string;
+  status: string;
+  total: Prisma.Decimal | number;
+  paymentMethod: string | null;
+  customerNameSnapshot: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}) {
+  return {
+    id: sale.id,
+    localCode: sale.localCode,
+    kind: sale.kind,
+    status: sale.status,
+    total: toNumber(sale.total),
+    paymentMethod: sale.paymentMethod,
+    customerName: sale.customerNameSnapshot,
+    createdAt: sale.createdAt,
+    updatedAt: sale.updatedAt,
+    deletedAt: sale.deletedAt,
+  };
 }
 
 async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
@@ -100,6 +133,31 @@ export async function syncSalesByRnc(
     return { ok: true, upserted: 0, companyId };
   }
 
+  const localCodes = Array.from(new Set(sales.map((sale) => sale.localCode).filter(Boolean)));
+  const existingSales =
+    localCodes.length === 0
+      ? []
+      : await prisma.sale.findMany({
+          where: { companyId, localCode: { in: localCodes } },
+          select: {
+            id: true,
+            localCode: true,
+            kind: true,
+            status: true,
+            total: true,
+            paymentMethod: true,
+            customerNameSnapshot: true,
+            updatedAt: true,
+            deletedAt: true,
+          },
+        });
+  const existingSaleMap = new Map(existingSales.map((sale) => [sale.localCode, sale]));
+
+  const realtimeEvents: Array<{
+    type: 'sale.created' | 'sale.updated' | 'sale.deleted';
+    sale: ReturnType<typeof toSaleRealtimePayload>;
+  }> = [];
+
   // Pre-cargar mapping de sesiones (localId -> id) para asociar ventas a cierres.
   const localSessionIds = Array.from(
     new Set(sales.map((s) => s.sessionLocalId).filter((v): v is number => !!v)),
@@ -122,6 +180,7 @@ export async function syncSalesByRnc(
       const createdAt = new Date(sale.createdAt);
       const updatedAt = new Date(sale.updatedAt);
       const deletedAt = sale.deletedAt ? new Date(sale.deletedAt) : null;
+      const previous = existingSaleMap.get(sale.localCode) ?? null;
 
       const sessionId =
         sale.sessionLocalId != null ? sessionMap.get(sale.sessionLocalId) ?? null : null;
@@ -175,8 +234,36 @@ export async function syncSalesByRnc(
           updatedAt,
           deletedAt,
         },
-        select: { id: true },
+        select: {
+          id: true,
+          localCode: true,
+          kind: true,
+          status: true,
+          total: true,
+          paymentMethod: true,
+          customerNameSnapshot: true,
+          createdAt: true,
+          updatedAt: true,
+          deletedAt: true,
+        },
       });
+
+      const changed =
+        !previous ||
+        previous.kind !== upserted.kind ||
+        previous.status !== upserted.status ||
+        toNumber(previous.total) !== toNumber(upserted.total) ||
+        previous.paymentMethod !== upserted.paymentMethod ||
+        previous.customerNameSnapshot !== upserted.customerNameSnapshot ||
+        !sameDate(previous.updatedAt, upserted.updatedAt) ||
+        !sameDate(previous.deletedAt, upserted.deletedAt);
+
+      if (changed) {
+        realtimeEvents.push({
+          type: !previous ? 'sale.created' : upserted.deletedAt ? 'sale.deleted' : 'sale.updated',
+          sale: toSaleRealtimePayload(upserted),
+        });
+      }
 
       await tx.saleItem.deleteMany({ where: { saleId: upserted.id } });
       if (sale.items && sale.items.length > 0) {
@@ -226,6 +313,14 @@ export async function syncSalesByRnc(
       }
     }
   });
+
+  for (const event of realtimeEvents) {
+    emitSaleEvent({
+      companyId,
+      type: event.type,
+      sale: event.sale,
+    });
+  }
 
   return { ok: true, upserted: sales.length, companyId };
 }

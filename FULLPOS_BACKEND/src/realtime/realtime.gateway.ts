@@ -13,6 +13,12 @@ type ProductEventType =
   | 'product.deleted'
   | 'product.stock_updated';
 
+type SaleEventType = 'sale.created' | 'sale.updated' | 'sale.deleted';
+
+type QuoteEventType = 'quote.created' | 'quote.updated' | 'quote.deleted';
+
+type CashEventType = 'cash.session.updated' | 'cash.movement.updated';
+
 let ioInstance: Server | null = null;
 
 function companyRoom(companyId: number) {
@@ -21,6 +27,44 @@ function companyRoom(companyId: number) {
 
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function hashIntegrationToken(rawToken: string) {
+  const pepper = env.INTEGRATION_TOKEN_PEPPER?.trim() ?? '';
+  return crypto
+    .createHash('sha256')
+    .update(`${pepper}${rawToken}`)
+    .digest('hex');
+}
+
+async function resolveIntegrationCompanyId(rawToken: string, expectedCompanyId?: number) {
+  const tokenHash = hashIntegrationToken(rawToken);
+  const record = await prisma.integrationToken.findUnique({
+    where: { tokenHash },
+    select: {
+      id: true,
+      companyId: true,
+      scopes: true,
+      revokedAt: true,
+      expiresAt: true,
+    },
+  });
+
+  if (!record) return null;
+
+  const now = Date.now();
+  if (record.revokedAt) return null;
+  if (record.expiresAt && record.expiresAt.getTime() <= now) return null;
+  if (!record.scopes.includes('products:read')) return null;
+  if (
+    expectedCompanyId != null &&
+    Number.isFinite(expectedCompanyId) &&
+    record.companyId !== expectedCompanyId
+  ) {
+    return null;
+  }
+
+  return record.companyId;
 }
 
 async function resolveCompanyIdForSocket(params: {
@@ -102,13 +146,28 @@ export function attachRealtimeGateway(server: http.Server) {
         );
 
       if (authToken) {
-        const payload = jwt.verify(
-          authToken,
-          env.JWT_ACCESS_SECRET,
-        ) as JwtUser & { exp: number };
-        socket.data.companyId = payload.companyId;
-        socket.data.clientType = 'owner';
-        return next();
+        try {
+          const payload = jwt.verify(
+            authToken,
+            env.JWT_ACCESS_SECRET,
+          ) as JwtUser & { exp: number };
+          socket.data.companyId = payload.companyId;
+          socket.data.clientType = 'owner';
+          return next();
+        } catch {
+          const expectedCompanyId = Number(
+            socket.handshake.auth?.expectedCompanyId,
+          );
+          const integrationCompanyId = await resolveIntegrationCompanyId(
+            authToken,
+            Number.isFinite(expectedCompanyId) ? expectedCompanyId : undefined,
+          );
+          if (integrationCompanyId != null) {
+            socket.data.companyId = integrationCompanyId;
+            socket.data.clientType = 'integration';
+            return next();
+          }
+        }
       }
 
       const cloudKey =
@@ -163,5 +222,47 @@ export async function emitProductEvent(params: {
     eventId: crypto.randomUUID(),
     type: params.type,
     product: serializeProduct(params.product),
+  });
+}
+
+export async function emitSaleEvent(params: {
+  companyId: number;
+  type: SaleEventType;
+  sale: Record<string, unknown>;
+}) {
+  if (!ioInstance) return;
+
+  ioInstance.to(companyRoom(params.companyId)).emit('sale.event', {
+    eventId: crypto.randomUUID(),
+    type: params.type,
+    sale: params.sale,
+  });
+}
+
+export async function emitQuoteEvent(params: {
+  companyId: number;
+  type: QuoteEventType;
+  quote: Record<string, unknown>;
+}) {
+  if (!ioInstance) return;
+
+  ioInstance.to(companyRoom(params.companyId)).emit('quote.event', {
+    eventId: crypto.randomUUID(),
+    type: params.type,
+    quote: params.quote,
+  });
+}
+
+export async function emitCashEvent(params: {
+  companyId: number;
+  type: CashEventType;
+  cash: Record<string, unknown>;
+}) {
+  if (!ioInstance) return;
+
+  ioInstance.to(companyRoom(params.companyId)).emit('cash.event', {
+    eventId: crypto.randomUUID(),
+    type: params.type,
+    cash: params.cash,
   });
 }

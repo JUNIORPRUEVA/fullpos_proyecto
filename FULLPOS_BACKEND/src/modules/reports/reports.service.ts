@@ -279,6 +279,7 @@ export async function getSalesList(
   const data = rows.map((sale) => ({
     id: sale.id,
     localCode: sale.localCode,
+    customerName: sale.customerNameSnapshot,
     total: toNumber(sale.total),
     paymentMethod: sale.paymentMethod,
     sessionId: sale.sessionId,
@@ -299,6 +300,93 @@ export async function getSalesList(
     page,
     pageSize,
     total: totalCount,
+  };
+}
+
+export async function getSaleDetail(companyId: number, saleId: number) {
+  const sale = await prisma.sale.findFirst({
+    where: {
+      id: saleId,
+      companyId,
+      kind: { in: ['invoice', 'sale'] },
+    },
+    include: {
+      session: true,
+      createdBy: { select: { id: true, username: true, displayName: true } },
+      items: {
+        include: {
+          product: { select: { id: true, code: true, name: true } },
+        },
+        orderBy: { id: 'asc' },
+      },
+    },
+  });
+
+  if (!sale) {
+    throw { status: 404, message: 'Venta no encontrada' };
+  }
+
+  const items = sale.items.map((item) => {
+    const qty = toNumber(item.qty);
+    const unitPrice = toNumber(item.unitPrice);
+    const cost = toNumber(item.purchasePriceSnapshot);
+    const discountLine = toNumber(item.discountLine);
+    const totalLine = toNumber(item.totalLine);
+    const lineCost = qty * cost;
+    const lineProfit = totalLine - lineCost;
+    return {
+      id: item.id,
+      productId: item.productId,
+      productCodeSnapshot: item.productCodeSnapshot ?? item.product?.code ?? null,
+      productNameSnapshot: item.productNameSnapshot,
+      qty,
+      unitPrice,
+      purchasePriceSnapshot: cost,
+      discountLine,
+      totalLine,
+      lineCost,
+      lineProfit,
+      createdAt: item.createdAt,
+    };
+  });
+
+  const totalCost = items.reduce((sum, item) => sum + item.lineCost, 0);
+  const profit = toNumber(sale.total) - totalCost;
+
+  return {
+    id: sale.id,
+    localCode: sale.localCode,
+    kind: sale.kind,
+    status: sale.status,
+    customerName: sale.customerNameSnapshot,
+    customerPhone: sale.customerPhoneSnapshot,
+    customerRnc: sale.customerRncSnapshot,
+    subtotal: toNumber(sale.subtotal),
+    discountTotal: toNumber(sale.discountTotal),
+    itbisAmount: toNumber(sale.itbisAmount),
+    itbisRate: toNumber(sale.itbisRate),
+    total: toNumber(sale.total),
+    totalCost,
+    profit,
+    paymentMethod: sale.paymentMethod,
+    paidAmount: toNumber(sale.paidAmount),
+    changeAmount: toNumber(sale.changeAmount),
+    fiscalEnabled: sale.fiscalEnabled,
+    ncfFull: sale.ncfFull,
+    ncfType: sale.ncfType,
+    sessionId: sale.sessionId,
+    sessionStatus: sale.session?.status,
+    createdAt: sale.createdAt,
+    updatedAt: sale.updatedAt,
+    deletedAt: sale.deletedAt,
+    user: sale.createdBy
+      ? {
+          id: sale.createdBy.id,
+          username: sale.createdBy.username,
+          displayName: sale.createdBy.displayName,
+        }
+      : null,
+    items,
   };
 }
 
