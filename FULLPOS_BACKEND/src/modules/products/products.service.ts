@@ -1,4 +1,4 @@
-import { Prisma, PrismaClientKnownRequestError, Product } from '@prisma/client';
+import { Prisma, Product } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { buildPagination } from '../../utils/pagination';
 import {
@@ -134,7 +134,7 @@ async function findExistingProduct(params: {
   if (params.localProductId != null) {
     clauses.push({ localId: params.localProductId, companyId: params.companyId });
   }
-  if (params.code && params.code.trim().isNotEmpty) {
+  if (params.code && params.code.trim().length > 0) {
     clauses.push({ code: params.code.trim(), companyId: params.companyId });
   }
 
@@ -369,7 +369,7 @@ export async function createProduct(companyId: number, input: CreateProductInput
     });
     return serializeProduct(created);
   } catch (err: any) {
-    if (err instanceof PrismaClientKnownRequestError && err.code === 'P2002') {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       throw { status: 409, message: 'Ya existe un producto con ese codigo' };
     }
     throw err;
@@ -420,7 +420,7 @@ export async function updateProduct(
     });
     return serializeProduct(updated);
   } catch (err: any) {
-    if (err instanceof PrismaClientKnownRequestError && err.code === 'P2002') {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       throw { status: 409, message: 'Ya existe un producto con ese codigo' };
     }
     throw err;

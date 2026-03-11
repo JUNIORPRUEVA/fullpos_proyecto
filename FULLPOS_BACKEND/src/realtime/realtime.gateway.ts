@@ -121,8 +121,14 @@ export function attachRealtimeGateway(server: http.Server) {
       }
 
       const companyId = await resolveCompanyIdForSocket({
-        companyCloudId: socket.handshake.auth?.companyCloudId as string?,
-        companyRnc: socket.handshake.auth?.companyRnc as string?,
+        companyCloudId:
+          typeof socket.handshake.auth?.companyCloudId === 'string'
+            ? socket.handshake.auth.companyCloudId
+            : undefined,
+        companyRnc:
+          typeof socket.handshake.auth?.companyRnc === 'string'
+            ? socket.handshake.auth.companyRnc
+            : undefined,
       });
       if (!companyId) {
         return next(new Error('Empresa no encontrada'));
