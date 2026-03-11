@@ -384,6 +384,7 @@ model Product {
   id         Int       @id @default(autoincrement())
   companyId  Int
   company    Company   @relation(fields: [companyId], references: [id])
+  localId    Int?
   code       String
   name       String
   description String?
@@ -392,6 +393,11 @@ model Product {
   stock      Decimal   @default(0) @db.Decimal(12, 3)
   imageUrl   String?
   isDemo     Boolean   @default(false)
+  isActive   Boolean   @default(true)
+  version    Int       @default(0)
+  lastModifiedBy String?
+  lastClientMutationId String?
+  deletedAt  DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
@@ -399,7 +405,9 @@ model Product {
   quoteItems QuoteItem[]
 
   @@unique([companyId, code])
+  @@unique([companyId, localId])
   @@index([companyId, isDemo])
+  @@index([companyId, deletedAt, updatedAt])
 }
 
 model Sale {

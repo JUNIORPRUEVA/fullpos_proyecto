@@ -5,9 +5,22 @@ import { validate } from '../../middlewares/validate';
 import {
   createProductSchema,
   listProductsSchema,
+  productIdParamsSchema,
+  syncProductOperationsSchema,
   syncProductsByRncSchema,
+  updateProductSchema,
+  updateProductStockSchema,
 } from './products.validation';
-import { createProduct, listProducts, syncProductsByRnc } from './products.service';
+import {
+  createProduct,
+  getProductById,
+  listProducts,
+  softDeleteProduct,
+  syncProductOperations,
+  syncProductsByRnc,
+  updateProduct,
+  updateProductStock,
+} from './products.service';
 
 const router = Router();
 
@@ -38,6 +51,24 @@ router.post(
   },
 );
 
+router.post(
+  '/sync/operations',
+  overrideKeyGuard,
+  validate(syncProductOperationsSchema),
+  async (req, res, next) => {
+    try {
+      const result = await syncProductOperations({
+        companyRnc: req.body.companyRnc,
+        companyCloudId: req.body.companyCloudId,
+        operations: req.body.operations,
+      });
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // Endpoints de administración (Owner) sí requieren JWT.
 router.use(authGuard);
 
@@ -59,5 +90,59 @@ router.post('/', validate(createProductSchema), async (req, res, next) => {
     next(err);
   }
 });
+
+router.get('/:id', validate(productIdParamsSchema, 'params'), async (req, res, next) => {
+  try {
+    const { id } = req.params as any;
+    const product = await getProductById(req.user!.companyId, Number(id));
+    res.json(product);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put(
+  '/:id',
+  validate(productIdParamsSchema, 'params'),
+  validate(updateProductSchema),
+  async (req, res, next) => {
+    try {
+      const { id } = req.params as any;
+      const product = await updateProduct(req.user!.companyId, Number(id), req.body);
+      res.json(product);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.delete('/:id', validate(productIdParamsSchema, 'params'), async (req, res, next) => {
+  try {
+    const { id } = req.params as any;
+    const product = await softDeleteProduct(req.user!.companyId, Number(id));
+    res.json(product);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch(
+  '/:id/stock',
+  validate(productIdParamsSchema, 'params'),
+  validate(updateProductStockSchema),
+  async (req, res, next) => {
+    try {
+      const { id } = req.params as any;
+      const product = await updateProductStock(
+        req.user!.companyId,
+        Number(id),
+        req.body.stock,
+      );
+      res.json(product);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 export default router;
