@@ -29,44 +29,6 @@ function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function hashIntegrationToken(rawToken: string) {
-  const pepper = env.INTEGRATION_TOKEN_PEPPER?.trim() ?? '';
-  return crypto
-    .createHash('sha256')
-    .update(`${pepper}${rawToken}`)
-    .digest('hex');
-}
-
-async function resolveIntegrationCompanyId(rawToken: string, expectedCompanyId?: number) {
-  const tokenHash = hashIntegrationToken(rawToken);
-  const record = await prisma.integrationToken.findUnique({
-    where: { tokenHash },
-    select: {
-      id: true,
-      companyId: true,
-      scopes: true,
-      revokedAt: true,
-      expiresAt: true,
-    },
-  });
-
-  if (!record) return null;
-
-  const now = Date.now();
-  if (record.revokedAt) return null;
-  if (record.expiresAt && record.expiresAt.getTime() <= now) return null;
-  if (!record.scopes.includes('products:read')) return null;
-  if (
-    expectedCompanyId != null &&
-    Number.isFinite(expectedCompanyId) &&
-    record.companyId !== expectedCompanyId
-  ) {
-    return null;
-  }
-
-  return record.companyId;
-}
-
 async function resolveCompanyIdForSocket(params: {
   companyRnc?: string;
   companyCloudId?: string;
@@ -146,28 +108,13 @@ export function attachRealtimeGateway(server: http.Server) {
         );
 
       if (authToken) {
-        try {
-          const payload = jwt.verify(
-            authToken,
-            env.JWT_ACCESS_SECRET,
-          ) as JwtUser & { exp: number };
-          socket.data.companyId = payload.companyId;
-          socket.data.clientType = 'owner';
-          return next();
-        } catch {
-          const expectedCompanyId = Number(
-            socket.handshake.auth?.expectedCompanyId,
-          );
-          const integrationCompanyId = await resolveIntegrationCompanyId(
-            authToken,
-            Number.isFinite(expectedCompanyId) ? expectedCompanyId : undefined,
-          );
-          if (integrationCompanyId != null) {
-            socket.data.companyId = integrationCompanyId;
-            socket.data.clientType = 'integration';
-            return next();
-          }
-        }
+        const payload = jwt.verify(
+          authToken,
+          env.JWT_ACCESS_SECRET,
+        ) as JwtUser & { exp: number };
+        socket.data.companyId = payload.companyId;
+        socket.data.clientType = 'owner';
+        return next();
       }
 
       const cloudKey =
