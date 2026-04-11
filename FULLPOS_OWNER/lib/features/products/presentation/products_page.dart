@@ -87,7 +87,10 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
     _productRealtimeSubscription = ref
         .read(productRealtimeServiceProvider)
         .stream
-        .listen((_) => _load(showLoading: false));
+        .listen((message) {
+          _applyRealtimeProductEvent(message);
+          unawaited(_load(showLoading: false));
+        });
   }
 
   @override
@@ -136,6 +139,47 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
     setState(() {
       _products = list;
     });
+  }
+
+  void _applyRealtimeProductEvent(ProductRealtimeMessage message) {
+    if (!mounted) return;
+
+    final incoming = message.product;
+    final isDelete =
+        message.type == 'product.deleted' || incoming.deletedAt != null;
+
+    setState(() {
+      final next = List<Product>.from(_allProducts);
+      final index = next.indexWhere((item) => item.id == incoming.id);
+
+      if (isDelete || !incoming.isActive) {
+        if (index >= 0) {
+          next.removeAt(index);
+        }
+      } else if (index >= 0) {
+        next[index] = incoming;
+      } else {
+        next.insert(0, incoming);
+      }
+
+      next.sort((a, b) {
+        final aUpdated =
+            a.updatedAt ??
+            a.createdAt ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final bUpdated =
+            b.updatedAt ??
+            b.createdAt ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final cmp = bUpdated.compareTo(aUpdated);
+        if (cmp != 0) return cmp;
+        return b.id.compareTo(a.id);
+      });
+
+      _allProducts = List<Product>.unmodifiable(next);
+    });
+
+    _applyFilters();
   }
 
   Future<void> _openFilters(BuildContext context) async {
