@@ -4,3 +4,16 @@
 !/.gitattributes
 !/FULLPOS_BACKEND/
 !/FULLPOS_BACKEND/**
+!/FULLPOS_OWNER/
+!/FULLPOS_OWNER/**
+
+# Keep generated Flutter artifacts ignored inside tracked projects
+FULLPOS_OWNER/.dart_tool/
+FULLPOS_OWNER/build/
+FULLPOS_OWNER/.idea/
+FULLPOS_OWNER/.idea/**
+FULLPOS_OWNER/**/*.iml
+FULLPOS_OWNER/.flutter-plugins
+FULLPOS_OWNER/.flutter-plugins-dependencies
+FULLPOS_OWNER/.packages
+FULLPOS_OWNER/build_verbose_owner*.txt
