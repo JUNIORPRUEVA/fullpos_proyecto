@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+function isAcceptedImageUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('/uploads/')) return true;
+  return z.string().url().safeParse(trimmed).success;
+}
+
+const imageUrlSchema = z
+  .string()
+  .trim()
+  .refine(isAcceptedImageUrl, 'La imagen debe ser una URL valida o una ruta /uploads/...');
+
 export const listProductsSchema = z.object({
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().max(100).optional(),
@@ -13,7 +25,7 @@ export const createProductSchema = z.object({
   price: z.coerce.number().nonnegative(),
   cost: z.coerce.number().nonnegative().optional().default(0),
   stock: z.coerce.number().nonnegative().default(0),
-  imageUrl: z.string().url().optional(),
+  imageUrl: imageUrlSchema.optional(),
   isDemo: z.boolean().optional(),
 });
 
@@ -38,7 +50,7 @@ const syncOperationProductSchema = z.object({
   price: z.coerce.number().nonnegative(),
   cost: z.coerce.number().nonnegative().optional().default(0),
   stock: z.coerce.number().nonnegative().optional().default(0),
-  imageUrl: z.string().url().optional().nullable(),
+  imageUrl: imageUrlSchema.optional().nullable(),
   isActive: z.boolean().optional().default(true),
   deletedAt: z.string().datetime().optional().nullable(),
 });
@@ -81,7 +93,7 @@ export const syncProductsByRncSchema = z
           price: z.coerce.number().nonnegative(),
           cost: z.coerce.number().nonnegative().optional(),
           stock: z.coerce.number().nonnegative().optional(),
-          imageUrl: z.string().url().optional().nullable(),
+          imageUrl: imageUrlSchema.optional().nullable(),
         }),
       )
       .max(2000)

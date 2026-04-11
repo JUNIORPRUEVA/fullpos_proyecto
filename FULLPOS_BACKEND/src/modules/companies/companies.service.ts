@@ -177,10 +177,36 @@ export async function updateCompanyConfig(companyId: number, payload: UpdateComp
   if (themeKey !== undefined) configUpdate.themeKey = themeKey;
 
   if (companyName) {
-    await prisma.company.update({
+    const currentCompany = await prisma.company.findUnique({
       where: { id: companyId },
-      data: { name: companyName },
+      select: { id: true, name: true },
     });
+    if (!currentCompany) {
+      throw { status: 404, message: 'Compañía no encontrada' };
+    }
+
+    if (currentCompany.name !== companyName) {
+      const conflictingCompany = await prisma.company.findFirst({
+        where: {
+          id: { not: companyId },
+          name: companyName,
+        },
+        select: { id: true },
+      });
+
+      if (!conflictingCompany) {
+        await prisma.company.update({
+          where: { id: companyId },
+          data: { name: companyName },
+        });
+      } else {
+        console.warn('[cloud_sync] Skipping company name update due to unique name conflict', {
+          companyId,
+          companyName,
+          conflictingCompanyId: conflictingCompany.id,
+        });
+      }
+    }
   }
 
   const configCreate: Prisma.CompanyConfigCreateInput = {
