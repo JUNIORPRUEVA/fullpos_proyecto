@@ -34,6 +34,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       if (!mounted) return;
       context.go('/dashboard');
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = e.toString().replaceAll('Exception: ', ''));
     }
   }
