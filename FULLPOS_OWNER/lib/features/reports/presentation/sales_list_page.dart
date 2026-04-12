@@ -9,6 +9,8 @@ import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
 
+const _salesHorizontalGap = 8.0;
+
 class SalesListPage extends ConsumerStatefulWidget {
   const SalesListPage({super.key, this.initialFrom, this.initialTo});
 
@@ -206,30 +208,36 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                         ],
                       ),
                       const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
+                      Row(
                         children: [
-                          _SalesMetric(
-                            title: 'Total vendido',
-                            value: summary != null
-                                ? formatAccountingAmount(summary.total)
-                                : '--',
-                            icon: Icons.payments_outlined,
+                          Expanded(
+                            child: _SalesMetric(
+                              title: 'Total vendido',
+                              value: summary != null
+                                  ? formatAccountingAmount(summary.total)
+                                  : '--',
+                              icon: Icons.payments_outlined,
+                            ),
                           ),
-                          _SalesMetric(
-                            title: 'Costo',
-                            value: summary != null
-                                ? formatAccountingAmount(summary.totalCost)
-                                : '--',
-                            icon: Icons.shopping_cart_outlined,
+                          const SizedBox(width: _salesHorizontalGap),
+                          Expanded(
+                            child: _SalesMetric(
+                              title: 'Costo',
+                              value: summary != null
+                                  ? formatAccountingAmount(summary.totalCost)
+                                  : '--',
+                              icon: Icons.shopping_cart_outlined,
+                            ),
                           ),
-                          _SalesMetric(
-                            title: 'Ganancia',
-                            value: summary != null
-                                ? formatAccountingAmount(summary.profit)
-                                : '--',
-                            icon: Icons.trending_up_outlined,
+                          const SizedBox(width: _salesHorizontalGap),
+                          Expanded(
+                            child: _SalesMetric(
+                              title: 'Ganancia',
+                              value: summary != null
+                                  ? formatAccountingAmount(summary.profit)
+                                  : '--',
+                              icon: Icons.trending_up_outlined,
+                            ),
                           ),
                         ],
                       ),
@@ -242,29 +250,8 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                                 const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final sale = _page!.data[index];
-                              return ListTile(
-                                leading: const Icon(
-                                  Icons.receipt_long_outlined,
-                                ),
-                                title: Text(
-                                  '${sale.localCode} • ${sale.paymentMethod ?? 'N/D'}',
-                                ),
-                                subtitle: Text(
-                                  [
-                                    if ((sale.customerName ?? '')
-                                        .trim()
-                                        .isNotEmpty)
-                                      sale.customerName!.trim(),
-                                    sale.createdAt != null
-                                        ? DateFormat(
-                                            'yyyy-MM-dd HH:mm',
-                                          ).format(sale.createdAt!)
-                                        : 'Fecha N/D',
-                                  ].join(' • '),
-                                ),
-                                trailing: Text(
-                                  formatAccountingAmount(sale.total),
-                                ),
+                              return _CompactSaleRow(
+                                sale: sale,
                                 onTap: () =>
                                     context.go('/sales/detail/${sale.id}'),
                               );
@@ -296,51 +283,80 @@ class _SalesFilters extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('yyyy-MM-dd');
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.date_range),
-                label: Text('Rango: ${fmt.format(from)} • ${fmt.format(to)}'),
-                onPressed: () async {
-                  final picked = await showDateRangePicker(
-                    context: context,
-                    firstDate: DateTime.now().subtract(
-                      const Duration(days: 365),
-                    ),
-                    lastDate: DateTime.now().add(const Duration(days: 1)),
-                    initialDateRange: DateTimeRange(start: from, end: to),
-                  );
-                  if (picked != null) onChange(picked.start, picked.end);
-                },
-              ),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          const _RangeChip(label: 'Rango'),
+          const SizedBox(width: _salesHorizontalGap),
+          ActionChip(
+            label: const Text('Hoy'),
+            onPressed: () => onQuickRange(0),
+          ),
+          const SizedBox(width: _salesHorizontalGap),
+          ActionChip(
+            label: const Text('7 dias'),
+            onPressed: () => onQuickRange(7),
+          ),
+          const SizedBox(width: _salesHorizontalGap),
+          ActionChip(
+            label: const Text('30 dias'),
+            onPressed: () => onQuickRange(30),
+          ),
+          const SizedBox(width: _salesHorizontalGap),
+          IconButton.filledTonal(
+            tooltip: 'Elegir rango',
+            onPressed: () async {
+              final picked = await _showCompactDateRangeSheet(
+                context,
+                initialFrom: from,
+                initialTo: to,
+              );
+              if (picked != null) {
+                onChange(picked.start, picked.end);
+              }
+            },
+            icon: const Icon(Icons.calendar_month_outlined),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RangeChip extends StatelessWidget {
+  const _RangeChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.calendar_today_outlined,
+            size: 16,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w700,
             ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            ActionChip(
-              label: const Text('Hoy'),
-              onPressed: () => onQuickRange(0),
-            ),
-            ActionChip(
-              label: const Text('7 dias'),
-              onPressed: () => onQuickRange(7),
-            ),
-            ActionChip(
-              label: const Text('30 dias'),
-              onPressed: () => onQuickRange(30),
-            ),
-          ],
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -361,32 +377,313 @@ class _SalesMetric extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 18),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+          Icon(icon, size: 17),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(value, style: theme.textTheme.titleSmall),
-            ],
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
+  }
+}
+
+class _CompactSaleRow extends StatelessWidget {
+  const _CompactSaleRow({required this.sale, required this.onTap});
+
+  final SaleRow sale;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dateLabel = sale.createdAt != null
+        ? DateFormat('yyyy-MM-dd HH:mm').format(sale.createdAt!)
+        : 'Fecha N/D';
+    final paymentLabel = _translatePaymentMethod(sale.paymentMethod);
+    final primaryLabel = _buildSalePrimaryLabel(sale);
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              Icons.receipt_long_outlined,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '$primaryLabel • $paymentLabel • $dateLabel',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              formatAccountingAmount(sale.total),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<DateTimeRange?> _showCompactDateRangeSheet(
+  BuildContext context, {
+  required DateTime initialFrom,
+  required DateTime initialTo,
+}) {
+  final firstDate = DateTime.now().subtract(const Duration(days: 365));
+  final lastDate = DateTime.now().add(const Duration(days: 1));
+  final fmt = DateFormat('yyyy-MM-dd');
+
+  return showModalBottomSheet<DateTimeRange>(
+    context: context,
+    showDragHandle: true,
+    backgroundColor: Theme.of(context).colorScheme.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+    ),
+    builder: (context) {
+      var start = DateTime(
+        initialFrom.year,
+        initialFrom.month,
+        initialFrom.day,
+      );
+      var end = DateTime(initialTo.year, initialTo.month, initialTo.day);
+
+      return StatefulBuilder(
+        builder: (context, setModalState) {
+          Future<void> pickStart() async {
+            final picked = await showDatePicker(
+              context: context,
+              firstDate: firstDate,
+              lastDate: end.isAfter(lastDate) ? lastDate : end,
+              initialDate: start,
+              helpText: 'Fecha inicial',
+            );
+            if (picked == null) return;
+            setModalState(() {
+              start = picked;
+              if (start.isAfter(end)) {
+                end = start;
+              }
+            });
+          }
+
+          Future<void> pickEnd() async {
+            final picked = await showDatePicker(
+              context: context,
+              firstDate: start.isBefore(firstDate) ? firstDate : start,
+              lastDate: lastDate,
+              initialDate: end.isBefore(start) ? start : end,
+              helpText: 'Fecha final',
+            );
+            if (picked == null) return;
+            setModalState(() {
+              end = picked;
+            });
+          }
+
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Filtrar por fecha',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Elige un intervalo compacto para el reporte.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _DateBox(
+                          label: 'Desde',
+                          value: fmt.format(start),
+                          onTap: pickStart,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _DateBox(
+                          label: 'Hasta',
+                          value: fmt.format(end),
+                          onTap: pickEnd,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('Cancelar'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () {
+                            Navigator.of(
+                              context,
+                            ).pop(DateTimeRange(start: start, end: end));
+                          },
+                          child: const Text('Aplicar'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+class _DateBox extends StatelessWidget {
+  const _DateBox({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Ink(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.event_outlined, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _buildSalePrimaryLabel(SaleRow sale) {
+  final customer = sale.customerName?.trim();
+  if (customer != null && customer.isNotEmpty) {
+    return customer;
+  }
+  return 'Venta sin cliente';
+}
+
+String _translatePaymentMethod(String? value) {
+  switch (value?.trim().toLowerCase()) {
+    case 'cash':
+    case 'efectivo':
+      return 'Efectivo';
+    case 'card':
+    case 'tarjeta':
+      return 'Tarjeta';
+    case 'transfer':
+    case 'transferencia':
+      return 'Transferencia';
+    case 'mixed':
+    case 'mixto':
+      return 'Mixto';
+    case 'credit':
+    case 'credito':
+      return 'Crédito';
+    default:
+      final normalized = value?.trim();
+      return normalized == null || normalized.isEmpty
+          ? 'No especificado'
+          : normalized;
   }
 }
