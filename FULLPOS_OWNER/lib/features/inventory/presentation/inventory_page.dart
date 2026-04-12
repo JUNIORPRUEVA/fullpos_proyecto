@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/utils/accounting_format.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../categories/data/categories_repository.dart';
 import '../../products/data/product_models.dart';
 import '../../products/data/product_realtime_service.dart';
 import '../../products/data/products_repository.dart';
@@ -30,6 +31,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
   bool _loading = true;
   String? _error;
   List<Product> _all = const [];
+  List<String> _syncedCategories = const [];
 
   @override
   void initState() {
@@ -65,12 +67,10 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
   }
 
   List<String> get _availableCategories {
-    final categories = _all
-        .map((product) => _normalizeCategory(product.category))
-        .whereType<String>()
-        .toSet()
-        .toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final categories = {
+      ..._all.map((product) => _normalizeCategory(product.category)).whereType<String>(),
+      ..._syncedCategories.map(_normalizeCategory).whereType<String>(),
+    }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return categories;
   }
 
@@ -91,6 +91,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
     }
 
     final repo = ref.read(productsRepositoryProvider);
+    final categoriesRepo = ref.read(categoriesRepositoryProvider);
 
     try {
       const pageSize = 100;
@@ -107,12 +108,15 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
         await Future<void>.delayed(const Duration(milliseconds: 1));
       }
 
+      final syncedCategories = await categoriesRepo.list();
+
       if (!mounted) return;
       items.sort(
         (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
       );
       setState(() {
         _all = items;
+        _syncedCategories = syncedCategories;
         if (_selectedCategory != null &&
             !_availableCategories.contains(_selectedCategory)) {
           _selectedCategory = null;

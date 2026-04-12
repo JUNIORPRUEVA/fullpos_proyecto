@@ -11,6 +11,7 @@ import '../../../core/config/app_config.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/utils/accounting_format.dart';
 import '../../auth/data/auth_repository.dart';
+import '../../categories/data/categories_repository.dart';
 import '../data/product_models.dart';
 import '../data/product_realtime_service.dart';
 import '../data/products_repository.dart';
@@ -57,6 +58,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
   bool _loading = true;
   String? _error;
   String? _selectedCategory;
+  List<String> _syncedCategories = const [];
 
   static const Duration _autoRefreshInterval = Duration(seconds: 30);
 
@@ -138,13 +140,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
   }
 
   List<String> get _availableCategories {
-    final categories =
-        _allProducts
-            .map((product) => _normalizeCategory(product.category))
-            .whereType<String>()
-            .toSet()
-            .toList()
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final categories = {
+      ..._allProducts
+          .map((product) => _normalizeCategory(product.category))
+          .whereType<String>(),
+      ..._syncedCategories.map(_normalizeCategory).whereType<String>(),
+    }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return categories;
   }
 
@@ -218,14 +219,34 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
     }
 
     final repo = ref.read(productsRepositoryProvider);
+    final categoriesRepo = ref.read(categoriesRepositoryProvider);
     try {
-      final result = await repo.list(
-        search: _searchCtrl.text.trim(),
-        pageSize: 100,
-      );
+      const pageSize = 100;
+      var page = 1;
+      final items = <Product>[];
+      while (true) {
+        final result = await repo.list(
+          page: page,
+          pageSize: pageSize,
+          search: _searchCtrl.text.trim(),
+        );
+        items.addAll(result.data);
+        if (items.length >= result.total) {
+          break;
+        }
+        if (result.data.length < pageSize) {
+          break;
+        }
+        page++;
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+
+      final syncedCategories = await categoriesRepo.list();
+
       if (!mounted) return;
       setState(() {
-        _allProducts = result.data;
+        _allProducts = items;
+        _syncedCategories = syncedCategories;
         if (_selectedCategory != null &&
             !_availableCategories.contains(_selectedCategory)) {
           _selectedCategory = null;

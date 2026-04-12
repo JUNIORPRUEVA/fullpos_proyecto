@@ -1,8 +1,9 @@
 import { Router } from 'express';
+import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
 import { syncCategoriesByRncSchema } from './categories.validation';
-import { syncCategoriesByRnc } from './categories.service';
+import { listCategories, syncCategoriesByRnc } from './categories.service';
 
 const router = Router();
 
@@ -16,6 +17,17 @@ router.post('/sync/by-rnc', overrideKeyGuard, validate(syncCategoriesByRncSchema
     });
     const result = await syncCategoriesByRnc(companyRnc, companyCloudId, categories ?? []);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.use(authGuard);
+
+router.get('/', async (req, res, next) => {
+  try {
+    const result = await listCategories(req.user!.companyId);
+    res.json({ data: result });
   } catch (err) {
     next(err);
   }

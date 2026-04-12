@@ -34,6 +34,26 @@ export type SyncCategoryInput = {
   deletedAt?: string | null;
 };
 
+export async function listCategories(companyId: number) {
+  const categories = await prisma.category.findMany({
+    where: {
+      companyId,
+      isActive: true,
+      deletedAt: null,
+    },
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      localId: true,
+      name: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return categories;
+}
+
 export async function syncCategoriesByRnc(
   companyRnc: string | undefined,
   companyCloudId: string | undefined,
