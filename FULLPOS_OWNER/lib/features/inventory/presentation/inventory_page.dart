@@ -3,8 +3,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../core/providers/sync_request_provider.dart';
+import '../../../core/utils/accounting_format.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../products/data/product_models.dart';
 import '../../products/data/product_realtime_service.dart';
@@ -23,6 +24,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
   Timer? _debounce;
   StreamSubscription<ProductRealtimeMessage>? _productRealtimeSubscription;
   bool _outOfStockOnly = false;
+  String? _selectedCategory;
   bool _reloadRequested = false;
 
   bool _loading = true;
@@ -34,9 +36,9 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _productRealtimeSubscription = ref
-      .read(productRealtimeServiceProvider)
-      .stream
-      .listen((_) => _load(showLoading: false));
+        .read(productRealtimeServiceProvider)
+        .stream
+        .listen((_) => _load(showLoading: false));
     _load(showLoading: true);
   }
 
@@ -54,6 +56,22 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
     if (state == AppLifecycleState.resumed) {
       _load(showLoading: false);
     }
+  }
+
+  String? _normalizeCategory(String? value) {
+    final normalized = value?.trim();
+    if (normalized == null || normalized.isEmpty) return null;
+    return normalized;
+  }
+
+  List<String> get _availableCategories {
+    final categories = _all
+        .map((product) => _normalizeCategory(product.category))
+        .whereType<String>()
+        .toSet()
+        .toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return categories;
   }
 
   Future<void> _load({required bool showLoading}) async {
@@ -95,6 +113,10 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
       );
       setState(() {
         _all = items;
+        if (_selectedCategory != null &&
+            !_availableCategories.contains(_selectedCategory)) {
+          _selectedCategory = null;
+        }
         if (showLoading) _loading = false;
       });
     } catch (e) {
@@ -121,8 +143,15 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
           .where(
             (p) =>
                 p.name.toLowerCase().contains(q) ||
-                p.code.toLowerCase().contains(q),
+                p.code.toLowerCase().contains(q) ||
+                (_normalizeCategory(p.category)?.toLowerCase().contains(q) ??
+                    false),
           )
+          .toList();
+    }
+    if (_selectedCategory != null) {
+      list = list
+          .where((p) => _normalizeCategory(p.category) == _selectedCategory)
           .toList();
     }
     if (_outOfStockOnly) {
@@ -131,11 +160,47 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
     return list;
   }
 
+  Future<void> _showMetricPreview(
+    BuildContext context, {
+    required _InventoryMetric metric,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withAlpha((0.38 * 255).round()),
+      builder: (context) {
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: _StatCard(
+              title: metric.title,
+              value: metric.value,
+              icon: metric.icon,
+              color: metric.color,
+              large: true,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
+      if (previous?.revision == next.revision) return;
+      if (!next.appliesTo('/inventory')) return;
+      unawaited(_load(showLoading: true));
+    });
+
     final theme = Theme.of(context);
-    final currency = NumberFormat.currency(locale: 'es_DO', symbol: '\$');
     final filtered = _filtered;
+    final totalProducts = filtered.length;
 
     final totalUnits = filtered.fold<double>(0, (sum, p) => sum + p.stock);
     final totalCost = filtered.fold<double>(
@@ -148,17 +213,40 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
     );
     final potentialProfit = potentialSales - totalCost;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Inventario'),
-        actions: [
-          IconButton(
-            tooltip: 'Actualizar',
-            onPressed: () => _load(showLoading: true),
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
+    final metricItems = [
+      _InventoryMetric(
+        title: 'Productos',
+        value: totalProducts.toString(),
+        icon: Icons.inventory_2_outlined,
+        color: theme.colorScheme.secondary,
       ),
+      _InventoryMetric(
+        title: 'Inversión',
+        value: formatAccountingAmount(totalCost),
+        icon: Icons.savings_outlined,
+        color: AppColors.success,
+      ),
+      _InventoryMetric(
+        title: 'Unidades',
+        value: totalUnits.toStringAsFixed(0),
+        icon: Icons.format_list_numbered,
+        color: theme.colorScheme.primary,
+      ),
+      _InventoryMetric(
+        title: 'Venta potencial',
+        value: formatAccountingAmount(potentialSales),
+        icon: Icons.trending_up,
+        color: AppColors.warning,
+      ),
+      _InventoryMetric(
+        title: 'Ganancia potencial',
+        value: formatAccountingAmount(potentialProfit),
+        icon: Icons.stacked_line_chart,
+        color: potentialProfit >= 0 ? AppColors.success : AppColors.danger,
+      ),
+    ];
+
+    return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
@@ -172,7 +260,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
                       builder: (context, constraints) {
                         final listHeight = math.max(
                           240.0,
-                          constraints.maxHeight - 180,
+                          constraints.maxHeight - 260,
                         );
                         return SingleChildScrollView(
                           padding: const EdgeInsets.all(16),
@@ -183,39 +271,86 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Wrap(
-                                  spacing: 12,
-                                  runSpacing: 12,
+                                Row(
                                   children: [
-                                    _StatCard(
-                                      title: 'Inversión',
-                                      value: currency.format(totalCost),
-                                      icon: Icons.savings_outlined,
-                                      color: AppColors.success,
+                                    Expanded(
+                                      child: _StatCard(
+                                        title: metricItems[0].title,
+                                        value: metricItems[0].value,
+                                        icon: metricItems[0].icon,
+                                        color: metricItems[0].color,
+                                        onTap: () => _showMetricPreview(
+                                          context,
+                                          metric: metricItems[0],
+                                        ),
+                                      ),
                                     ),
-                                    _StatCard(
-                                      title: 'Unidades',
-                                      value: totalUnits.toStringAsFixed(0),
-                                      icon: Icons.format_list_numbered,
-                                      color: theme.colorScheme.primary,
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _StatCard(
+                                        title: metricItems[1].title,
+                                        value: metricItems[1].value,
+                                        icon: metricItems[1].icon,
+                                        color: metricItems[1].color,
+                                        onTap: () => _showMetricPreview(
+                                          context,
+                                          metric: metricItems[1],
+                                        ),
+                                      ),
                                     ),
-                                    _StatCard(
-                                      title: 'Venta potencial',
-                                      value: currency.format(potentialSales),
-                                      icon: Icons.trending_up,
-                                      color: AppColors.warning,
-                                    ),
-                                    _StatCard(
-                                      title: 'Ganancia potencial',
-                                      value: currency.format(potentialProfit),
-                                      icon: Icons.stacked_line_chart,
-                                      color: potentialProfit >= 0
-                                          ? AppColors.success
-                                          : AppColors.danger,
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _StatCard(
+                                        title: metricItems[2].title,
+                                        value: metricItems[2].value,
+                                        icon: metricItems[2].icon,
+                                        color: metricItems[2].color,
+                                        onTap: () => _showMetricPreview(
+                                          context,
+                                          metric: metricItems[2],
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
                                 const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _StatCard(
+                                        title: metricItems[3].title,
+                                        value: metricItems[3].value,
+                                        icon: metricItems[3].icon,
+                                        color: metricItems[3].color,
+                                        onTap: () => _showMetricPreview(
+                                          context,
+                                          metric: metricItems[3],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _StatCard(
+                                        title: metricItems[4].title,
+                                        value: metricItems[4].value,
+                                        icon: metricItems[4].icon,
+                                        color: metricItems[4].color,
+                                        onTap: () => _showMetricPreview(
+                                          context,
+                                          metric: metricItems[4],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Productos',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
                                 SizedBox(
                                   height: listHeight,
                                   child: Card(
@@ -239,11 +374,15 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
                                                 leading: CircleAvatar(
                                                   backgroundColor: isOut
                                                       ? theme.colorScheme.error
-                                                    .withValues(alpha: 0.15)
+                                                            .withValues(
+                                                              alpha: 0.15,
+                                                            )
                                                       : theme
                                                             .colorScheme
                                                             .primary
-                                                    .withValues(alpha: 0.12),
+                                                            .withValues(
+                                                              alpha: 0.12,
+                                                            ),
                                                   child: Text(
                                                     item.code.isNotEmpty
                                                         ? item.code
@@ -268,7 +407,12 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
                                                       TextOverflow.ellipsis,
                                                 ),
                                                 subtitle: Text(
-                                                  'Código: ${item.code} • Stock: ${item.stock.toStringAsFixed(0)}',
+                                                  _normalizeCategory(
+                                                            item.category,
+                                                          ) !=
+                                                          null
+                                                      ? 'Código: ${item.code} • Stock: ${item.stock.toStringAsFixed(0)} • ${_normalizeCategory(item.category)!}'
+                                                      : 'Código: ${item.code} • Stock: ${item.stock.toStringAsFixed(0)}',
                                                 ),
                                                 trailing: Column(
                                                   mainAxisAlignment:
@@ -277,13 +421,13 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
                                                       CrossAxisAlignment.end,
                                                   children: [
                                                     Text(
-                                                      'Costo: ${currency.format(item.cost)}',
+                                                      'Costo: ${formatAccountingAmount(item.cost)}',
                                                       style: theme
                                                           .textTheme
                                                           .bodySmall,
                                                     ),
                                                     Text(
-                                                      'Precio: ${currency.format(item.price)}',
+                                                      'Precio: ${formatAccountingAmount(item.price)}',
                                                       style: theme
                                                           .textTheme
                                                           .bodySmall
@@ -316,6 +460,8 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
   }
 
   Widget _buildToolbar(ThemeData theme) {
+    const allCategoriesValue = '__all_categories__';
+
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
@@ -363,6 +509,64 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
             ),
           ),
           const SizedBox(width: 10),
+          PopupMenuButton<String>(
+            tooltip: 'Filtrar por categoría',
+            offset: const Offset(0, 48),
+            onSelected: (value) {
+              setState(() {
+                _selectedCategory =
+                    value == allCategoriesValue ? null : value;
+              });
+            },
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem<String>(
+                value: allCategoriesValue,
+                checked: _selectedCategory == null,
+                child: const Text('Todas las categorías'),
+              ),
+              ..._availableCategories.map(
+                (category) => CheckedPopupMenuItem<String>(
+                  value: category,
+                  checked: _selectedCategory == category,
+                  child: Text(category),
+                ),
+              ),
+            ],
+            child: Container(
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.category_outlined,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  if (_selectedCategory != null) ...[
+                    const SizedBox(width: 6),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 96),
+                      child: Text(
+                        _selectedCategory!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
           FilterChip(
             label: const Text('Agotados'),
             selected: _outOfStockOnly,
@@ -380,37 +584,80 @@ class _StatCard extends StatelessWidget {
     required this.value,
     required this.icon,
     required this.color,
+    this.large = false,
+    this.onTap,
   });
 
   final String title;
   final String value;
   final IconData icon;
   final Color color;
+  final bool large;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 200,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(height: 10),
-              Text(title, style: Theme.of(context).textTheme.bodyMedium),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+    final theme = Theme.of(context);
+    final content = Card(
+      child: Padding(
+        padding: EdgeInsets.all(large ? 22 : 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: large ? 28 : 24),
+            SizedBox(height: large ? 14 : 10),
+            Text(
+              title,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: color,
               ),
-            ],
-          ),
+            ),
+            SizedBox(height: large ? 10 : 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  fontSize: large ? 34 : null,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: content,
+      ),
+    );
   }
+}
+
+class _InventoryMetric {
+  const _InventoryMetric({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color color;
 }

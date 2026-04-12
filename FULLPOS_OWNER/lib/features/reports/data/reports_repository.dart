@@ -54,6 +54,7 @@ class ReportsRepository {
     String from,
     String to, {
     int page = 1,
+    int pageSize = 20,
   }) async {
     return _guard(
       () async {
@@ -63,7 +64,7 @@ class ReportsRepository {
             'from': from,
             'to': to,
             'page': page,
-            'pageSize': 20,
+            'pageSize': pageSize,
           },
         );
         return PaginatedSales.fromJson(res.data as Map<String, dynamic>);
@@ -71,7 +72,7 @@ class ReportsRepository {
       fallback: PaginatedSales(
         data: const [],
         page: page,
-        pageSize: 20,
+        pageSize: pageSize,
         total: 0,
       ),
     );

@@ -1,6 +1,8 @@
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/theme_provider.dart';
@@ -33,6 +35,13 @@ class _OwnerAppState extends ConsumerState<OwnerApp> {
     return MaterialApp.router(
       title: 'FULLPOS Owner',
       debugShowCheckedModeBanner: false,
+      locale: const Locale('es'),
+      supportedLocales: const [Locale('es'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: theme.copyWith(
         textTheme: GoogleFonts.poppinsTextTheme(theme.textTheme),
       ),

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/providers/sync_request_provider.dart';
+import '../../../core/utils/accounting_format.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
@@ -30,7 +32,9 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
         .read(saleRealtimeServiceProvider)
         .stream
         .listen((message) {
-          final eventSaleId = int.tryParse(message.sale['id']?.toString() ?? '');
+          final eventSaleId = int.tryParse(
+            message.sale['id']?.toString() ?? '',
+          );
           if (eventSaleId == widget.id) {
             _load();
           }
@@ -51,13 +55,15 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     });
 
     try {
-      final detail = await ref.read(reportsRepositoryProvider).saleDetail(widget.id);
+      final detail = await ref
+          .read(reportsRepositoryProvider)
+          .saleDetail(widget.id);
       if (!mounted) return;
       setState(() {
         _detail = detail;
         _loading = false;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _error = 'Error cargando factura';
@@ -68,199 +74,477 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final number = NumberFormat.currency(locale: 'es_DO', symbol: '\$');
-    final dateFmt = DateFormat('yyyy-MM-dd HH:mm');
+    ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
+      if (previous?.revision == next.revision) return;
+      if (!next.appliesTo('/sales/detail')) return;
+      unawaited(_load());
+    });
+
+    final dateFormat = DateFormat('dd/MM/yyyy hh:mm a');
 
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Center(child: CircularProgressIndicator());
     }
+
     if (_error != null) {
-      return Scaffold(
-        appBar: AppBar(title: Text('Factura #${widget.id}')),
-        body: Center(child: Text(_error!)),
-      );
-    }
-    if (_detail == null) {
-      return Scaffold(
-        appBar: AppBar(title: Text('Factura #${widget.id}')),
-        body: const Center(child: Text('Sin datos')),
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!),
+            const SizedBox(height: 10),
+            OutlinedButton(onPressed: _load, child: const Text('Reintentar')),
+          ],
+        ),
       );
     }
 
-    final detail = _detail!;
+    final detail = _detail;
+    if (detail == null) {
+      return const Center(child: Text('Sin datos de la factura.'));
+    }
 
-    return Scaffold(
-      appBar: AppBar(title: Text(detail.localCode)),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  _InfoChip('Estado', detail.status),
-                  _InfoChip('Tipo', detail.kind),
-                  _InfoChip('Pago', detail.paymentMethod ?? 'N/D'),
-                  _InfoChip('Total', number.format(detail.total)),
-                  _InfoChip('Costo', number.format(detail.totalCost)),
-                  _InfoChip('Ganancia', number.format(detail.profit)),
-                  if (detail.createdAt != null)
-                    _InfoChip('Fecha', dateFmt.format(detail.createdAt!)),
-                  if ((detail.sessionStatus ?? '').isNotEmpty)
-                    _InfoChip('Corte', detail.sessionStatus!),
-                  if ((detail.ncfFull ?? '').isNotEmpty)
-                    _InfoChip('NCF', detail.ncfFull!),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Cliente y resumen',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 10),
-                  _DetailRow('Cliente', detail.customerName ?? 'Consumidor final'),
-                  _DetailRow('Telefono', detail.customerPhone ?? 'N/D'),
-                  _DetailRow('RNC', detail.customerRnc ?? 'N/D'),
-                  _DetailRow(
-                    'Vendedor',
-                    detail.user?.displayName ?? detail.user?.username ?? 'N/D',
-                  ),
-                  _DetailRow('Subtotal', number.format(detail.subtotal ?? 0)),
-                  _DetailRow('Descuento', number.format(detail.discountTotal ?? 0)),
-                  _DetailRow('ITBIS', number.format(detail.itbisAmount ?? 0)),
-                  _DetailRow('Pagado', number.format(detail.paidAmount ?? 0)),
-                  _DetailRow('Cambio', number.format(detail.changeAmount ?? 0)),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Lineas de venta',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  ...detail.items.map(
-                    (item) => Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                      ),
+    final cashier = _normalizeText(detail.cashierName);
+    final customer = _normalizeText(detail.customerName);
+    final paymentMethod = _translatePaymentMethod(detail.paymentMethod);
+    final status = _translateSaleStatus(detail.status);
+    final type = _translateSaleType(detail.kind);
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _TicketHero(
+                      localCode: detail.localCode,
+                      status: status,
+                      paymentMethod: paymentMethod,
+                      createdAt: detail.createdAt == null
+                          ? 'Fecha no disponible'
+                          : dateFormat.format(detail.createdAt!),
+                    ),
+                    const SizedBox(height: 12),
+                    _TicketSection(
+                      title: 'Cliente y venta',
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            item.productNameSnapshot,
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 4),
-                          if ((item.productCodeSnapshot ?? '').isNotEmpty)
-                            Text('Codigo: ${item.productCodeSnapshot}'),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 12,
-                            runSpacing: 8,
-                            children: [
-                              _InfoChip('Cant.', item.qty.toStringAsFixed(2)),
-                              _InfoChip('Precio', number.format(item.unitPrice)),
-                              _InfoChip(
-                                'Costo',
-                                number.format(item.purchasePriceSnapshot),
-                              ),
-                              _InfoChip(
-                                'Desc.',
-                                number.format(item.discountLine),
-                              ),
-                              _InfoChip('Linea', number.format(item.totalLine)),
-                              _InfoChip('Ganancia', number.format(item.lineProfit)),
-                            ],
-                          ),
+                          if (customer != null)
+                            _TicketRow(label: 'Cliente', value: customer),
+                          if (cashier != null)
+                            _TicketRow(label: 'Cajero', value: cashier),
+                          _TicketRow(label: 'Pago', value: paymentMethod),
+                          _TicketRow(label: 'Tipo', value: type),
+                          if ((detail.customerPhone ?? '').trim().isNotEmpty)
+                            _TicketRow(
+                              label: 'Telefono',
+                              value: detail.customerPhone!.trim(),
+                            ),
+                          if ((detail.customerRnc ?? '').trim().isNotEmpty)
+                            _TicketRow(
+                              label: 'RNC',
+                              value: detail.customerRnc!.trim(),
+                            ),
+                          if ((detail.ncfFull ?? '').trim().isNotEmpty)
+                            _TicketRow(
+                              label: 'NCF',
+                              value: detail.ncfFull!.trim(),
+                            ),
+                          if (detail.sessionId != null)
+                            _TicketRow(
+                              label: 'Sesion',
+                              value: detail.sessionId.toString(),
+                            ),
                         ],
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 12),
+                    _TicketSection(
+                      title: 'Productos',
+                      child: Column(
+                        children: [
+                          for (final item in detail.items)
+                            _TicketItemRow(item: item),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 12),
+            _FixedTotalsPanel(detail: detail),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _InfoChip extends StatelessWidget {
-  const _InfoChip(this.label, this.value);
+class _TicketHero extends StatelessWidget {
+  const _TicketHero({
+    required this.localCode,
+    required this.status,
+    required this.paymentMethod,
+    required this.createdAt,
+  });
 
-  final String label;
-  final String value;
+  final String localCode;
+  final String status;
+  final String paymentMethod;
+  final String createdAt;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium,
+            'Ticket de venta',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-          const SizedBox(height: 2),
-          Text(value, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _HeroBadge(label: localCode),
+              _HeroBadge(label: status),
+              _HeroBadge(label: paymentMethod),
+              _HeroBadge(label: createdAt),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  const _DetailRow(this.label, this.value);
+class _FixedTotalsPanel extends StatelessWidget {
+  const _FixedTotalsPanel({required this.detail});
 
-  final String label;
-  final String value;
+  final SaleDetail detail;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Totales',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _TicketRow(
+              label: 'Subtotal',
+              value: formatAccountingAmount(detail.subtotal ?? 0),
+            ),
+            _TicketRow(
+              label: 'Descuento',
+              value: formatAccountingAmount(detail.discountTotal ?? 0),
+            ),
+            _TicketRow(
+              label: 'ITBIS',
+              value: formatAccountingAmount(detail.itbisAmount ?? 0),
+            ),
+            _TicketRow(
+              label: 'Costo',
+              value: formatAccountingAmount(detail.totalCost),
+            ),
+            _TicketRow(
+              label: 'Ganancia',
+              value: formatAccountingAmount(detail.profit),
+            ),
+            _TicketRow(
+              label: 'Pagado',
+              value: formatAccountingAmount(detail.paidAmount ?? 0),
+              emphasized: true,
+            ),
+            _TicketRow(
+              label: 'Cambio',
+              value: formatAccountingAmount(detail.changeAmount ?? 0),
+            ),
+            _TicketRow(
+              label: 'Total final',
+              value: formatAccountingAmount(detail.total),
+              emphasized: true,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroBadge extends StatelessWidget {
+  const _HeroBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class _TicketSection extends StatelessWidget {
+  const _TicketSection({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _TicketRow extends StatelessWidget {
+  const _TicketRow({
+    required this.label,
+    required this.value,
+    this.emphasized = false,
+  });
+
+  final String label;
+  final String value;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 110,
+            width: 108,
             child: Text(
               label,
-              style: Theme.of(context).textTheme.labelLarge,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
-          Expanded(child: Text(value)),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontWeight: emphasized ? FontWeight.w900 : FontWeight.w700,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
+}
+
+class _TicketItemRow extends StatelessWidget {
+  const _TicketItemRow({required this.item});
+
+  final SaleDetailItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.productNameSnapshot,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                formatAccountingAmount(item.totalLine),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${item.qty.toStringAsFixed(2)} x ${formatAccountingAmount(item.unitPrice)}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if ((item.productCodeSnapshot ?? '').trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Codigo: ${item.productCodeSnapshot!.trim()}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+String? _normalizeText(String? value) {
+  final normalized = value?.trim();
+  if (normalized == null || normalized.isEmpty) {
+    return null;
+  }
+  return normalized;
+}
+
+String _translatePaymentMethod(String? value) {
+  switch (value?.trim().toLowerCase()) {
+    case 'cash':
+    case 'efectivo':
+      return 'Efectivo';
+    case 'card':
+    case 'tarjeta':
+      return 'Tarjeta';
+    case 'transfer':
+    case 'transferencia':
+      return 'Transferencia';
+    case 'mixed':
+    case 'mixto':
+      return 'Mixto';
+    case 'credit':
+    case 'credito':
+      return 'Crédito';
+    default:
+      return _normalizeText(value) ?? 'No especificado';
+  }
+}
+
+String _translateSaleStatus(String value) {
+  switch (value.trim().toLowerCase()) {
+    case 'completed':
+    case 'complete':
+      return 'Completado';
+    case 'pending':
+      return 'Pendiente';
+    case 'cancelled':
+    case 'canceled':
+      return 'Cancelado';
+    case 'draft':
+      return 'Borrador';
+    default:
+      return _capitalizeWords(value);
+  }
+}
+
+String _translateSaleType(String value) {
+  switch (value.trim().toLowerCase()) {
+    case 'invoice':
+      return 'Factura';
+    case 'sale':
+      return 'Venta';
+    case 'quote':
+      return 'Cotización';
+    case 'order':
+      return 'Pedido';
+    default:
+      return _capitalizeWords(value);
+  }
+}
+
+String _capitalizeWords(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return value;
+  }
+
+  return trimmed
+      .split(RegExp(r'[_\-\s]+'))
+      .where((part) => part.isNotEmpty)
+      .map(
+        (part) => '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+      )
+      .join(' ');
 }

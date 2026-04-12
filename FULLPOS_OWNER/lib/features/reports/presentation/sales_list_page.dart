@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../../../core/providers/sync_request_provider.dart';
+import '../../../core/utils/accounting_format.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
@@ -120,7 +122,12 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
 
   @override
   Widget build(BuildContext context) {
-    final number = NumberFormat.currency(locale: 'es_DO', symbol: '\$');
+    ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
+      if (previous?.revision == next.revision) return;
+      if (!next.appliesTo('/sales/list')) return;
+      unawaited(_load(page: 1, showLoading: true));
+    });
+
     final summary = _summary;
 
     return Padding(
@@ -143,8 +150,11 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
               final end = now;
               final start = days == 0
                   ? DateTime(now.year, now.month, now.day)
-                  : DateTime(now.year, now.month, now.day)
-                        .subtract(Duration(days: days - 1));
+                  : DateTime(
+                      now.year,
+                      now.month,
+                      now.day,
+                    ).subtract(Duration(days: days - 1));
               setState(() {
                 _from = start;
                 _to = end;
@@ -203,21 +213,21 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                           _SalesMetric(
                             title: 'Total vendido',
                             value: summary != null
-                                ? number.format(summary.total)
+                                ? formatAccountingAmount(summary.total)
                                 : '--',
                             icon: Icons.payments_outlined,
                           ),
                           _SalesMetric(
                             title: 'Costo',
                             value: summary != null
-                                ? number.format(summary.totalCost)
+                                ? formatAccountingAmount(summary.totalCost)
                                 : '--',
                             icon: Icons.shopping_cart_outlined,
                           ),
                           _SalesMetric(
                             title: 'Ganancia',
                             value: summary != null
-                                ? number.format(summary.profit)
+                                ? formatAccountingAmount(summary.profit)
                                 : '--',
                             icon: Icons.trending_up_outlined,
                           ),
@@ -241,7 +251,9 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                                 ),
                                 subtitle: Text(
                                   [
-                                    if ((sale.customerName ?? '').trim().isNotEmpty)
+                                    if ((sale.customerName ?? '')
+                                        .trim()
+                                        .isNotEmpty)
                                       sale.customerName!.trim(),
                                     sale.createdAt != null
                                         ? DateFormat(
@@ -250,8 +262,11 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                                         : 'Fecha N/D',
                                   ].join(' • '),
                                 ),
-                                trailing: Text(number.format(sale.total)),
-                                onTap: () => context.go('/sales/detail/${sale.id}'),
+                                trailing: Text(
+                                  formatAccountingAmount(sale.total),
+                                ),
+                                onTap: () =>
+                                    context.go('/sales/detail/${sale.id}'),
                               );
                             },
                           ),
@@ -294,7 +309,9 @@ class _SalesFilters extends StatelessWidget {
                 onPressed: () async {
                   final picked = await showDateRangePicker(
                     context: context,
-                    firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                    firstDate: DateTime.now().subtract(
+                      const Duration(days: 365),
+                    ),
                     lastDate: DateTime.now().add(const Duration(days: 1)),
                     initialDateRange: DateTimeRange(start: from, end: to),
                   );

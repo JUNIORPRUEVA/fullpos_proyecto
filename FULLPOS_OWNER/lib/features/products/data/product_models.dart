@@ -4,6 +4,7 @@ class Product {
     this.localId,
     required this.code,
     required this.name,
+    this.category,
     this.description,
     required this.price,
     required this.cost,
@@ -22,6 +23,7 @@ class Product {
   final int? localId;
   final String code;
   final String name;
+  final String? category;
   final String? description;
   final double price;
   final double cost;
@@ -40,6 +42,7 @@ class Product {
     localId: json['localId'] as int?,
     code: json['code'] as String,
     name: json['name'] as String,
+    category: _readCategory(json),
     description: json['description'] as String?,
     price: (json['price'] as num).toDouble(),
     cost: (json['cost'] as num?)?.toDouble() ?? 0,
@@ -65,6 +68,7 @@ class Product {
     int? localId,
     String? code,
     String? name,
+    String? category,
     String? description,
     double? price,
     double? cost,
@@ -83,6 +87,7 @@ class Product {
       localId: localId ?? this.localId,
       code: code ?? this.code,
       name: name ?? this.name,
+      category: category ?? this.category,
       description: description ?? this.description,
       price: price ?? this.price,
       cost: cost ?? this.cost,
@@ -97,6 +102,28 @@ class Product {
       deletedAt: deletedAt ?? this.deletedAt,
     );
   }
+}
+
+String? _readCategory(Map<String, dynamic> json) {
+  final candidates = [
+    json['category'],
+    json['categoryName'],
+    json['category_name'],
+  ];
+
+  for (final candidate in candidates) {
+    if (candidate is String && candidate.trim().isNotEmpty) {
+      return candidate.trim();
+    }
+    if (candidate is Map<String, dynamic>) {
+      final name = candidate['name'];
+      if (name is String && name.trim().isNotEmpty) {
+        return name.trim();
+      }
+    }
+  }
+
+  return null;
 }
 
 class PaginatedProducts {

@@ -37,6 +37,7 @@ function serializeProduct(product: Product) {
     localId: product.localId,
     code: product.code,
     name: product.name,
+    category: product.category,
     description: product.description,
     price: toNumber(product.price),
     cost: toNumber(product.cost),
@@ -110,6 +111,7 @@ export type UpdateProductInput = ReturnType<typeof updateProductSchema.parse>;
 export type SyncProductInput = {
   code: string;
   name: string;
+  category?: string;
   description?: string;
   price: number;
   cost?: number;
@@ -235,6 +237,7 @@ async function persistSyncOperation(companyId: number, operation: ProductSyncOpe
     const baseData = {
       code,
       name,
+        category: operation.product.category?.trim() || null,
       description: null,
       price: operation.product.price,
       cost: operation.product.cost ?? 0,
@@ -350,6 +353,7 @@ export async function createProduct(companyId: number, input: CreateProductInput
         companyId,
         code: input.code.trim(),
         name: input.name.trim(),
+        category: input.category?.trim() || null,
         description: input.description?.trim() || null,
         price: input.price,
         cost: input.cost ?? 0,
@@ -394,6 +398,10 @@ export async function updateProduct(
       data: {
         code: input.code?.trim() ?? existing.code,
         name: input.name?.trim() ?? existing.name,
+        category:
+          input.category === undefined
+            ? existing.category
+            : input.category?.trim() || null,
         description:
           input.description === undefined
             ? existing.description
@@ -534,6 +542,7 @@ export async function syncProductsByRnc(
         businessId: company.cloudCompanyId ?? company.rnc,
         code: item.code,
         name: item.name,
+        category: item.category?.trim() || null,
         price: item.price,
         cost: item.cost ?? 0,
         stock: item.stock ?? 0,

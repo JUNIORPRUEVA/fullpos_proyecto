@@ -8,6 +8,7 @@ import '../../features/reports/presentation/dashboard_page.dart';
 import '../../features/reports/presentation/sale_detail_page.dart';
 import '../../features/reports/presentation/sales_list_page.dart';
 import '../../features/reports/presentation/sales_by_day_page.dart';
+import '../../features/settings/presentation/owner_settings_page.dart';
 import '../../features/shared/owner_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -36,7 +37,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(path: '/reports', redirect: (context, state) => '/dashboard'),
           GoRoute(path: '/profile', redirect: (context, state) => '/dashboard'),
-          GoRoute(path: '/settings', redirect: (context, state) => '/dashboard'),
+          GoRoute(
+            path: '/settings',
+            builder: (context, state) => const OwnerSettingsPage(),
+          ),
           GoRoute(path: '/cash', redirect: (context, state) => '/dashboard'),
           GoRoute(
             path: '/cash/closing/:id',

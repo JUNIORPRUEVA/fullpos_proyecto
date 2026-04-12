@@ -355,6 +355,7 @@ class SaleDetail {
     this.updatedAt,
     this.deletedAt,
     this.user,
+    this.cashierName,
   });
 
   final int id;
@@ -383,10 +384,12 @@ class SaleDetail {
   final DateTime? updatedAt;
   final DateTime? deletedAt;
   final UserInfo? user;
+  final String? cashierName;
   final List<SaleDetailItem> items;
 
   factory SaleDetail.fromJson(Map<String, dynamic> json) {
     final rawItems = (json['items'] as List?) ?? const [];
+    final resolvedUser = _readSaleUser(json);
     return SaleDetail(
       id: (json['id'] as num).toInt(),
       localCode: json['localCode']?.toString() ?? '',
@@ -419,15 +422,68 @@ class SaleDetail {
       deletedAt: json['deletedAt'] != null
           ? DateTime.tryParse(json['deletedAt'].toString())
           : null,
-      user: json['user'] is Map<String, dynamic>
-          ? UserInfo.fromJson(json['user'] as Map<String, dynamic>)
-          : null,
+      user: resolvedUser,
+      cashierName: _readCashierName(json, resolvedUser),
       items: rawItems
           .whereType<Map<String, dynamic>>()
           .map(SaleDetailItem.fromJson)
           .toList(),
     );
   }
+}
+
+UserInfo? _readSaleUser(Map<String, dynamic> json) {
+  final candidates = [
+    json['user'],
+    json['cashier'],
+    json['seller'],
+    json['createdBy'],
+    json['employee'],
+  ];
+
+  for (final candidate in candidates) {
+    if (candidate is! Map) continue;
+    final map = Map<String, dynamic>.from(candidate);
+    final username = map['username']?.toString().trim();
+    final displayName =
+        map['displayName']?.toString().trim() ??
+        map['name']?.toString().trim() ??
+        map['fullName']?.toString().trim();
+    final hasUsername = username != null && username.isNotEmpty;
+    final hasDisplayName = displayName != null && displayName.isNotEmpty;
+
+    if (!hasUsername && !hasDisplayName) continue;
+
+    return UserInfo(
+      id: (map['id'] as num?)?.toInt() ?? 0,
+      username: hasUsername ? username! : displayName!,
+      displayName: hasDisplayName ? displayName : null,
+    );
+  }
+
+  return null;
+}
+
+String? _readCashierName(Map<String, dynamic> json, UserInfo? user) {
+  final candidates = [
+    json['cashierName'],
+    json['sellerName'],
+    json['createdByName'],
+    json['employeeName'],
+    json['userName'],
+    json['user_name'],
+    user?.displayName,
+    user?.username,
+  ];
+
+  for (final candidate in candidates) {
+    final value = candidate?.toString().trim();
+    if (value != null && value.isNotEmpty) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 class SaleDetailItem {
@@ -464,7 +520,8 @@ class SaleDetailItem {
       id: (json['id'] as num).toInt(),
       productId: (json['productId'] as num?)?.toInt(),
       productCodeSnapshot: json['productCodeSnapshot']?.toString(),
-      productNameSnapshot: json['productNameSnapshot']?.toString() ?? 'Producto',
+      productNameSnapshot:
+          json['productNameSnapshot']?.toString() ?? 'Producto',
       qty: (json['qty'] as num?)?.toDouble() ?? 0,
       unitPrice: (json['unitPrice'] as num?)?.toDouble() ?? 0,
       purchasePriceSnapshot:

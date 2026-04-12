@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/providers/sync_request_provider.dart';
 import '../../core/widgets/app_shell_scaffold.dart';
 import '../auth/data/auth_repository.dart';
 import '../auth/data/auth_state.dart';
@@ -23,15 +24,10 @@ class OwnerShell extends ConsumerStatefulWidget {
 
 class _OwnerShellState extends ConsumerState<OwnerShell> {
   static const _mainRoutes = ['/dashboard', '/products', '/inventory'];
-  final ProductsPageController _productsController = ProductsPageController();
 
   late final List<Widget> _pages = [
     const DashboardPage(key: PageStorageKey('tab_reportes')),
-    ProductsPage(
-      key: const PageStorageKey('tab_catalog'),
-      controller: _productsController,
-      showEmbeddedToolbar: false,
-    ),
+    const ProductsPage(key: PageStorageKey('tab_catalog')),
     const InventoryPage(key: PageStorageKey('tab_inventory')),
   ];
 
@@ -66,24 +62,115 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
 
   @override
   void dispose() {
-    _productsController.dispose();
     super.dispose();
   }
 
   String _titleForRoute(String route, {required int routeIndex}) {
     if (routeIndex == 0) return 'Reporte';
-    if (routeIndex == 1) return 'Catálogo';
+    if (routeIndex == 1) return 'Productos';
     if (routeIndex == 2) return 'Inventario';
 
+    if (route.startsWith('/settings')) return 'Configuración';
     if (route.startsWith('/sales/by-day')) return 'Ventas diarias';
     if (route.startsWith('/sales/list')) return 'Registro de ventas';
+    if (route.startsWith('/sales/detail')) return 'Ticket de venta';
     if (route.startsWith('/inventory')) return 'Inventario';
 
     return '';
   }
 
-  List<Widget> _buildAppBarActions(BuildContext context, AuthState authState) {
+  bool _isSecondaryRoute(String route, {required int routeIndex}) {
+    if (routeIndex >= 0) return false;
+    return route != '/login';
+  }
+
+  String _parentRouteFor(String route) {
+    if (route.startsWith('/sales/')) return '/dashboard';
+    if (route.startsWith('/products/')) return '/products';
+    if (route.startsWith('/inventory/')) return '/inventory';
+    return '/dashboard';
+  }
+
+  Widget? _buildBackButton(
+    BuildContext context, {
+    required String currentRoute,
+    required int routeIndex,
+  }) {
+    if (!_isSecondaryRoute(currentRoute, routeIndex: routeIndex)) {
+      return null;
+    }
+
+    final targetRoute = _parentRouteFor(currentRoute);
+    return IconButton(
+      tooltip: 'Regresar',
+      icon: const Icon(Icons.arrow_back_rounded),
+      onPressed: () {
+        context.go(targetRoute);
+      },
+    );
+  }
+
+  Future<void> _handleSyncAction(
+    BuildContext context, {
+    required _SyncMenuAction action,
+    required String currentRoute,
+  }) async {
+    if (action == _SyncMenuAction.currentScreen) {
+      ref.read(syncRequestProvider.notifier).syncCurrentScreen(currentRoute);
+    } else {
+      ref.read(syncRequestProvider.notifier).syncFullApp();
+    }
+
+    await _syncRealtimeConnections();
+    if (!context.mounted) return;
+
+    final message = action == _SyncMenuAction.currentScreen
+        ? 'Pantalla actual sincronizada.'
+        : 'Se lanzó una sincronización global.';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  List<Widget> _buildAppBarActions(
+    BuildContext context,
+    AuthState authState, {
+    required String currentRoute,
+  }) {
     return [
+      PopupMenuButton<_SyncMenuAction>(
+        tooltip: 'Sincronizar',
+        offset: const Offset(0, 10),
+        position: PopupMenuPosition.under,
+        icon: const Icon(Icons.sync_rounded),
+        onSelected: (value) => _handleSyncAction(
+          context,
+          action: value,
+          currentRoute: currentRoute,
+        ),
+        itemBuilder: (context) => const [
+          PopupMenuItem<_SyncMenuAction>(
+            value: _SyncMenuAction.currentScreen,
+            child: Row(
+              children: [
+                Icon(Icons.sync_outlined, size: 18),
+                SizedBox(width: 10),
+                Text('Solo esta pantalla'),
+              ],
+            ),
+          ),
+          PopupMenuItem<_SyncMenuAction>(
+            value: _SyncMenuAction.fullApp,
+            child: Row(
+              children: [
+                Icon(Icons.sync_alt_rounded, size: 18),
+                SizedBox(width: 10),
+                Text('Toda la app'),
+              ],
+            ),
+          ),
+        ],
+      ),
       Padding(
         padding: const EdgeInsets.only(right: 6),
         child: PopupMenuButton<_SessionMenuAction>(
@@ -136,6 +223,11 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
   }) {
     final title = _titleForRoute(currentRoute, routeIndex: routeIndex);
     final theme = Theme.of(context);
+    final leading = _buildBackButton(
+      context,
+      currentRoute: currentRoute,
+      routeIndex: routeIndex,
+    );
 
     if (routeIndex == 0) {
       return AppBar(
@@ -145,8 +237,13 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
         surfaceTintColor: Colors.transparent,
         backgroundColor: theme.colorScheme.surface,
         centerTitle: false,
+        leading: leading,
         titleSpacing: 12,
-        actions: _buildAppBarActions(context, authState),
+        actions: _buildAppBarActions(
+          context,
+          authState,
+          currentRoute: currentRoute,
+        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -180,39 +277,20 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
         surfaceTintColor: Colors.transparent,
         backgroundColor: theme.colorScheme.surface,
         centerTitle: false,
-        titleSpacing: 6,
-        title: SizedBox(
-          height: 36,
-          child: TextField(
-            controller: _productsController.searchController,
-            textInputAction: TextInputAction.search,
-            onChanged: (value) => _productsController.onChanged?.call(value),
-            onSubmitted: (_) => _productsController.onSearch?.call(),
-            decoration: InputDecoration(
-              hintText: 'Buscar productos',
-              isDense: true,
-              filled: true,
-              fillColor: theme.colorScheme.surfaceContainerLow,
-              prefixIcon: const Icon(Icons.search),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 8,
-              ),
-            ),
+        leading: leading,
+        titleSpacing: 12,
+        title: Text(
+          title,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.2,
           ),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.tune_outlined),
-            tooltip: 'Filtrar',
-            onPressed: () => _productsController.onFilter?.call(context),
-          ),
-          ..._buildAppBarActions(context, authState),
-        ],
+        actions: _buildAppBarActions(
+          context,
+          authState,
+          currentRoute: currentRoute,
+        ),
       );
     }
 
@@ -222,9 +300,14 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
       scrolledUnderElevation: 1,
       surfaceTintColor: Colors.transparent,
       backgroundColor: theme.colorScheme.surface,
+      leading: leading,
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
       centerTitle: false,
-      actions: _buildAppBarActions(context, authState),
+      actions: _buildAppBarActions(
+        context,
+        authState,
+        currentRoute: currentRoute,
+      ),
     );
   }
 
@@ -267,7 +350,7 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
       companyName: authState.companyName?.trim().isNotEmpty == true
           ? authState.companyName!.trim()
           : 'FULLPOS',
-      companySubtitle: null,
+      companySubtitle: _buildCompanySubtitle(authState),
       username: authState.displayName ?? authState.username,
       version: authState.ownerVersion,
       body: body,
@@ -282,6 +365,22 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
       },
     );
   }
+
+  String? _buildCompanySubtitle(AuthState authState) {
+    final details = <String>[];
+    final companyRnc = authState.companyRnc?.trim();
+    final companyId = authState.companyId?.toString();
+
+    if (companyRnc != null && companyRnc.isNotEmpty) {
+      details.add('RNC $companyRnc');
+    }
+    if (companyId != null && companyId.isNotEmpty) {
+      details.add('ID $companyId');
+    }
+
+    if (details.isEmpty) return null;
+    return details.join(' · ');
+  }
 }
 
 class _SessionInfoRow extends StatelessWidget {
@@ -295,11 +394,13 @@ class _SessionInfoRow extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow,
+        color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.85),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -309,6 +410,7 @@ class _SessionInfoRow extends StatelessWidget {
             style: theme.textTheme.labelMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w700,
+              letterSpacing: 0.25,
             ),
           ),
           const SizedBox(height: 4),
@@ -352,9 +454,7 @@ class _SessionInfoMenu extends StatelessWidget {
         .toList();
     if (parts.isEmpty) return 'U';
 
-    return parts
-        .map((part) => part.characters.first.toUpperCase())
-        .join();
+    return parts.map((part) => part.characters.first.toUpperCase()).join();
   }
 
   @override
@@ -385,11 +485,20 @@ class _SessionInfoMenu extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Text(
+            'OWNER PANEL',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.primary.withValues(alpha: 0.82),
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.1,
+            ),
+          ),
+          const SizedBox(height: 10),
           Row(
             children: [
               Container(
-                width: 46,
-                height: 46,
+                width: 52,
+                height: 52,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
@@ -401,7 +510,9 @@ class _SessionInfoMenu extends StatelessWidget {
                   ),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: theme.colorScheme.primary.withAlpha((0.16 * 255).round()),
+                    color: theme.colorScheme.primary.withAlpha(
+                      (0.16 * 255).round(),
+                    ),
                   ),
                 ),
                 alignment: Alignment.center,
@@ -410,11 +521,11 @@ class _SessionInfoMenu extends StatelessWidget {
                   style: theme.textTheme.titleMedium?.copyWith(
                     color: theme.colorScheme.primary,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: 0.2,
+                    letterSpacing: 0.3,
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -425,11 +536,11 @@ class _SessionInfoMenu extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.2,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.25,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       'Sesión activa',
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -442,10 +553,38 @@ class _SessionInfoMenu extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  height: 1,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        theme.colorScheme.primary.withValues(alpha: 0.22),
+                        theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
           Wrap(
             spacing: 8,
-            runSpacing: 0,
+            runSpacing: 8,
             children: [
               const SizedBox(
                 width: 136,
@@ -490,3 +629,5 @@ class _SessionInfoMenu extends StatelessWidget {
 }
 
 enum _SessionMenuAction { logout }
+
+enum _SyncMenuAction { currentScreen, fullApp }

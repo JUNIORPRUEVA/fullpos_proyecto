@@ -21,6 +21,7 @@ export const listProductsSchema = z.object({
 export const createProductSchema = z.object({
   code: z.string().trim().min(1, 'El codigo es requerido'),
   name: z.string().trim().min(1, 'El nombre es requerido'),
+  category: z.string().trim().max(120).optional(),
   description: z.string().trim().max(500).optional(),
   price: z.coerce.number().nonnegative(),
   cost: z.coerce.number().nonnegative().optional().default(0),
@@ -47,6 +48,7 @@ const syncOperationProductSchema = z.object({
   businessId: z.string().trim().min(1).optional().nullable(),
   code: z.string().trim().min(1, 'El codigo es requerido'),
   name: z.string().trim().min(1, 'El nombre es requerido'),
+  category: z.string().trim().max(120).optional().nullable(),
   price: z.coerce.number().nonnegative(),
   cost: z.coerce.number().nonnegative().optional().default(0),
   stock: z.coerce.number().nonnegative().optional().default(0),
@@ -89,6 +91,7 @@ export const syncProductsByRncSchema = z
         z.object({
           code: z.string().trim().min(1, 'El codigo es requerido'),
           name: z.string().trim().min(1, 'El nombre es requerido'),
+          category: z.string().trim().max(120).optional(),
           description: z.string().trim().max(500).optional(),
           price: z.coerce.number().nonnegative(),
           cost: z.coerce.number().nonnegative().optional(),
