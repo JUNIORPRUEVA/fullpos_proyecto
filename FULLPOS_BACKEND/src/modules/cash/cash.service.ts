@@ -5,6 +5,17 @@ function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function normalizeCashMovementType(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized == 'in' || normalized == 'entrada' || normalized == 'ingreso') {
+    return 'in';
+  }
+  if (normalized == 'out' || normalized == 'retiro' || normalized == 'salida' || normalized == 'egreso') {
+    return 'out';
+  }
+  return normalized;
+}
+
 async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
   const rnc = companyRnc?.trim() ?? '';
   const cloudId = companyCloudId?.trim() ?? '';
@@ -204,11 +215,12 @@ export async function syncCashByRnc(
     for (const m of movements ?? []) {
       const sessionId = sessionMap.get(m.sessionLocalId);
       if (!sessionId) continue;
+      const normalizedType = normalizeCashMovementType(m.type);
       const upserted = await tx.cashMovement.upsert({
         where: { companyId_localId: { companyId, localId: m.localId } },
         update: {
           sessionId,
-          type: m.type,
+          type: normalizedType,
           amount: m.amount,
           note: m.note ?? null,
           createdAt: new Date(m.createdAt),
@@ -217,7 +229,7 @@ export async function syncCashByRnc(
           companyId,
           localId: m.localId,
           sessionId,
-          type: m.type,
+          type: normalizedType,
           amount: m.amount,
           note: m.note ?? null,
           createdAt: new Date(m.createdAt),
@@ -235,7 +247,7 @@ export async function syncCashByRnc(
       const previous = movementMapBefore.get(m.localId) ?? null;
       const changed =
         !previous ||
-        previous.type !== upserted.type ||
+        normalizeCashMovementType(previous.type) !== upserted.type ||
         Number(previous.amount) !== Number(upserted.amount) ||
         previous.sessionId !== upserted.sessionId ||
         previous.createdAt.getTime() !== upserted.createdAt.getTime();
