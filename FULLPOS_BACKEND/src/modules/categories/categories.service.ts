@@ -1,4 +1,5 @@
 import { prisma } from '../../config/prisma';
+import { emitCategoryEvent } from '../../realtime/realtime.gateway';
 
 function normalizeRnc(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -87,6 +88,26 @@ export async function syncCategoriesByRnc(
       });
     }
   });
+
+  const syncedCategories = await prisma.category.findMany({
+    where: {
+      companyId,
+      localId: { in: categories.map((item) => item.localId) },
+    },
+  });
+
+  const categoriesByLocalId = new Map(
+    syncedCategories.map((item) => [item.localId, item]),
+  );
+  for (const input of categories) {
+    const category = categoriesByLocalId.get(input.localId);
+    if (category == null) continue;
+    await emitCategoryEvent({
+      companyId,
+      type: input.deletedAt != null ? 'category.deleted' : 'category.updated',
+      category,
+    });
+  }
 
   return { ok: true, upserted: categories.length, companyId };
 }

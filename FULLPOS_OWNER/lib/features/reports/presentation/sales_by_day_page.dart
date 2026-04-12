@@ -23,7 +23,6 @@ class SalesByDayPage extends ConsumerStatefulWidget {
 
 class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     with WidgetsBindingObserver {
-  Timer? _autoRefreshTimer;
   StreamSubscription<SaleRealtimeMessage>? _saleRealtimeSubscription;
   bool _reloadInProgress = false;
   bool _reloadRequested = false;
@@ -48,10 +47,6 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     final today = _dateOnly(DateTime.now());
     _from = today.subtract(const Duration(days: 6));
     _to = today;
-    _autoRefreshTimer = Timer.periodic(
-      const Duration(seconds: 60),
-      (_) => _load(showLoading: false),
-    );
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream
@@ -62,7 +57,6 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _autoRefreshTimer?.cancel();
     _saleRealtimeSubscription?.cancel();
     _clientCtrl.dispose();
     _cashierCtrl.dispose();

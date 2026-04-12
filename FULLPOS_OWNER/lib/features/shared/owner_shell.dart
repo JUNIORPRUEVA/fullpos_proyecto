@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/realtime/company_realtime_service.dart';
 import '../../core/providers/sync_request_provider.dart';
 import '../../core/widgets/app_shell_scaffold.dart';
 import '../auth/data/auth_repository.dart';
@@ -25,6 +26,9 @@ class OwnerShell extends ConsumerStatefulWidget {
 class _OwnerShellState extends ConsumerState<OwnerShell> {
   static const _mainRoutes = ['/dashboard', '/products', '/inventory'];
 
+  StreamSubscription<CompanyRealtimeMessage>? _companyRealtimeSubscription;
+  Timer? _realtimeRefreshDebounce;
+
   late final List<Widget> _pages = [
     const DashboardPage(key: PageStorageKey('tab_reportes')),
     const ProductsPage(key: PageStorageKey('tab_catalog')),
@@ -33,6 +37,7 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
 
   Future<void> _syncRealtimeConnections() async {
     final authState = ref.read(authRepositoryProvider);
+    final companyRealtime = ref.read(companyRealtimeServiceProvider);
     final productRealtime = ref.read(productRealtimeServiceProvider);
     final saleRealtime = ref.read(saleRealtimeServiceProvider);
 
@@ -41,20 +46,37 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
         (authState.refreshToken?.trim().isNotEmpty ?? false);
 
     if (!hasSession) {
+      companyRealtime.disconnect();
       productRealtime.disconnect();
       saleRealtime.disconnect();
       return;
     }
 
     await Future.wait<void>([
+      companyRealtime.connect(authState),
       productRealtime.connect(authState),
       saleRealtime.connect(authState),
     ]);
   }
 
+  void _bindCompanyRealtime() {
+    _companyRealtimeSubscription?.cancel();
+    _companyRealtimeSubscription = ref
+        .read(companyRealtimeServiceProvider)
+        .stream
+        .listen((_) {
+          _realtimeRefreshDebounce?.cancel();
+          _realtimeRefreshDebounce = Timer(
+            const Duration(milliseconds: 250),
+            () => ref.read(syncRequestProvider.notifier).syncFullApp(),
+          );
+        });
+  }
+
   @override
   void initState() {
     super.initState();
+    _bindCompanyRealtime();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_syncRealtimeConnections());
     });
@@ -62,6 +84,8 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
 
   @override
   void dispose() {
+    _realtimeRefreshDebounce?.cancel();
+    _companyRealtimeSubscription?.cancel();
     super.dispose();
   }
 
@@ -392,38 +416,59 @@ class _SessionInfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.78),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.85),
-        ),
-      ),
-      child: Column(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.25,
+          SizedBox(
+            width: 82,
+            child: Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.1,
+              ),
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                height: 1.15,
+                letterSpacing: -0.1,
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SessionDetailsPanel extends StatelessWidget {
+  const _SessionDetailsPanel({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.85),
+        ),
+      ),
+      child: Column(children: children),
     );
   }
 }
@@ -466,6 +511,40 @@ class _SessionInfoMenu extends StatelessWidget {
     final companyRnc = authState.companyRnc?.trim();
     final companyId = authState.companyId?.toString();
     final version = authState.ownerVersion?.trim();
+    final detailRows = <Widget>[
+      const _SessionInfoRow(label: 'Rol', value: 'Admin'),
+      if (companyId != null && companyId.isNotEmpty)
+        _buildSessionDetailRow(
+          label: 'ID empresa',
+          value: companyId,
+        ),
+      if (username != null && username.isNotEmpty)
+        _buildSessionDetailRow(
+          label: 'Usuario',
+          value: username,
+        ),
+      if (version != null && version.isNotEmpty)
+        _buildSessionDetailRow(
+          label: 'Versión',
+          value: version,
+        ),
+      if (email != null && email.isNotEmpty)
+        _buildSessionDetailRow(
+          label: 'Correo',
+          value: email,
+        ),
+      if (companyName != null && companyName.isNotEmpty)
+        _buildSessionDetailRow(
+          label: 'Empresa',
+          value: companyName,
+        ),
+      if (companyRnc != null && companyRnc.isNotEmpty)
+        _buildSessionDetailRow(
+          label: 'RNC',
+          value: companyRnc,
+          isLast: true,
+        ),
+    ];
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -490,15 +569,15 @@ class _SessionInfoMenu extends StatelessWidget {
             style: theme.textTheme.labelMedium?.copyWith(
               color: theme.colorScheme.primary.withValues(alpha: 0.82),
               fontWeight: FontWeight.w800,
-              letterSpacing: 1.1,
+              letterSpacing: 0.9,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Row(
             children: [
               Container(
-                width: 52,
-                height: 52,
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
@@ -536,16 +615,17 @@ class _SessionInfoMenu extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.25,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.35,
                       ),
                     ),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 1),
                     Text(
                       'Sesión activa',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                         fontWeight: FontWeight.w600,
+                        height: 1.05,
                       ),
                     ),
                   ],
@@ -553,7 +633,7 @@ class _SessionInfoMenu extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Row(
             children: [
               Container(
@@ -581,51 +661,28 @@ class _SessionInfoMenu extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              const SizedBox(
-                width: 136,
-                child: _SessionInfoRow(label: 'Rol', value: 'Admin'),
-              ),
-              if (companyId != null && companyId.isNotEmpty)
-                SizedBox(
-                  width: 136,
-                  child: _SessionInfoRow(label: 'ID empresa', value: companyId),
-                ),
-              if (username != null && username.isNotEmpty)
-                SizedBox(
-                  width: 136,
-                  child: _SessionInfoRow(label: 'Usuario', value: username),
-                ),
-              if (version != null && version.isNotEmpty)
-                SizedBox(
-                  width: 136,
-                  child: _SessionInfoRow(label: 'Versión', value: version),
-                ),
-              if (email != null && email.isNotEmpty)
-                SizedBox(
-                  width: 280,
-                  child: _SessionInfoRow(label: 'Correo', value: email),
-                ),
-              if (companyName != null && companyName.isNotEmpty)
-                SizedBox(
-                  width: 280,
-                  child: _SessionInfoRow(label: 'Empresa', value: companyName),
-                ),
-              if (companyRnc != null && companyRnc.isNotEmpty)
-                SizedBox(
-                  width: 280,
-                  child: _SessionInfoRow(label: 'RNC', value: companyRnc),
-                ),
-            ],
+          const SizedBox(height: 12),
+          _SessionDetailsPanel(
+            children: detailRows,
           ),
         ],
       ),
     );
   }
+}
+
+Widget _buildSessionDetailRow({
+  required String label,
+  required String value,
+  bool isLast = false,
+}) {
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      _SessionInfoRow(label: label, value: value),
+      if (!isLast) const Divider(height: 1),
+    ],
+  );
 }
 
 enum _SessionMenuAction { logout }

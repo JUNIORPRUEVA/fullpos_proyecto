@@ -23,12 +23,9 @@ class SalesListPage extends ConsumerStatefulWidget {
 
 class _SalesListPageState extends ConsumerState<SalesListPage>
     with WidgetsBindingObserver {
-  Timer? _autoRefreshTimer;
   StreamSubscription<SaleRealtimeMessage>? _saleRealtimeSubscription;
   bool _refreshInFlight = false;
   bool _reloadRequested = false;
-
-  static const Duration _autoRefreshInterval = Duration(seconds: 60);
 
   PaginatedSales? _page;
   SalesSummary? _summary;
@@ -47,9 +44,6 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
     _from = widget.initialFrom ?? todayStart;
     WidgetsBinding.instance.addObserver(this);
     _load(page: 1, showLoading: true);
-    _autoRefreshTimer = Timer.periodic(_autoRefreshInterval, (_) {
-      _load(page: _currentPage, showLoading: false);
-    });
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream
@@ -58,7 +52,6 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
 
   @override
   void dispose() {
-    _autoRefreshTimer?.cancel();
     _saleRealtimeSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();

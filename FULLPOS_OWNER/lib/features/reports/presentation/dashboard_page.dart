@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/accounting_format.dart';
 import '../../auth/data/auth_repository.dart';
@@ -23,9 +24,6 @@ class DashboardPage extends ConsumerStatefulWidget {
 
 class _DashboardPageState extends ConsumerState<DashboardPage>
     with WidgetsBindingObserver {
-  static const _refreshInterval = Duration(seconds: 60);
-
-  Timer? _autoRefreshTimer;
   StreamSubscription<SaleRealtimeMessage>? _saleRealtimeSubscription;
   bool _refreshInFlight = false;
   bool _reloadRequested = false;
@@ -50,9 +48,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     _to = now;
     WidgetsBinding.instance.addObserver(this);
     _load(showLoading: true);
-    _autoRefreshTimer = Timer.periodic(_refreshInterval, (_) {
-      _load(showLoading: false);
-    });
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream
@@ -61,7 +56,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
 
   @override
   void dispose() {
-    _autoRefreshTimer?.cancel();
     _saleRealtimeSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -454,6 +448,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
+      if (previous?.revision == next.revision) return;
+      if (!next.appliesTo('/dashboard')) return;
+      unawaited(_load(showLoading: false));
+    });
+
     final theme = Theme.of(context);
     final authState = ref.watch(authRepositoryProvider);
     final appConfig = ref.watch(appConfigProvider);

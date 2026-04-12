@@ -49,7 +49,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
   late final TextEditingController _searchCtrl =
       widget.controller?.searchController ?? TextEditingController();
   Timer? _searchDebounce;
-  Timer? _autoRefreshTimer;
   StreamSubscription<ProductRealtimeMessage>? _productRealtimeSubscription;
   bool _refreshInFlight = false;
   bool _reloadRequested = false;
@@ -59,8 +58,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
   String? _error;
   String? _selectedCategory;
   List<String> _syncedCategories = const [];
-
-  static const Duration _autoRefreshInterval = Duration(seconds: 30);
 
   @override
   void initState() {
@@ -80,10 +77,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
     }
 
     _load(showLoading: true);
-    _autoRefreshTimer = Timer.periodic(_autoRefreshInterval, (_) {
-      // Silent refresh so UI doesn't flicker.
-      _load(showLoading: false);
-    });
     _productRealtimeSubscription = ref
         .read(productRealtimeServiceProvider)
         .stream
@@ -99,7 +92,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
       _searchCtrl.dispose();
     }
     _searchDebounce?.cancel();
-    _autoRefreshTimer?.cancel();
     _productRealtimeSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();

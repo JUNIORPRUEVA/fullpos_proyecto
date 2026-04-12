@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../auth/data/auth_repository.dart';
 import '../../../core/config/app_config.dart';
+import '../../auth/data/auth_repository.dart';
 import '../../../core/widgets/app_background.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
@@ -17,7 +17,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _obscure = true;
-  bool _showServerSettings = false;
   String? _error;
 
   @override
@@ -45,7 +44,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authRepositoryProvider);
-    final appConfig = ref.watch(appConfigProvider);
     final theme = Theme.of(context);
 
     return PopScope(
@@ -108,55 +106,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                             ],
                           ),
                           const SizedBox(height: 24),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton.icon(
-                              onPressed: authState.loading
-                                  ? null
-                                  : () => setState(() {
-                                      _showServerSettings =
-                                          !_showServerSettings;
-                                    }),
-                              icon: Icon(
-                                _showServerSettings
-                                    ? Icons.expand_less
-                                    : Icons.tune,
-                              ),
-                              label: const Text('Servidor'),
-                            ),
-                          ),
-                          if (_showServerSettings) ...[
-                            TextFormField(
-                              initialValue: enforcedOwnerBackendBaseUrl,
-                              readOnly: true,
-                              enableInteractiveSelection: true,
-                              decoration: const InputDecoration(
-                                labelText: 'URL backend Owner',
-                                prefixIcon: Icon(Icons.cloud_outlined),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Activa: ${appConfig.baseUrl}',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Esta app usa de forma fija el backend oficial.',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                          ],
                           TextFormField(
                             controller: _userCtrl,
                             decoration: const InputDecoration(

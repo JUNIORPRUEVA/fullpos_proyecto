@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/config/app_config.dart';
+import '../../../core/realtime/company_realtime_service.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/providers/theme_provider.dart';
 import '../../auth/data/auth_repository.dart';
@@ -32,12 +32,15 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
       ref.read(syncRequestProvider.notifier).syncFullApp();
       final authState = ref.read(authRepositoryProvider);
       await Future.wait<void>([
+        ref.read(companyRealtimeServiceProvider).connect(authState),
         ref.read(productRealtimeServiceProvider).connect(authState),
         ref.read(saleRealtimeServiceProvider).connect(authState),
       ]);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Datos actualizados y conexiones reanudadas.')),
+        const SnackBar(
+          content: Text('Datos actualizados y conexiones reanudadas.'),
+        ),
       );
     } finally {
       if (mounted) {
@@ -75,7 +78,7 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
     final scheme = theme.colorScheme;
     final authState = ref.watch(authRepositoryProvider);
     final themeMode = ref.watch(themeModeProvider);
-    final appConfig = ref.watch(appConfigProvider);
+    final companyRealtime = ref.read(companyRealtimeServiceProvider);
     final productRealtime = ref.read(productRealtimeServiceProvider);
     final saleRealtime = ref.read(saleRealtimeServiceProvider);
 
@@ -89,18 +92,17 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
             children: [
               _SettingsHeroCard(
                 companyName: authState.companyName ?? 'FULLPOS Owner',
-                username: authState.displayName ?? authState.username ?? 'Usuario',
+                username:
+                    authState.displayName ?? authState.username ?? 'Usuario',
                 version: authState.ownerVersion ?? '1.0.0',
               ),
               const SizedBox(height: 16),
               _SettingsSection(
                 title: 'Apariencia',
-                subtitle: 'Configura como quieres ver FULLPOS Owner en este dispositivo.',
                 child: Column(
                   children: [
                     _ThemeModeTile(
                       title: 'Modo claro',
-                      subtitle: 'Interfaz luminosa para uso diurno.',
                       icon: Icons.light_mode_rounded,
                       selected: themeMode == ThemeMode.light,
                       onTap: () => _setThemeMode(ThemeMode.light),
@@ -108,7 +110,6 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
                     const SizedBox(height: 10),
                     _ThemeModeTile(
                       title: 'Modo oscuro',
-                      subtitle: 'Reduce brillo y resalta el contenido en ambientes oscuros.',
                       icon: Icons.dark_mode_rounded,
                       selected: themeMode == ThemeMode.dark,
                       onTap: () => _setThemeMode(ThemeMode.dark),
@@ -119,24 +120,33 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
               const SizedBox(height: 16),
               _SettingsSection(
                 title: 'Datos y sincronización',
-                subtitle: 'Usa estas acciones para pedir una actualización manual y revisar el estado actual.',
                 child: Column(
                   children: [
                     Row(
                       children: [
                         Expanded(
                           child: _InfoStatCard(
-                            label: 'Productos realtime',
-                            value: productRealtime.connectionState,
-                            emphasized: productRealtime.connectionState == 'connected',
+                            label: 'Global realtime',
+                            value: companyRealtime.connectionState,
+                            emphasized:
+                                companyRealtime.connectionState == 'connected',
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: _InfoStatCard(
+                            label: 'Productos realtime',
+                            value: productRealtime.connectionState,
+                            emphasized:
+                                productRealtime.connectionState == 'connected',
+                          ),
+                        ),
+                        Expanded(
+                          child: _InfoStatCard(
                             label: 'Ventas realtime',
                             value: saleRealtime.connectionState,
-                            emphasized: saleRealtime.connectionState == 'connected',
+                            emphasized:
+                                saleRealtime.connectionState == 'connected',
                           ),
                         ),
                       ],
@@ -149,17 +159,23 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
                             onPressed: _refreshingData ? null : _refreshAllData,
                             icon: const Icon(Icons.sync_rounded),
                             label: Text(
-                              _refreshingData ? 'Actualizando...' : 'Actualizar datos',
+                              _refreshingData
+                                  ? 'Actualizando...'
+                                  : 'Actualizar datos',
                             ),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: _refreshingSession ? null : _refreshSession,
+                            onPressed: _refreshingSession
+                                ? null
+                                : _refreshSession,
                             icon: const Icon(Icons.verified_user_outlined),
                             label: Text(
-                              _refreshingSession ? 'Verificando...' : 'Verificar sesión',
+                              _refreshingSession
+                                  ? 'Verificando...'
+                                  : 'Verificar sesión',
                             ),
                           ),
                         ),
@@ -171,29 +187,43 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
               const SizedBox(height: 16),
               _SettingsSection(
                 title: 'Cuenta y empresa',
-                subtitle: 'Información principal de la cuenta conectada en este momento.',
                 child: Column(
                   children: [
-                    _InfoRow(label: 'Empresa', value: authState.companyName ?? 'No disponible'),
-                    _InfoRow(label: 'Usuario', value: authState.username ?? 'No disponible'),
-                    _InfoRow(label: 'Nombre', value: authState.displayName ?? 'No disponible'),
-                    _InfoRow(label: 'Correo', value: authState.email ?? 'No disponible'),
-                    _InfoRow(label: 'RNC', value: authState.companyRnc ?? 'No disponible'),
-                    _InfoRow(label: 'Servidor', value: appConfig.baseUrl),
+                    _InfoRow(
+                      label: 'Empresa',
+                      value: authState.companyName ?? 'No disponible',
+                    ),
+                    _InfoRow(
+                      label: 'Usuario',
+                      value: authState.username ?? 'No disponible',
+                    ),
+                    _InfoRow(
+                      label: 'Nombre',
+                      value: authState.displayName ?? 'No disponible',
+                    ),
+                    _InfoRow(
+                      label: 'Correo',
+                      value: authState.email ?? 'No disponible',
+                    ),
+                    _InfoRow(
+                      label: 'RNC',
+                      value: authState.companyRnc ?? 'No disponible',
+                    ),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
               _SettingsSection(
                 title: 'Seguridad',
-                subtitle: 'Acciones importantes para proteger el acceso a la cuenta.',
                 child: Column(
                   children: [
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: scheme.errorContainer.withAlpha((0.45 * 255).round()),
+                        color: scheme.errorContainer.withAlpha(
+                          (0.45 * 255).round(),
+                        ),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
                           color: scheme.error.withAlpha((0.20 * 255).round()),
@@ -205,7 +235,7 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              'Si usas este dispositivo en un lugar compartido, cierra la sesión al terminar.',
+                              'Cierra la sesión al terminar de usar este dispositivo.',
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: scheme.onSurface,
                                 fontWeight: FontWeight.w600,
@@ -224,7 +254,9 @@ class _OwnerSettingsPageState extends ConsumerState<OwnerSettingsPage> {
                         label: const Text('Cerrar sesión'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: scheme.error,
-                          side: BorderSide(color: scheme.error.withAlpha((0.35 * 255).round())),
+                          side: BorderSide(
+                            color: scheme.error.withAlpha((0.35 * 255).round()),
+                          ),
                         ),
                       ),
                     ),
@@ -280,7 +312,11 @@ class _SettingsHeroCard extends StatelessWidget {
               color: scheme.primary,
               borderRadius: BorderRadius.circular(18),
             ),
-            child: Icon(Icons.settings_rounded, color: scheme.onPrimary, size: 28),
+            child: Icon(
+              Icons.settings_rounded,
+              color: scheme.onPrimary,
+              size: 28,
+            ),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -326,14 +362,9 @@ class _SettingsHeroCard extends StatelessWidget {
 }
 
 class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({
-    required this.title,
-    required this.subtitle,
-    required this.child,
-  });
+  const _SettingsSection({required this.title, required this.child});
 
   final String title;
-  final String subtitle;
   final Widget child;
 
   @override
@@ -357,14 +388,6 @@ class _SettingsSection extends StatelessWidget {
               fontWeight: FontWeight.w900,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
           const SizedBox(height: 14),
           child,
         ],
@@ -376,14 +399,12 @@ class _SettingsSection extends StatelessWidget {
 class _ThemeModeTile extends StatelessWidget {
   const _ThemeModeTile({
     required this.title,
-    required this.subtitle,
     required this.icon,
     required this.selected,
     required this.onTap,
   });
 
   final String title;
-  final String subtitle;
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
@@ -419,7 +440,10 @@ class _ThemeModeTile extends StatelessWidget {
                     : scheme.surface,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: Icon(icon, color: selected ? scheme.primary : scheme.onSurface),
+              child: Icon(
+                icon,
+                color: selected ? scheme.primary : scheme.onSurface,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -430,14 +454,6 @@ class _ThemeModeTile extends StatelessWidget {
                     title,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],

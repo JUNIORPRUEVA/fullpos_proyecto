@@ -14,26 +14,32 @@ class CategoriesRepository {
   final Dio _dio;
 
   Future<List<String>> list() async {
-    final response = await _dio.get('/api/categories');
-    final body = response.data;
-    if (body is! Map) return const [];
+    try {
+      final response = await _dio.get('/api/categories');
+      final body = response.data;
+      if (body is! Map) return const [];
 
-    final data = body['data'];
-    if (data is! List) return const [];
+      final data = body['data'];
+      if (data is! List) return const [];
 
-    final categories = data
-        .map((item) {
-          if (item is! Map) return null;
-          final rawName = item['name'];
-          if (rawName is! String) return null;
-          final normalized = rawName.trim();
-          return normalized.isEmpty ? null : normalized;
-        })
-        .whereType<String>()
-        .toSet()
-        .toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      final categories = data
+          .map((item) {
+            if (item is! Map) return null;
+            final rawName = item['name'];
+            if (rawName is! String) return null;
+            final normalized = rawName.trim();
+            return normalized.isEmpty ? null : normalized;
+          })
+          .whereType<String>()
+          .toSet()
+          .toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
-    return categories;
+      return categories;
+    } on DioException {
+      return const [];
+    } catch (_) {
+      return const [];
+    }
   }
 }

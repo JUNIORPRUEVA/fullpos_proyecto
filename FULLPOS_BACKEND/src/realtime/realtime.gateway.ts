@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import http from 'http';
 import jwt from 'jsonwebtoken';
-import { Product } from '@prisma/client';
+import { Category, Product } from '@prisma/client';
 import { Server } from 'socket.io';
 import env, { corsOrigins } from '../config/env';
 import { prisma } from '../config/prisma';
@@ -13,11 +13,27 @@ type ProductEventType =
   | 'product.deleted'
   | 'product.stock_updated';
 
+type CategoryEventType =
+  | 'category.created'
+  | 'category.updated'
+  | 'category.deleted';
+
 type SaleEventType = 'sale.created' | 'sale.updated' | 'sale.deleted';
 
 type QuoteEventType = 'quote.created' | 'quote.updated' | 'quote.deleted';
 
 type CashEventType = 'cash.session.updated' | 'cash.movement.updated';
+
+type CompanyDataEntity =
+  | 'users'
+  | 'company_config'
+  | 'clients'
+  | 'categories'
+  | 'suppliers'
+  | 'products'
+  | 'sales'
+  | 'cash'
+  | 'quotes';
 
 let ioInstance: Server | null = null;
 
@@ -73,6 +89,7 @@ function serializeProduct(product: Product) {
     localId: product.localId,
     code: product.code,
     name: product.name,
+    category: product.category,
     description: product.description,
     price: Number(product.price),
     cost: Number(product.cost),
@@ -84,6 +101,18 @@ function serializeProduct(product: Product) {
     updatedAt: product.updatedAt.toISOString(),
     createdAt: product.createdAt.toISOString(),
     deletedAt: product.deletedAt?.toISOString() ?? null,
+  };
+}
+
+function serializeCategory(category: Category) {
+  return {
+    id: category.id,
+    localId: category.localId,
+    name: category.name,
+    isActive: category.isActive,
+    createdAt: category.createdAt.toISOString(),
+    updatedAt: category.updatedAt.toISOString(),
+    deletedAt: category.deletedAt?.toISOString() ?? null,
   };
 }
 
@@ -170,6 +199,32 @@ export async function emitProductEvent(params: {
     type: params.type,
     product: serializeProduct(params.product),
   });
+
+  await emitCompanyDataChangeEvent({
+    companyId: params.companyId,
+    entity: 'products',
+    action: params.type,
+  });
+}
+
+export async function emitCategoryEvent(params: {
+  companyId: number;
+  type: CategoryEventType;
+  category: Category;
+}) {
+  if (!ioInstance) return;
+
+  ioInstance.to(companyRoom(params.companyId)).emit('category.event', {
+    eventId: crypto.randomUUID(),
+    type: params.type,
+    category: serializeCategory(params.category),
+  });
+
+  await emitCompanyDataChangeEvent({
+    companyId: params.companyId,
+    entity: 'categories',
+    action: params.type,
+  });
 }
 
 export async function emitSaleEvent(params: {
@@ -183,6 +238,12 @@ export async function emitSaleEvent(params: {
     eventId: crypto.randomUUID(),
     type: params.type,
     sale: params.sale,
+  });
+
+  await emitCompanyDataChangeEvent({
+    companyId: params.companyId,
+    entity: 'sales',
+    action: params.type,
   });
 }
 
@@ -198,6 +259,12 @@ export async function emitQuoteEvent(params: {
     type: params.type,
     quote: params.quote,
   });
+
+  await emitCompanyDataChangeEvent({
+    companyId: params.companyId,
+    entity: 'quotes',
+    action: params.type,
+  });
 }
 
 export async function emitCashEvent(params: {
@@ -211,5 +278,26 @@ export async function emitCashEvent(params: {
     eventId: crypto.randomUUID(),
     type: params.type,
     cash: params.cash,
+  });
+
+  await emitCompanyDataChangeEvent({
+    companyId: params.companyId,
+    entity: 'cash',
+    action: params.type,
+  });
+}
+
+export async function emitCompanyDataChangeEvent(params: {
+  companyId: number;
+  entity: CompanyDataEntity;
+  action: string;
+}) {
+  if (!ioInstance) return;
+
+  ioInstance.to(companyRoom(params.companyId)).emit('company.data_changed', {
+    eventId: crypto.randomUUID(),
+    entity: params.entity,
+    action: params.action,
+    occurredAt: new Date().toISOString(),
   });
 }

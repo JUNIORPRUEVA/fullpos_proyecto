@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
+import { emitCompanyDataChangeEvent } from '../../realtime/realtime.gateway';
 import { syncSuppliersByRncSchema } from './suppliers.validation';
 import { syncSuppliersByRnc } from './suppliers.service';
 
@@ -15,6 +16,11 @@ router.post('/sync/by-rnc', overrideKeyGuard, validate(syncSuppliersByRncSchema)
       count: Array.isArray(suppliers) ? suppliers.length : 0,
     });
     const result = await syncSuppliersByRnc(companyRnc, companyCloudId, suppliers ?? []);
+    await emitCompanyDataChangeEvent({
+      companyId: result.companyId,
+      entity: 'suppliers',
+      action: 'suppliers.synced',
+    });
     res.json(result);
   } catch (err) {
     next(err);

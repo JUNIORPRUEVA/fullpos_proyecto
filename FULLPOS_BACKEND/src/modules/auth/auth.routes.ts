@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
+import { emitCompanyDataChangeEvent } from '../../realtime/realtime.gateway';
 import { validate } from '../../middlewares/validate';
 import {
   loginSchema,
@@ -91,6 +92,13 @@ router.post('/sync-users', overrideKeyGuard, validate(syncUsersSchema), async (r
   try {
     const { companyRnc, companyCloudId, companyName, users } = req.body;
     const result = await syncUsers({ companyRnc, companyCloudId, companyName, users });
+    if (typeof result?.companyId === 'number') {
+      await emitCompanyDataChangeEvent({
+        companyId: result.companyId,
+        entity: 'users',
+        action: 'users.synced',
+      });
+    }
     res.json(result);
   } catch (err) {
     next(err);

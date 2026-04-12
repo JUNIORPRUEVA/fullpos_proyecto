@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { dangerRateLimit } from '../../middlewares/dangerRateLimit';
+import { emitCompanyDataChangeEvent } from '../../realtime/realtime.gateway';
 import { validate } from '../../middlewares/validate';
 import env from '../../config/env';
 import {
@@ -56,6 +57,13 @@ router.put(
         ...payload,
         companyCloudId,
       });
+      if (typeof updated?.id === 'number') {
+        await emitCompanyDataChangeEvent({
+          companyId: updated.id,
+          entity: 'company_config',
+          action: 'company_config.updated',
+        });
+      }
       res.json(updated);
     } catch (err) {
       next(err);
