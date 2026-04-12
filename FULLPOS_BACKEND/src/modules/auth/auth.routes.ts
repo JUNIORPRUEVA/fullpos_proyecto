@@ -92,9 +92,9 @@ router.post('/sync-users', overrideKeyGuard, validate(syncUsersSchema), async (r
   try {
     const { companyRnc, companyCloudId, companyName, users } = req.body;
     const result = await syncUsers({ companyRnc, companyCloudId, companyName, users });
-    if (typeof result?.companyId === 'number') {
+    if (typeof result.company?.id === 'number') {
       await emitCompanyDataChangeEvent({
-        companyId: result.companyId,
+        companyId: result.company.id,
         entity: 'users',
         action: 'users.synced',
       });

@@ -57,9 +57,9 @@ router.put(
         ...payload,
         companyCloudId,
       });
-      if (typeof updated?.id === 'number') {
+      if (typeof updated?.companyId === 'number') {
         await emitCompanyDataChangeEvent({
-          companyId: updated.id,
+          companyId: updated.companyId,
           entity: 'company_config',
           action: 'company_config.updated',
         });
