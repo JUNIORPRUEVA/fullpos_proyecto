@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { parseRange, ensureRangeWithinDays } from '../../utils/date';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -5,35 +6,57 @@ import { buildPagination } from '../../utils/pagination';
 
 const MAX_RANGE_DAYS = 365;
 const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
+const REPORT_SALE_KINDS = ['invoice', 'sale'];
 const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND', 'REFUNDED'] as const;
 
-function getReportSalesWhere(companyId: number, fromDate: Date, toDate: Date) {
+const reportSaleInclude = {
+  session: {
+    select: {
+      status: true,
+      openedAt: true,
+    },
+  },
+  createdBy: {
+    select: {
+      id: true,
+      username: true,
+      displayName: true,
+    },
+  },
+} satisfies Prisma.SaleInclude;
+
+type ReportSaleRow = Prisma.SaleGetPayload<{
+  include: typeof reportSaleInclude;
+}>;
+
+function getReportSalesWhere(companyId: number, fromDate: Date, toDate: Date): Prisma.SaleWhereInput {
   return {
     companyId,
-    kind: { in: ['invoice', 'sale'] },
+    kind: { in: [...REPORT_SALE_KINDS] },
     status: { in: [...REPORT_SALE_STATUSES] },
     deletedAt: null,
     createdAt: { gte: fromDate, lte: toDate },
-  } as const;
+  };
 }
 
-function getReportExpensesWhere(companyId: number, fromDate: Date, toDate: Date) {
+function getReportExpensesWhere(
+  companyId: number,
+  fromDate: Date,
+  toDate: Date,
+): Prisma.CashMovementWhereInput {
   return {
     companyId,
     type: 'out',
     movementType: 'expense',
     affectsProfit: true,
     createdAt: { gte: fromDate, lte: toDate },
-  } as const;
+  };
 }
 
 async function listReportSales(companyId: number, fromDate: Date, toDate: Date) {
-  const rows = await prisma.sale.findMany({
+  const rows: ReportSaleRow[] = await prisma.sale.findMany({
     where: getReportSalesWhere(companyId, fromDate, toDate),
-    include: {
-      session: true,
-      createdBy: { select: { id: true, username: true, displayName: true } },
-    },
+    include: reportSaleInclude,
     orderBy: { createdAt: 'desc' },
   });
 
