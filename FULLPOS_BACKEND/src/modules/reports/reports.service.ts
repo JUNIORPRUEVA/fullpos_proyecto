@@ -1,4 +1,3 @@
-import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { parseRange, ensureRangeWithinDays } from '../../utils/date';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -8,32 +7,24 @@ const MAX_RANGE_DAYS = 365;
 const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
 const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND', 'REFUNDED'] as const;
 
-function getReportSalesWhere(
-  companyId: number,
-  fromDate: Date,
-  toDate: Date,
-): Prisma.SaleWhereInput {
+function getReportSalesWhere(companyId: number, fromDate: Date, toDate: Date) {
   return {
     companyId,
     kind: { in: ['invoice', 'sale'] },
     status: { in: [...REPORT_SALE_STATUSES] },
     deletedAt: null,
     createdAt: { gte: fromDate, lte: toDate },
-  };
+  } as const;
 }
 
-function getReportExpensesWhere(
-  companyId: number,
-  fromDate: Date,
-  toDate: Date,
-): Prisma.CashMovementWhereInput {
+function getReportExpensesWhere(companyId: number, fromDate: Date, toDate: Date) {
   return {
     companyId,
     type: 'out',
     movementType: 'expense',
     affectsProfit: true,
     createdAt: { gte: fromDate, lte: toDate },
-  };
+  } as const;
 }
 
 async function listReportSales(companyId: number, fromDate: Date, toDate: Date) {
