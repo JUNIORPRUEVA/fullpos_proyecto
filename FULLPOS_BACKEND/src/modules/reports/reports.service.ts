@@ -6,17 +6,6 @@ import { buildPagination } from '../../utils/pagination';
 const MAX_RANGE_DAYS = 365;
 const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
 const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND', 'REFUNDED'] as const;
-const REPORT_CASH_EXPENSE_TYPES = [
-  'out',
-  'OUT',
-  'retiro',
-  'RETIRO',
-  'salida',
-  'SALIDA',
-  'egreso',
-  'EGRESO',
-] as const;
-
 function toNumber(value: any) {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return value;
@@ -184,7 +173,9 @@ export async function getSalesSummary(companyId: number, from: string, to: strin
         _sum: { amount: true },
         where: {
           companyId,
-          type: { in: [...REPORT_CASH_EXPENSE_TYPES] },
+          type: 'out',
+          movementType: 'expense',
+          affectsProfit: true,
           createdAt: { gte: fromDate, lte: toDate },
         },
       }),
@@ -399,7 +390,9 @@ export async function getSaleDetail(companyId: number, saleId: number) {
           where: {
             companyId,
             sessionId: sale.sessionId,
-            type: { in: [...REPORT_CASH_EXPENSE_TYPES] },
+            type: 'out',
+            movementType: 'expense',
+            affectsProfit: true,
           },
         }),
       ])

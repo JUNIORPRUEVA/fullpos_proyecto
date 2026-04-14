@@ -27,6 +27,8 @@ export const syncCashByRncSchema = z
           localId: z.coerce.number().int().positive(),
           sessionLocalId: z.coerce.number().int().positive(),
           type: z.string().trim().min(1).max(10),
+          movementType: z.enum(['expense', 'owner_draw', 'transfer']).optional().default('expense'),
+          affectsProfit: z.coerce.boolean().optional(),
           amount: z.coerce.number(),
           note: z.string().trim().max(500).optional().nullable(),
           createdAt: z.string().datetime(),

@@ -469,7 +469,7 @@ UserInfo? _readSaleUser(Map<String, dynamic> json) {
 
     return UserInfo(
       id: (map['id'] as num?)?.toInt() ?? 0,
-      username: hasUsername ? username! : displayName!,
+      username: hasUsername ? username : displayName!,
       displayName: hasDisplayName ? displayName : null,
     );
   }

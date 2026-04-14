@@ -11,17 +11,6 @@ function toNumber(value: any) {
   return Number(value);
 }
 
-const cashExpenseTypes = [
-  'out',
-  'OUT',
-  'retiro',
-  'RETIRO',
-  'salida',
-  'SALIDA',
-  'egreso',
-  'EGRESO',
-];
-
 export async function getExpensesSummary(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
@@ -31,7 +20,9 @@ export async function getExpensesSummary(companyId: number, from: string, to: st
     _count: { _all: true },
     where: {
       companyId,
-      type: { in: cashExpenseTypes },
+      type: 'out',
+      movementType: 'expense',
+      affectsProfit: true,
       createdAt: { gte: fromDate, lte: toDate },
     },
   });

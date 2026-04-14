@@ -16,6 +16,14 @@ function normalizeCashMovementType(value: string) {
   return normalized;
 }
 
+function normalizeCashMovementAccountingType(value?: string | null) {
+  const normalized = value?.trim().toLowerCase() ?? 'expense';
+  if (normalized === 'expense' || normalized === 'owner_draw' || normalized === 'transfer') {
+    return normalized;
+  }
+  return 'expense';
+}
+
 async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
   const rnc = companyRnc?.trim() ?? '';
   const cloudId = companyCloudId?.trim() ?? '';
@@ -77,6 +85,8 @@ export type SyncCashMovementInput = {
   localId: number;
   sessionLocalId: number;
   type: string;
+  movementType?: string;
+  affectsProfit?: boolean;
   amount: number;
   note?: string | null;
   createdAt: string;
@@ -119,6 +129,8 @@ export async function syncCashByRnc(
       id: true,
       localId: true,
       type: true,
+      movementType: true,
+      affectsProfit: true,
       amount: true,
       createdAt: true,
       sessionId: true,
@@ -216,11 +228,17 @@ export async function syncCashByRnc(
       const sessionId = sessionMap.get(m.sessionLocalId);
       if (!sessionId) continue;
       const normalizedType = normalizeCashMovementType(m.type);
+      const movementType = normalizeCashMovementAccountingType(m.movementType);
+      const affectsProfit = normalizedType === 'out'
+        ? (m.affectsProfit ?? movementType === 'expense')
+        : false;
       const upserted = await tx.cashMovement.upsert({
         where: { companyId_localId: { companyId, localId: m.localId } },
         update: {
           sessionId,
           type: normalizedType,
+          movementType,
+          affectsProfit,
           amount: m.amount,
           note: m.note ?? null,
           createdAt: new Date(m.createdAt),
@@ -230,6 +248,8 @@ export async function syncCashByRnc(
           localId: m.localId,
           sessionId,
           type: normalizedType,
+          movementType,
+          affectsProfit,
           amount: m.amount,
           note: m.note ?? null,
           createdAt: new Date(m.createdAt),
@@ -238,6 +258,8 @@ export async function syncCashByRnc(
           id: true,
           localId: true,
           type: true,
+          movementType: true,
+          affectsProfit: true,
           amount: true,
           createdAt: true,
           sessionId: true,
@@ -248,6 +270,8 @@ export async function syncCashByRnc(
       const changed =
         !previous ||
         normalizeCashMovementType(previous.type) !== upserted.type ||
+        (previous as any).movementType !== upserted.movementType ||
+        Boolean((previous as any).affectsProfit) !== upserted.affectsProfit ||
         Number(previous.amount) !== Number(upserted.amount) ||
         previous.sessionId !== upserted.sessionId ||
         previous.createdAt.getTime() !== upserted.createdAt.getTime();
@@ -259,6 +283,8 @@ export async function syncCashByRnc(
             localId: upserted.localId,
             sessionId: upserted.sessionId,
             type: upserted.type,
+            movementType: upserted.movementType,
+            affectsProfit: upserted.affectsProfit,
             amount: upserted.amount,
             createdAt: upserted.createdAt,
           },

@@ -455,7 +455,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     final chartData = _byDay.length > 30
         ? _byDay.sublist(_byDay.length - 30)
         : _byDay;
-    final activeDays = chartData.isEmpty ? 0 : chartData.length;
     final averageDay = (summary?.average ?? 0).toDouble();
     final hasNoVisibleData = !_loading && chartData.isEmpty && total == 0;
     final peakDay = chartData.isEmpty
