@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/utils/accounting_format.dart';
+import '../data/report_data.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
@@ -27,9 +28,8 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
   bool _reloadInProgress = false;
   bool _reloadRequested = false;
 
-  PaginatedSales? _page;
-  SalesSummary? _summary;
-  List<SalesByDay> _byDay = const [];
+  ReportData? _reportData;
+  List<SalesByDay> _byDay = const <SalesByDay>[];
   bool _loading = true;
   String? _error;
   late DateTime _from;
@@ -96,22 +96,16 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     }
 
     final repo = ref.read(reportsRepositoryProvider);
-    final format = DateFormat('yyyy-MM-dd');
-    final fromStr = format.format(_from);
-    final toStr = format.format(_to);
 
     try {
-      final results = await Future.wait<Object?>([
-        _loadAllSales(repo, fromStr, toStr),
-        repo.salesSummary(fromStr, toStr),
-        repo.salesByDay(fromStr, toStr),
-      ]);
+      final report = await repo.getReportData(
+        DateFilter(start: _from, end: _to),
+      );
 
       if (!mounted) return;
       setState(() {
-        _page = results[0] as PaginatedSales;
-        _summary = results[1] as SalesSummary;
-        _byDay = results[2] as List<SalesByDay>;
+        _reportData = report;
+        _byDay = report.salesByDay;
         if (showLoading) {
           _loading = false;
         }
@@ -133,47 +127,8 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     }
   }
 
-  Future<PaginatedSales> _loadAllSales(
-    ReportsRepository repo,
-    String from,
-    String to,
-  ) async {
-    const pageSize = 100;
-    final firstPage = await repo.salesList(
-      from,
-      to,
-      page: 1,
-      pageSize: pageSize,
-    );
-    if (firstPage.total <= firstPage.data.length) {
-      return firstPage;
-    }
-
-    final allRows = <SaleRow>[...firstPage.data];
-    var page = 2;
-
-    while (allRows.length < firstPage.total) {
-      final nextPage = await repo.salesList(
-        from,
-        to,
-        page: page,
-        pageSize: pageSize,
-      );
-      if (nextPage.data.isEmpty) break;
-      allRows.addAll(nextPage.data);
-      page += 1;
-    }
-
-    return PaginatedSales(
-      data: allRows,
-      page: 1,
-      pageSize: allRows.length,
-      total: firstPage.total,
-    );
-  }
-
   List<SaleRow> get _filteredSales {
-    final rows = _page?.data ?? const <SaleRow>[];
+    final rows = _reportData?.sales ?? const <SaleRow>[];
     final clientTerm = _clientCtrl.text.trim().toLowerCase();
     final cashierTerm = _cashierCtrl.text.trim().toLowerCase();
     final paymentTerm = _paymentCtrl.text.trim().toLowerCase();
@@ -439,6 +394,7 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     final theme = Theme.of(context);
     final filtered = _filteredSales;
     final groupedSales = _groupedFilteredSales;
+    final report = _reportData;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
@@ -448,12 +404,13 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
           _TopInfoStrip(
             rangeLabel: _rangeLabel(),
             salesCount: filtered.length,
-            totalLabel: formatAccountingAmount(_summary?.total ?? 0),
+            totalLabel: formatAccountingAmount(report?.totalSales ?? 0),
           ),
           const SizedBox(height: 8),
           _DailyMetricsStrip(
             byDay: _byDay,
-            summary: _summary,
+            salesCount: report?.salesCount ?? 0,
+            averageTicket: report?.averageTicket ?? 0,
             visibleSalesCount: filtered.length,
           ),
           const SizedBox(height: 8),
@@ -649,19 +606,21 @@ class _TopInfoStrip extends StatelessWidget {
 class _DailyMetricsStrip extends StatelessWidget {
   const _DailyMetricsStrip({
     required this.byDay,
-    required this.summary,
+    required this.salesCount,
+    required this.averageTicket,
     required this.visibleSalesCount,
   });
 
   final List<SalesByDay> byDay;
-  final SalesSummary? summary;
+  final int salesCount;
+  final double averageTicket;
   final int visibleSalesCount;
 
   @override
   Widget build(BuildContext context) {
     final daysWithSales = byDay.length;
-    final totalCount = summary?.count ?? visibleSalesCount;
-    final averagePerSale = summary?.average ?? 0;
+    final totalCount = salesCount == 0 ? visibleSalesCount : salesCount;
+    final averagePerSale = averageTicket;
 
     return Row(
       children: [

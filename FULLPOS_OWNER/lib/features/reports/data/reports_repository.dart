@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/api_client.dart';
+import 'report_data.dart';
 import 'report_models.dart';
 
 final reportsRepositoryProvider = Provider<ReportsRepository>((ref) {
@@ -16,6 +17,28 @@ class ReportsRepository {
     validateStatus: (status) =>
         status != null && ((status >= 200 && status < 300) || status == 404),
   );
+
+  Future<ReportData> getReportData(DateFilter filter) async {
+    return _guard(
+      () async {
+        final res = await _dio.get(
+          '/api/reports/data',
+          queryParameters: {'from': filter.fromQuery, 'to': filter.toQuery},
+        );
+        return ReportData.fromJson(res.data as Map<String, dynamic>);
+      },
+      fallback: ReportData(
+        sales: const <SaleRow>[],
+        expenses: const <ReportExpenseRow>[],
+        salesByDay: const <SalesByDay>[],
+        totalSales: 0,
+        totalExpenses: 0,
+        profit: 0,
+        salesCount: 0,
+        averageTicket: 0,
+      ),
+    );
+  }
 
   Future<SalesSummary> salesSummary(String from, String to) async {
     return _guard(() async {

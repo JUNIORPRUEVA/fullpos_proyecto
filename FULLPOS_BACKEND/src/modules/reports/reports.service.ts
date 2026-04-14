@@ -6,6 +6,121 @@ import { buildPagination } from '../../utils/pagination';
 const MAX_RANGE_DAYS = 365;
 const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
 const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND', 'REFUNDED'] as const;
+
+function getReportSalesWhere(companyId: number, fromDate: Date, toDate: Date) {
+  return {
+    companyId,
+    kind: { in: ['invoice', 'sale'] },
+    status: { in: [...REPORT_SALE_STATUSES] },
+    deletedAt: null,
+    createdAt: { gte: fromDate, lte: toDate },
+  } as const;
+}
+
+function getReportExpensesWhere(companyId: number, fromDate: Date, toDate: Date) {
+  return {
+    companyId,
+    type: 'out',
+    movementType: 'expense',
+    affectsProfit: true,
+    createdAt: { gte: fromDate, lte: toDate },
+  } as const;
+}
+
+async function listReportSales(companyId: number, fromDate: Date, toDate: Date) {
+  const rows = await prisma.sale.findMany({
+    where: getReportSalesWhere(companyId, fromDate, toDate),
+    include: {
+      session: true,
+      createdBy: { select: { id: true, username: true, displayName: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return rows.map((sale) => ({
+    id: sale.id,
+    localCode: sale.localCode,
+    customerName: sale.customerNameSnapshot,
+    total: toNumber(sale.total),
+    paymentMethod: sale.paymentMethod,
+    sessionId: sale.sessionId,
+    sessionStatus: sale.session?.status,
+    sessionOpenedAt: sale.session?.openedAt,
+    createdAt: sale.createdAt,
+    user: sale.createdBy
+      ? {
+          id: sale.createdBy.id,
+          username: sale.createdBy.username,
+          displayName: sale.createdBy.displayName,
+        }
+      : null,
+  }));
+}
+
+async function listReportExpenses(companyId: number, fromDate: Date, toDate: Date) {
+  const rows = await prisma.cashMovement.findMany({
+    where: getReportExpensesWhere(companyId, fromDate, toDate),
+    select: {
+      id: true,
+      amount: true,
+      note: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    amount: toNumber(row.amount),
+    note: row.note,
+    createdAt: row.createdAt,
+  }));
+}
+
+function buildSalesByDay(sales: Array<{ createdAt: Date; total: number }>) {
+  const byDay = new Map<string, { total: number; count: number }>();
+
+  for (const sale of sales) {
+    const key = formatInTimeZone(sale.createdAt, REPORTS_TIMEZONE, 'yyyy-MM-dd');
+    const entry = byDay.get(key) ?? { total: 0, count: 0 };
+    entry.total += sale.total;
+    entry.count += 1;
+    byDay.set(key, entry);
+  }
+
+  return Array.from(byDay.entries()).map(([date, info]) => ({
+    date,
+    total: info.total,
+    count: info.count,
+  }));
+}
+
+export async function getReportData(companyId: number, from: string, to: string) {
+  const { fromDate, toDate } = parseRange(from, to);
+  ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
+
+  const [sales, expenses] = await Promise.all([
+    listReportSales(companyId, fromDate, toDate),
+    listReportExpenses(companyId, fromDate, toDate),
+  ]);
+
+  const totalSales = sales.reduce((sum, sale) => sum + sale.total, 0);
+  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const salesCount = sales.length;
+  const averageTicket = salesCount > 0 ? totalSales / salesCount : 0;
+  const profit = totalSales - totalExpenses;
+
+  return {
+    sales,
+    expenses,
+    salesByDay: buildSalesByDay(sales),
+    totalSales,
+    totalExpenses,
+    profit,
+    salesCount,
+    averageTicket,
+  };
+}
 function toNumber(value: any) {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return value;
@@ -117,163 +232,31 @@ export async function getReportsStatus(companyId: number, from: string, to: stri
 }
 
 export async function getSalesSummary(companyId: number, from: string, to: string) {
-  const { fromDate, toDate } = parseRange(from, to);
-  ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
-
-  const [salesAggregate, returnsAggregate, salesCostRows, returnCostRows, cashExpenseAggregate, paymentAggregate, creditPaymentAggregate, layawayPaymentAggregate] =
-    await Promise.all([
-      prisma.sale.aggregate({
-        _sum: { total: true },
-        _count: { _all: true },
-        where: {
-          companyId,
-          kind: { in: ['invoice', 'sale'] },
-          status: { in: [...REPORT_SALE_STATUSES] },
-          deletedAt: null,
-          createdAt: { gte: fromDate, lte: toDate },
-        },
-      }),
-      prisma.$queryRaw<{ returnedRevenue: any }[]>`
-        SELECT COALESCE(SUM(ABS(rs."total")), 0) AS "returnedRevenue"
-        FROM "Return" r
-        INNER JOIN "Sale" rs ON rs.id = r."returnSaleId"
-        WHERE r."companyId" = ${companyId}
-          AND rs."deletedAt" IS NULL
-          AND rs."status" IN ('completed','PAID','PARTIAL_REFUND','REFUNDED')
-          AND rs."createdAt" >= ${fromDate}
-          AND rs."createdAt" <= ${toDate}
-      `,
-      prisma.$queryRaw<{ totalCost: any }[]>`
-        SELECT COALESCE(SUM(si."purchasePriceSnapshot" * si."qty"), 0) AS "totalCost"
-        FROM "SaleItem" si
-        INNER JOIN "Sale" s ON s.id = si."saleId"
-        WHERE s."companyId" = ${companyId}
-          AND s."deletedAt" IS NULL
-          AND s."kind" IN ('invoice','sale')
-          AND s."status" IN ('completed','PAID','PARTIAL_REFUND','REFUNDED')
-          AND s."createdAt" >= ${fromDate}
-          AND s."createdAt" <= ${toDate}
-      `,
-      prisma.$queryRaw<{ returnCost: any }[]>`
-        SELECT COALESCE(SUM(
-          ri."qty" * COALESCE(NULLIF(si."purchasePriceSnapshot", 0), p."cost", 0)
-        ), 0) AS "returnCost"
-        FROM "ReturnItem" ri
-        INNER JOIN "Return" r ON r.id = ri."returnId"
-        INNER JOIN "Sale" rs ON rs.id = r."returnSaleId"
-        LEFT JOIN "SaleItem" si ON si.id = ri."saleItemId"
-        LEFT JOIN "Product" p ON p.id = COALESCE(ri."productId", si."productId")
-        WHERE r."companyId" = ${companyId}
-          AND rs."deletedAt" IS NULL
-          AND rs."status" IN ('completed','PAID','PARTIAL_REFUND','REFUNDED')
-          AND rs."createdAt" >= ${fromDate}
-          AND rs."createdAt" <= ${toDate}
-      `,
-      prisma.cashMovement.aggregate({
-        _sum: { amount: true },
-        where: {
-          companyId,
-          type: 'out',
-          movementType: 'expense',
-          affectsProfit: true,
-          createdAt: { gte: fromDate, lte: toDate },
-        },
-      }),
-      prisma.payment.aggregate({
-        _sum: { amount: true },
-        _count: { _all: true },
-        where: {
-          companyId,
-          postedAt: { gte: fromDate, lte: toDate },
-        },
-      }),
-      prisma.payment.aggregate({
-        _sum: { amount: true },
-        where: {
-          companyId,
-          kind: 'credit',
-          postedAt: { gte: fromDate, lte: toDate },
-        },
-      }),
-      prisma.payment.aggregate({
-        _sum: { amount: true },
-        where: {
-          companyId,
-          kind: 'layaway',
-          postedAt: { gte: fromDate, lte: toDate },
-        },
-      }),
-    ]);
-
-  const grossRevenue = toNumber(salesAggregate._sum.total);
-  const returnedRevenue = toNumber(returnsAggregate?.[0]?.returnedRevenue);
-  const total = grossRevenue - returnedRevenue;
-  const count = salesAggregate._count._all;
-  const average = count > 0 ? total / count : 0;
-
-  const grossCost = toNumber(salesCostRows?.[0]?.totalCost);
-  const returnedCost = toNumber(returnCostRows?.[0]?.returnCost);
-  const totalCost = grossCost - returnedCost;
-  const expenses = toNumber(cashExpenseAggregate._sum.amount);
-  const profit = calculateProfit(total, totalCost, expenses);
-  const paymentsReceived = toNumber(paymentAggregate._sum.amount);
-  const creditPaymentsReceived = toNumber(creditPaymentAggregate._sum.amount);
-  const layawayPaymentsReceived = toNumber(layawayPaymentAggregate._sum.amount);
-  const paymentsCount = paymentAggregate._count._all;
+  const report = await getReportData(companyId, from, to);
 
   return {
-    total,
-    count,
-    average,
-    totalCost,
-    profit,
-    paymentsReceived,
-    creditPaymentsReceived,
-    layawayPaymentsReceived,
-    paymentsCount,
+    total: report.totalSales,
+    count: report.salesCount,
+    average: report.averageTicket,
+    totalCost: 0,
+    profit: report.profit,
+    expenses: report.totalExpenses,
+    paymentsReceived: 0,
+    creditPaymentsReceived: 0,
+    layawayPaymentsReceived: 0,
+    paymentsCount: 0,
     paymentFlow: {
-      totalReceived: paymentsReceived,
-      creditReceived: creditPaymentsReceived,
-      layawayReceived: layawayPaymentsReceived,
-      count: paymentsCount,
+      totalReceived: 0,
+      creditReceived: 0,
+      layawayReceived: 0,
+      count: 0,
     },
   };
 }
 
 export async function getSalesByDay(companyId: number, from: string, to: string) {
-  const { fromDate, toDate } = parseRange(from, to);
-  ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
-
-  const sales = await prisma.sale.findMany({
-    where: {
-      companyId,
-      kind: { in: ['invoice', 'sale', 'return'] },
-      status: { in: [...REPORT_SALE_STATUSES] },
-      deletedAt: null,
-      createdAt: { gte: fromDate, lte: toDate },
-    },
-    select: { id: true, kind: true, total: true, createdAt: true },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  const byDay = new Map<string, { total: number; count: number }>();
-  for (const sale of sales) {
-    // Agrupar por día en timezone de negocio (no depende del timezone del servidor).
-    const key = formatInTimeZone(sale.createdAt, REPORTS_TIMEZONE, 'yyyy-MM-dd');
-    const entry = byDay.get(key) ?? { total: 0, count: 0 };
-    const signedTotal = sale.kind === 'return' ? -Math.abs(toNumber(sale.total)) : toNumber(sale.total);
-    entry.total += signedTotal;
-    if (sale.kind !== 'return') {
-      entry.count += 1;
-    }
-    byDay.set(key, entry);
-  }
-
-  return Array.from(byDay.entries()).map(([date, info]) => ({
-    date,
-    total: info.total,
-    count: info.count,
-  }));
+  const report = await getReportData(companyId, from, to);
+  return report.salesByDay;
 }
 
 export async function getSalesList(
@@ -287,52 +270,9 @@ export async function getSalesList(
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
   const { skip, take } = buildPagination(page, pageSize);
 
-  const [totalCount, rows] = await Promise.all([
-    prisma.sale.count({
-      where: {
-        companyId,
-        kind: { in: ['invoice', 'sale'] },
-        status: { in: [...REPORT_SALE_STATUSES] },
-        deletedAt: null,
-        createdAt: { gte: fromDate, lte: toDate },
-      },
-    }),
-    prisma.sale.findMany({
-      where: {
-        companyId,
-        kind: { in: ['invoice', 'sale'] },
-        status: { in: [...REPORT_SALE_STATUSES] },
-        deletedAt: null,
-        createdAt: { gte: fromDate, lte: toDate },
-      },
-      include: {
-        session: true,
-        createdBy: { select: { id: true, username: true, displayName: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take,
-    }),
-  ]);
-
-  const data = rows.map((sale) => ({
-    id: sale.id,
-    localCode: sale.localCode,
-    customerName: sale.customerNameSnapshot,
-    total: toNumber(sale.total),
-    paymentMethod: sale.paymentMethod,
-    sessionId: sale.sessionId,
-    sessionStatus: sale.session?.status,
-    sessionOpenedAt: sale.session?.openedAt,
-    createdAt: sale.createdAt,
-    user: sale.createdBy
-      ? {
-          id: sale.createdBy.id,
-          username: sale.createdBy.username,
-          displayName: sale.createdBy.displayName,
-        }
-      : null,
-  }));
+  const allSales = await listReportSales(companyId, fromDate, toDate);
+  const totalCount = allSales.length;
+  const data = allSales.slice(skip, skip + take);
 
   return {
     data,

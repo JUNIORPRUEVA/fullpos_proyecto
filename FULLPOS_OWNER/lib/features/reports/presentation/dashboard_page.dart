@@ -11,6 +11,7 @@ import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/accounting_format.dart';
 import '../../auth/data/auth_repository.dart';
+import '../data/report_data.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
@@ -28,8 +29,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
   bool _refreshInFlight = false;
   bool _reloadRequested = false;
 
-  SalesSummary? _summary;
-  List<SalesByDay> _byDay = const [];
+  ReportData? _reportData;
   bool _loading = true;
   String _warningMessage = '';
   late DateTime _from;
@@ -83,37 +83,43 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     }
 
     final repo = ref.read(reportsRepositoryProvider);
-    final formatter = DateFormat('yyyy-MM-dd');
     final warnings = <String>[];
 
     try {
-      final results = await Future.wait<Object?>([
-        _safeLoad<Object?>(
-          loader: () =>
-              repo.salesSummary(formatter.format(_from), formatter.format(_to)),
-          fallback: const SalesSummary(total: 0, count: 0, average: 0),
-          onError: () =>
-              warnings.add('No se pudo cargar el resumen de ventas.'),
+      final report = await _safeLoad<ReportData>(
+        loader: () => repo.getReportData(DateFilter(start: _from, end: _to)),
+        fallback: ReportData(
+          sales: const <SaleRow>[],
+          expenses: const <ReportExpenseRow>[],
+          salesByDay: const <SalesByDay>[],
+          totalSales: 0,
+          totalExpenses: 0,
+          profit: 0,
+          salesCount: 0,
+          averageTicket: 0,
         ),
-        _safeLoad<Object?>(
-          loader: () =>
-              repo.salesByDay(formatter.format(_from), formatter.format(_to)),
-          fallback: const <SalesByDay>[],
-          onError: () => warnings.add('No se pudo cargar la tendencia diaria.'),
-        ),
-      ]);
+        onError: () => warnings.add('No se pudo cargar el reporte unificado.'),
+      );
 
       if (!mounted) return;
       setState(() {
-        _summary = results[0] as SalesSummary;
-        _byDay = results[1] as List<SalesByDay>;
+        _reportData = report;
         _warningMessage = warnings.join(' ');
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _summary ??= const SalesSummary(total: 0, count: 0, average: 0);
+        _reportData ??= ReportData(
+          sales: const <SaleRow>[],
+          expenses: const <ReportExpenseRow>[],
+          salesByDay: const <SalesByDay>[],
+          totalSales: 0,
+          totalExpenses: 0,
+          profit: 0,
+          salesCount: 0,
+          averageTicket: 0,
+        );
         _warningMessage =
             'No se pudieron actualizar todos los datos, pero el panel sigue disponible.';
         _loading = false;
@@ -446,16 +452,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     final theme = Theme.of(context);
     final authState = ref.watch(authRepositoryProvider);
     final appConfig = ref.watch(appConfigProvider);
-    final summary = _summary;
-    final total = (summary?.total ?? 0).toDouble();
-    final totalCost = (summary?.totalCost ?? 0).toDouble();
-    final expensesTotal = (summary?.expenses ?? 0).toDouble();
-    final profit = (summary?.profit ?? 0).toDouble();
+    final report = _reportData;
+    final total = report?.totalSales ?? 0;
+    final expensesTotal = report?.totalExpenses ?? 0;
+    final profit = report?.profit ?? 0;
     final margin = total > 0 ? (profit / total) * 100 : 0.0;
-    final chartData = _byDay.length > 30
-        ? _byDay.sublist(_byDay.length - 30)
-        : _byDay;
-    final averageDay = (summary?.average ?? 0).toDouble();
+    final reportSalesByDay = report?.salesByDay ?? const <SalesByDay>[];
+    final chartData = reportSalesByDay.length > 30
+        ? reportSalesByDay.sublist(reportSalesByDay.length - 30)
+        : reportSalesByDay;
+    final averageDay = report?.averageTicket ?? 0;
     final hasNoVisibleData = !_loading && chartData.isEmpty && total == 0;
     final peakDay = chartData.isEmpty
         ? null
@@ -678,8 +684,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                                 color: AppColors.success,
                               ),
                               _StatPill(
-                                label: 'Costo',
-                                value: _formatReportAmount(totalCost),
+                                label: 'Gastos',
+                                value: _formatReportAmount(expensesTotal),
                                 color: AppColors.warning,
                               ),
                               _StatPill(

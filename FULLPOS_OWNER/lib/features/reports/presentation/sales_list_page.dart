@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/utils/accounting_format.dart';
+import '../data/report_data.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
@@ -27,8 +29,7 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
   bool _refreshInFlight = false;
   bool _reloadRequested = false;
 
-  PaginatedSales? _page;
-  SalesSummary? _summary;
+  ReportData? _reportData;
   bool _loading = true;
   String? _error;
   int _currentPage = 1;
@@ -79,23 +80,16 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
       });
     }
     final repo = ref.read(reportsRepositoryProvider);
-    final fmt = DateFormat('yyyy-MM-dd');
     try {
-      final fromStr = fmt.format(_from);
-      final toStr = fmt.format(_to);
-
-      final results = await Future.wait<Object?>([
-        repo.salesList(fromStr, toStr, page: page),
-        repo.salesSummary(fromStr, toStr),
-      ]);
-
-      final data = results[0] as PaginatedSales;
-      final summary = results[1] as SalesSummary;
+      final report = await repo.getReportData(
+        DateFilter(start: _from, end: _to),
+      );
+      final totalPages = math.max(1, (report.sales.length / 20).ceil());
+      final resolvedPage = page.clamp(1, totalPages);
       if (!mounted) return;
       setState(() {
-        _page = data;
-        _summary = summary;
-        _currentPage = page;
+        _reportData = report;
+        _currentPage = resolvedPage;
         if (showLoading) _loading = false;
       });
     } catch (e) {
@@ -123,7 +117,15 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
       unawaited(_load(page: 1, showLoading: true));
     });
 
-    final summary = _summary;
+    final report = _reportData;
+    final allSales = report?.sales ?? const <SaleRow>[];
+    const pageSize = 20;
+    final totalPages = math.max(1, (allSales.length / pageSize).ceil());
+    final startIndex = (_currentPage - 1) * pageSize;
+    final endIndex = math.min(startIndex + pageSize, allSales.length);
+    final visibleSales = startIndex >= allSales.length
+        ? const <SaleRow>[]
+        : allSales.sublist(startIndex, endIndex);
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -184,12 +186,10 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                                       )
                                     : null,
                               ),
-                              Text('Página $_currentPage'),
+                              Text('Página $_currentPage de $totalPages'),
                               IconButton(
                                 icon: const Icon(Icons.chevron_right),
-                                onPressed:
-                                    ((_page?.data.length ?? 0) >=
-                                        (_page?.pageSize ?? 20))
+                                onPressed: _currentPage < totalPages
                                     ? () => _load(
                                         page: _currentPage + 1,
                                         showLoading: true,
@@ -206,8 +206,8 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                           Expanded(
                             child: _SalesMetric(
                               title: 'Total vendido',
-                              value: summary != null
-                                  ? formatAccountingAmount(summary.total)
+                              value: report != null
+                                  ? formatAccountingAmount(report.totalSales)
                                   : '--',
                               icon: Icons.payments_outlined,
                             ),
@@ -215,19 +215,19 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                           const SizedBox(width: _salesHorizontalGap),
                           Expanded(
                             child: _SalesMetric(
-                              title: 'Costo',
-                              value: summary != null
-                                  ? formatAccountingAmount(summary.totalCost)
+                              title: 'Gastos',
+                              value: report != null
+                                  ? formatAccountingAmount(report.totalExpenses)
                                   : '--',
-                              icon: Icons.shopping_cart_outlined,
+                              icon: Icons.receipt_long_outlined,
                             ),
                           ),
                           const SizedBox(width: _salesHorizontalGap),
                           Expanded(
                             child: _SalesMetric(
                               title: 'Ganancia',
-                              value: summary != null
-                                  ? formatAccountingAmount(summary.profit)
+                              value: report != null
+                                  ? formatAccountingAmount(report.profit)
                                   : '--',
                               icon: Icons.trending_up_outlined,
                             ),
@@ -238,11 +238,11 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                       Expanded(
                         child: Card(
                           child: ListView.separated(
-                            itemCount: _page?.data.length ?? 0,
+                            itemCount: visibleSales.length,
                             separatorBuilder: (context, separatorIndex) =>
                                 const Divider(height: 1),
                             itemBuilder: (context, index) {
-                              final sale = _page!.data[index];
+                              final sale = visibleSales[index];
                               return _CompactSaleRow(
                                 sale: sale,
                                 onTap: () =>

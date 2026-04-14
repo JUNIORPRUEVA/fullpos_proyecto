@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { validate } from '../../middlewares/validate';
 import {
+  getReportData,
   getReportsStatus,
   getSaleDetail,
   getSalesByDay,
@@ -11,6 +12,16 @@ import {
 import { idParamSchema, rangeQuerySchema, salesListQuerySchema } from './reports.validation';
 
 const router = Router();
+
+router.get('/data', authGuard, validate(rangeQuerySchema, 'query'), async (req, res, next) => {
+  try {
+    const { from, to } = req.query as any;
+    const result = await getReportData(req.user!.companyId, from, to);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/sales/summary', authGuard, validate(rangeQuerySchema, 'query'), async (req, res, next) => {
   try {
