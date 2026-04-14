@@ -5,6 +5,17 @@ import { buildPagination } from '../../utils/pagination';
 
 const MAX_RANGE_DAYS = 365;
 const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
+const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND', 'REFUNDED'] as const;
+const REPORT_CASH_EXPENSE_TYPES = [
+  'out',
+  'OUT',
+  'retiro',
+  'RETIRO',
+  'salida',
+  'SALIDA',
+  'egreso',
+  'EGRESO',
+] as const;
 
 function toNumber(value: any) {
   if (value === null || value === undefined) return 0;
@@ -12,6 +23,30 @@ function toNumber(value: any) {
   if (typeof value === 'string') return Number(value);
   if (typeof (value as any).toNumber === 'function') return (value as any).toNumber();
   return Number(value);
+}
+
+function calculateProfit(revenue: number, cost: number, expenses: number) {
+  return revenue - cost - expenses;
+}
+
+function calculateDeferredTotalDue(sale: {
+  total: any;
+  paymentMethod: string | null | undefined;
+  creditInterestRate?: any;
+}) {
+  const total = toNumber(sale.total);
+  const paymentMethod = (sale.paymentMethod ?? '').trim().toLowerCase();
+  if (paymentMethod === 'credit') {
+    return total + (total * toNumber(sale.creditInterestRate) / 100);
+  }
+  return total;
+}
+
+function allocateExpenseShare(totalExpenses: number, revenue: number, revenueBase: number) {
+  if (Math.abs(totalExpenses) <= 0.009 || revenue <= 0 || revenueBase <= 0) {
+    return 0;
+  }
+  return totalExpenses * (revenue / revenueBase);
 }
 
 export async function getReportsStatus(companyId: number, from: string, to: string) {
@@ -28,7 +63,7 @@ export async function getReportsStatus(companyId: number, from: string, to: stri
         where: {
           companyId,
           kind: { in: ['invoice', 'sale'] },
-          status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+          status: { in: [...REPORT_SALE_STATUSES] },
           deletedAt: null,
           createdAt: { gte: fromDate, lte: toDate },
         },
@@ -96,39 +131,122 @@ export async function getSalesSummary(companyId: number, from: string, to: strin
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
 
-  const result = await prisma.sale.aggregate({
-    _sum: { total: true },
-    _count: { _all: true },
-    where: {
-      companyId,
-      kind: { in: ['invoice', 'sale'] },
-      status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
-      deletedAt: null,
-      createdAt: { gte: fromDate, lte: toDate },
-    },
-  });
+  const [salesAggregate, returnsAggregate, salesCostRows, returnCostRows, cashExpenseAggregate, paymentAggregate, creditPaymentAggregate, layawayPaymentAggregate] =
+    await Promise.all([
+      prisma.sale.aggregate({
+        _sum: { total: true },
+        _count: { _all: true },
+        where: {
+          companyId,
+          kind: { in: ['invoice', 'sale'] },
+          status: { in: [...REPORT_SALE_STATUSES] },
+          deletedAt: null,
+          createdAt: { gte: fromDate, lte: toDate },
+        },
+      }),
+      prisma.$queryRaw<{ returnedRevenue: any }[]>`
+        SELECT COALESCE(SUM(ABS(rs."total")), 0) AS "returnedRevenue"
+        FROM "Return" r
+        INNER JOIN "Sale" rs ON rs.id = r."returnSaleId"
+        WHERE r."companyId" = ${companyId}
+          AND rs."deletedAt" IS NULL
+          AND rs."status" IN ('completed','PAID','PARTIAL_REFUND','REFUNDED')
+          AND rs."createdAt" >= ${fromDate}
+          AND rs."createdAt" <= ${toDate}
+      `,
+      prisma.$queryRaw<{ totalCost: any }[]>`
+        SELECT COALESCE(SUM(si."purchasePriceSnapshot" * si."qty"), 0) AS "totalCost"
+        FROM "SaleItem" si
+        INNER JOIN "Sale" s ON s.id = si."saleId"
+        WHERE s."companyId" = ${companyId}
+          AND s."deletedAt" IS NULL
+          AND s."kind" IN ('invoice','sale')
+          AND s."status" IN ('completed','PAID','PARTIAL_REFUND','REFUNDED')
+          AND s."createdAt" >= ${fromDate}
+          AND s."createdAt" <= ${toDate}
+      `,
+      prisma.$queryRaw<{ returnCost: any }[]>`
+        SELECT COALESCE(SUM(
+          ri."qty" * COALESCE(NULLIF(si."purchasePriceSnapshot", 0), p."cost", 0)
+        ), 0) AS "returnCost"
+        FROM "ReturnItem" ri
+        INNER JOIN "Return" r ON r.id = ri."returnId"
+        INNER JOIN "Sale" rs ON rs.id = r."returnSaleId"
+        LEFT JOIN "SaleItem" si ON si.id = ri."saleItemId"
+        LEFT JOIN "Product" p ON p.id = COALESCE(ri."productId", si."productId")
+        WHERE r."companyId" = ${companyId}
+          AND rs."deletedAt" IS NULL
+          AND rs."status" IN ('completed','PAID','PARTIAL_REFUND','REFUNDED')
+          AND rs."createdAt" >= ${fromDate}
+          AND rs."createdAt" <= ${toDate}
+      `,
+      prisma.cashMovement.aggregate({
+        _sum: { amount: true },
+        where: {
+          companyId,
+          type: { in: [...REPORT_CASH_EXPENSE_TYPES] },
+          createdAt: { gte: fromDate, lte: toDate },
+        },
+      }),
+      prisma.payment.aggregate({
+        _sum: { amount: true },
+        _count: { _all: true },
+        where: {
+          companyId,
+          postedAt: { gte: fromDate, lte: toDate },
+        },
+      }),
+      prisma.payment.aggregate({
+        _sum: { amount: true },
+        where: {
+          companyId,
+          kind: 'credit',
+          postedAt: { gte: fromDate, lte: toDate },
+        },
+      }),
+      prisma.payment.aggregate({
+        _sum: { amount: true },
+        where: {
+          companyId,
+          kind: 'layaway',
+          postedAt: { gte: fromDate, lte: toDate },
+        },
+      }),
+    ]);
 
-  const total = toNumber(result._sum.total);
-  const count = result._count._all;
+  const grossRevenue = toNumber(salesAggregate._sum.total);
+  const returnedRevenue = toNumber(returnsAggregate?.[0]?.returnedRevenue);
+  const total = grossRevenue - returnedRevenue;
+  const count = salesAggregate._count._all;
   const average = count > 0 ? total / count : 0;
 
-  // Total cost of goods sold (COGS) based on SaleItem snapshots.
-  const costRows = await prisma.$queryRaw<{ totalCost: any }[]>`
-    SELECT COALESCE(SUM(si."purchasePriceSnapshot" * si."qty"), 0) AS "totalCost"
-    FROM "SaleItem" si
-    INNER JOIN "Sale" s ON s.id = si."saleId"
-    WHERE s."companyId" = ${companyId}
-      AND s."deletedAt" IS NULL
-      AND s."kind" IN ('invoice','sale')
-      AND s."status" IN ('completed','PAID','PARTIAL_REFUND')
-      AND s."createdAt" >= ${fromDate}
-      AND s."createdAt" <= ${toDate}
-  `;
+  const grossCost = toNumber(salesCostRows?.[0]?.totalCost);
+  const returnedCost = toNumber(returnCostRows?.[0]?.returnCost);
+  const totalCost = grossCost - returnedCost;
+  const expenses = toNumber(cashExpenseAggregate._sum.amount);
+  const profit = calculateProfit(total, totalCost, expenses);
+  const paymentsReceived = toNumber(paymentAggregate._sum.amount);
+  const creditPaymentsReceived = toNumber(creditPaymentAggregate._sum.amount);
+  const layawayPaymentsReceived = toNumber(layawayPaymentAggregate._sum.amount);
+  const paymentsCount = paymentAggregate._count._all;
 
-  const totalCost = toNumber(costRows?.[0]?.totalCost);
-  const profit = total - totalCost;
-
-  return { total, count, average, totalCost, profit };
+  return {
+    total,
+    count,
+    average,
+    totalCost,
+    profit,
+    paymentsReceived,
+    creditPaymentsReceived,
+    layawayPaymentsReceived,
+    paymentsCount,
+    paymentFlow: {
+      totalReceived: paymentsReceived,
+      creditReceived: creditPaymentsReceived,
+      layawayReceived: layawayPaymentsReceived,
+      count: paymentsCount,
+    },
+  };
 }
 
 export async function getSalesByDay(companyId: number, from: string, to: string) {
@@ -138,12 +256,12 @@ export async function getSalesByDay(companyId: number, from: string, to: string)
   const sales = await prisma.sale.findMany({
     where: {
       companyId,
-      kind: { in: ['invoice', 'sale'] },
-      status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+      kind: { in: ['invoice', 'sale', 'return'] },
+      status: { in: [...REPORT_SALE_STATUSES] },
       deletedAt: null,
       createdAt: { gte: fromDate, lte: toDate },
     },
-    select: { id: true, total: true, createdAt: true },
+    select: { id: true, kind: true, total: true, createdAt: true },
     orderBy: { createdAt: 'asc' },
   });
 
@@ -152,8 +270,11 @@ export async function getSalesByDay(companyId: number, from: string, to: string)
     // Agrupar por día en timezone de negocio (no depende del timezone del servidor).
     const key = formatInTimeZone(sale.createdAt, REPORTS_TIMEZONE, 'yyyy-MM-dd');
     const entry = byDay.get(key) ?? { total: 0, count: 0 };
-    entry.total += toNumber(sale.total);
-    entry.count += 1;
+    const signedTotal = sale.kind === 'return' ? -Math.abs(toNumber(sale.total)) : toNumber(sale.total);
+    entry.total += signedTotal;
+    if (sale.kind !== 'return') {
+      entry.count += 1;
+    }
     byDay.set(key, entry);
   }
 
@@ -180,7 +301,7 @@ export async function getSalesList(
       where: {
         companyId,
         kind: { in: ['invoice', 'sale'] },
-        status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+        status: { in: [...REPORT_SALE_STATUSES] },
         deletedAt: null,
         createdAt: { gte: fromDate, lte: toDate },
       },
@@ -189,7 +310,7 @@ export async function getSalesList(
       where: {
         companyId,
         kind: { in: ['invoice', 'sale'] },
-        status: { in: ['completed', 'PAID', 'PARTIAL_REFUND'] },
+        status: { in: [...REPORT_SALE_STATUSES] },
         deletedAt: null,
         createdAt: { gte: fromDate, lte: toDate },
       },
@@ -240,6 +361,13 @@ export async function getSaleDetail(companyId: number, saleId: number) {
     include: {
       session: true,
       createdBy: { select: { id: true, username: true, displayName: true } },
+      payments: {
+        include: {
+          creditPayment: true,
+          layawayPayment: true,
+        },
+        orderBy: { postedAt: 'asc' },
+      },
       items: {
         include: {
           product: { select: { id: true, code: true, name: true } },
@@ -253,14 +381,65 @@ export async function getSaleDetail(companyId: number, saleId: number) {
     throw { status: 404, message: 'Venta no encontrada' };
   }
 
-  const items = sale.items.map((item) => {
+  const saleTotal = toNumber(sale.total);
+  const [sessionRevenueAggregate, sessionExpenseAggregate] = sale.sessionId
+    ? await Promise.all([
+        prisma.sale.aggregate({
+          _sum: { total: true },
+          where: {
+            companyId,
+            sessionId: sale.sessionId,
+            kind: { in: ['invoice', 'sale'] },
+            status: { in: [...REPORT_SALE_STATUSES] },
+            deletedAt: null,
+          },
+        }),
+        prisma.cashMovement.aggregate({
+          _sum: { amount: true },
+          where: {
+            companyId,
+            sessionId: sale.sessionId,
+            type: { in: [...REPORT_CASH_EXPENSE_TYPES] },
+          },
+        }),
+      ])
+    : [null, null] as const;
+  const sessionRevenue = toNumber(sessionRevenueAggregate?._sum.total);
+  const allocatedExpenses = allocateExpenseShare(
+    toNumber(sessionExpenseAggregate?._sum.amount),
+    saleTotal,
+    sessionRevenue,
+  );
+  const lineRevenueBase = sale.items.reduce((sum, item) => sum + Math.max(toNumber(item.totalLine), 0), 0);
+  let remainingRevenue = saleTotal;
+  let remainingExpenses = allocatedExpenses;
+
+  const items = sale.items.map((item, index) => {
     const qty = toNumber(item.qty);
     const unitPrice = toNumber(item.unitPrice);
     const cost = toNumber(item.purchasePriceSnapshot);
     const discountLine = toNumber(item.discountLine);
     const totalLine = toNumber(item.totalLine);
     const lineCost = qty * cost;
-    const lineProfit = totalLine - lineCost;
+    const isLastItem = index === sale.items.length - 1;
+    const revenueWeight = Math.max(totalLine, 0);
+    const revenueShare = isLastItem
+      ? remainingRevenue
+      : lineRevenueBase > 0
+        ? saleTotal * (revenueWeight / lineRevenueBase)
+        : sale.items.length > 0
+          ? saleTotal / sale.items.length
+          : 0;
+    const expenseShare = isLastItem
+      ? remainingExpenses
+      : lineRevenueBase > 0
+        ? allocatedExpenses * (revenueWeight / lineRevenueBase)
+        : sale.items.length > 0
+          ? allocatedExpenses / sale.items.length
+          : 0;
+    remainingRevenue -= revenueShare;
+    remainingExpenses -= expenseShare;
+    const lineProfit = calculateProfit(revenueShare, lineCost, expenseShare);
     return {
       id: item.id,
       productId: item.productId,
@@ -278,7 +457,36 @@ export async function getSaleDetail(companyId: number, saleId: number) {
   });
 
   const totalCost = items.reduce((sum, item) => sum + item.lineCost, 0);
-  const profit = toNumber(sale.total) - totalCost;
+  const profit = calculateProfit(saleTotal, totalCost, allocatedExpenses);
+  const totalDue = calculateDeferredTotalDue(sale);
+  const deferredPayments = sale.payments.map((payment) => ({
+    id: payment.id,
+    kind: payment.kind,
+    method: payment.method,
+    amount: toNumber(payment.amount),
+    note: payment.note,
+    postedAt: payment.postedAt,
+    creditPayment: payment.creditPayment
+      ? {
+          totalDueSnapshot: toNumber(payment.creditPayment.totalDueSnapshot),
+          totalPaidSnapshot: toNumber(payment.creditPayment.totalPaidSnapshot),
+          pendingAmountSnapshot: toNumber(payment.creditPayment.pendingAmountSnapshot),
+        }
+      : null,
+    layawayPayment: payment.layawayPayment
+      ? {
+          totalDueSnapshot: toNumber(payment.layawayPayment.totalDueSnapshot),
+          totalPaidSnapshot: toNumber(payment.layawayPayment.totalPaidSnapshot),
+          pendingAmountSnapshot: toNumber(payment.layawayPayment.pendingAmountSnapshot),
+          statusSnapshot: payment.layawayPayment.statusSnapshot,
+        }
+      : null,
+  }));
+  const deferredPaymentsReceived = deferredPayments.reduce((sum, payment) => sum + payment.amount, 0);
+  const paymentCollectionsReceived = deferredPayments.length > 0
+    ? deferredPaymentsReceived
+    : toNumber(sale.paidAmount);
+  const pendingAmount = Math.max(0, totalDue - paymentCollectionsReceived);
 
   return {
     id: sale.id,
@@ -292,12 +500,17 @@ export async function getSaleDetail(companyId: number, saleId: number) {
     discountTotal: toNumber(sale.discountTotal),
     itbisAmount: toNumber(sale.itbisAmount),
     itbisRate: toNumber(sale.itbisRate),
-    total: toNumber(sale.total),
+    total: saleTotal,
     totalCost,
     profit,
     paymentMethod: sale.paymentMethod,
     paidAmount: toNumber(sale.paidAmount),
     changeAmount: toNumber(sale.changeAmount),
+    creditInterestRate: toNumber(sale.creditInterestRate),
+    creditTermDays: sale.creditTermDays,
+    creditDueDate: sale.creditDueDate,
+    creditInstallments: sale.creditInstallments,
+    creditNote: sale.creditNote,
     fiscalEnabled: sale.fiscalEnabled,
     ncfFull: sale.ncfFull,
     ncfType: sale.ncfType,
@@ -313,6 +526,19 @@ export async function getSaleDetail(companyId: number, saleId: number) {
           displayName: sale.createdBy.displayName,
         }
       : null,
+    payments: deferredPayments,
+    paymentSummary: {
+      totalDue,
+      totalReceived: paymentCollectionsReceived,
+      pendingAmount,
+      paymentsCount: deferredPayments.length,
+      creditReceived: deferredPayments
+        .filter((payment) => payment.kind === 'credit')
+        .reduce((sum, payment) => sum + payment.amount, 0),
+      layawayReceived: deferredPayments
+        .filter((payment) => payment.kind === 'layaway')
+        .reduce((sum, payment) => sum + payment.amount, 0),
+    },
     items,
   };
 }

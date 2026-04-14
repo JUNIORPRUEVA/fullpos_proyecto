@@ -264,6 +264,25 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
     }
   }
 
+  int _catalogColumnsForWidth(double width) {
+    if (width < 700) return 2;
+
+    const horizontalPadding = 24.0;
+    const spacing = 12.0;
+    const targetTileWidth = 220.0;
+    final availableWidth = width - horizontalPadding;
+    return ((availableWidth + spacing) / (targetTileWidth + spacing))
+        .floor()
+        .clamp(3, 6);
+  }
+
+  double _catalogAspectRatioForWidth(double width) {
+    if (width >= 1400) return 0.86;
+    if (width >= 1000) return 0.82;
+    if (width >= 700) return 0.78;
+    return 0.75;
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
@@ -311,6 +330,13 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
                       onRefresh: () => _load(showLoading: true),
                       child: LayoutBuilder(
                         builder: (context, constraints) {
+                          final columns = _catalogColumnsForWidth(
+                            constraints.maxWidth,
+                          );
+                          final aspectRatio = _catalogAspectRatioForWidth(
+                            constraints.maxWidth,
+                          );
+
                           return GridView.builder(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
@@ -318,11 +344,11 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
                             ),
                             itemCount: _products.length,
                             gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: 2,
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: columns,
                                   crossAxisSpacing: 12,
                                   mainAxisSpacing: 12,
-                                  childAspectRatio: 0.75,
+                                  childAspectRatio: aspectRatio,
                                 ),
                             itemBuilder: (context, index) {
                               final product = _products[index];

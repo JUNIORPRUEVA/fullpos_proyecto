@@ -104,6 +104,11 @@ export type SyncSaleInput = {
   paymentMethod?: string | null;
   paidAmount: number;
   changeAmount: number;
+  creditInterestRate?: number;
+  creditTermDays?: number | null;
+  creditDueDate?: string | null;
+  creditInstallments?: number | null;
+  creditNote?: string | null;
   fiscalEnabled: boolean;
   ncfFull?: string | null;
   ncfType?: string | null;
@@ -112,6 +117,7 @@ export type SyncSaleInput = {
   updatedAt: string;
   deletedAt?: string | null;
   items: Array<{
+    localId?: number | null;
     productCodeSnapshot?: string | null;
     productNameSnapshot: string;
     qty: number;
@@ -186,7 +192,12 @@ export async function syncSalesByRnc(
         sale.sessionLocalId != null ? sessionMap.get(sale.sessionLocalId) ?? null : null;
 
       const upserted = await tx.sale.upsert({
-        where: { localCode: sale.localCode },
+        where: {
+          companyId_localCode: {
+            companyId,
+            localCode: sale.localCode,
+          },
+        },
         update: {
           kind: sale.kind,
           status: sale.status,
@@ -202,6 +213,11 @@ export async function syncSalesByRnc(
           paymentMethod: sale.paymentMethod ?? null,
           paidAmount: sale.paidAmount,
           changeAmount: sale.changeAmount,
+          creditInterestRate: sale.creditInterestRate ?? 0,
+          creditTermDays: sale.creditTermDays ?? null,
+          creditDueDate: sale.creditDueDate ? new Date(sale.creditDueDate) : null,
+          creditInstallments: sale.creditInstallments ?? null,
+          creditNote: sale.creditNote ?? null,
           fiscalEnabled: sale.fiscalEnabled,
           ncfFull: sale.ncfFull ?? null,
           ncfType: sale.ncfType ?? null,
@@ -226,6 +242,11 @@ export async function syncSalesByRnc(
           paymentMethod: sale.paymentMethod ?? null,
           paidAmount: sale.paidAmount,
           changeAmount: sale.changeAmount,
+          creditInterestRate: sale.creditInterestRate ?? 0,
+          creditTermDays: sale.creditTermDays ?? null,
+          creditDueDate: sale.creditDueDate ? new Date(sale.creditDueDate) : null,
+          creditInstallments: sale.creditInstallments ?? null,
+          creditNote: sale.creditNote ?? null,
           fiscalEnabled: sale.fiscalEnabled,
           ncfFull: sale.ncfFull ?? null,
           ncfType: sale.ncfType ?? null,
@@ -297,6 +318,7 @@ export async function syncSalesByRnc(
               providedCost > 0 ? providedCost : product?.cost ?? 0;
 
             return {
+              localId: i.localId ?? null,
               productId: product?.id ?? null,
               saleId: upserted.id,
               productCodeSnapshot: code,

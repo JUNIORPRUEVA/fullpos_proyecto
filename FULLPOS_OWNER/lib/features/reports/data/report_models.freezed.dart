@@ -26,6 +26,7 @@ mixin _$SalesSummary {
   double get average => throw _privateConstructorUsedError;
   double get totalCost => throw _privateConstructorUsedError;
   double get profit => throw _privateConstructorUsedError;
+  double get expenses => throw _privateConstructorUsedError;
 
   /// Serializes this SalesSummary to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
@@ -50,6 +51,7 @@ abstract class $SalesSummaryCopyWith<$Res> {
     double average,
     double totalCost,
     double profit,
+    double expenses,
   });
 }
 
@@ -73,6 +75,7 @@ class _$SalesSummaryCopyWithImpl<$Res, $Val extends SalesSummary>
     Object? average = null,
     Object? totalCost = null,
     Object? profit = null,
+    Object? expenses = null,
   }) {
     return _then(
       _value.copyWith(
@@ -96,6 +99,10 @@ class _$SalesSummaryCopyWithImpl<$Res, $Val extends SalesSummary>
                 ? _value.profit
                 : profit // ignore: cast_nullable_to_non_nullable
                       as double,
+            expenses: null == expenses
+                ? _value.expenses
+                : expenses // ignore: cast_nullable_to_non_nullable
+                      as double,
           )
           as $Val,
     );
@@ -117,6 +124,7 @@ abstract class _$$SalesSummaryImplCopyWith<$Res>
     double average,
     double totalCost,
     double profit,
+    double expenses,
   });
 }
 
@@ -139,6 +147,7 @@ class __$$SalesSummaryImplCopyWithImpl<$Res>
     Object? average = null,
     Object? totalCost = null,
     Object? profit = null,
+    Object? expenses = null,
   }) {
     return _then(
       _$SalesSummaryImpl(
@@ -162,6 +171,10 @@ class __$$SalesSummaryImplCopyWithImpl<$Res>
             ? _value.profit
             : profit // ignore: cast_nullable_to_non_nullable
                   as double,
+        expenses: null == expenses
+            ? _value.expenses
+            : expenses // ignore: cast_nullable_to_non_nullable
+                  as double,
       ),
     );
   }
@@ -176,6 +189,7 @@ class _$SalesSummaryImpl implements _SalesSummary {
     required this.average,
     this.totalCost = 0,
     this.profit = 0,
+    this.expenses = 0,
   });
 
   factory _$SalesSummaryImpl.fromJson(Map<String, dynamic> json) =>
@@ -193,10 +207,13 @@ class _$SalesSummaryImpl implements _SalesSummary {
   @override
   @JsonKey()
   final double profit;
+  @override
+  @JsonKey()
+  final double expenses;
 
   @override
   String toString() {
-    return 'SalesSummary(total: $total, count: $count, average: $average, totalCost: $totalCost, profit: $profit)';
+    return 'SalesSummary(total: $total, count: $count, average: $average, totalCost: $totalCost, profit: $profit, expenses: $expenses)';
   }
 
   @override
@@ -209,13 +226,22 @@ class _$SalesSummaryImpl implements _SalesSummary {
             (identical(other.average, average) || other.average == average) &&
             (identical(other.totalCost, totalCost) ||
                 other.totalCost == totalCost) &&
-            (identical(other.profit, profit) || other.profit == profit));
+            (identical(other.profit, profit) || other.profit == profit) &&
+            (identical(other.expenses, expenses) ||
+                other.expenses == expenses));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
   @override
-  int get hashCode =>
-      Object.hash(runtimeType, total, count, average, totalCost, profit);
+  int get hashCode => Object.hash(
+    runtimeType,
+    total,
+    count,
+    average,
+    totalCost,
+    profit,
+    expenses,
+  );
 
   /// Create a copy of SalesSummary
   /// with the given fields replaced by the non-null parameter values.
@@ -238,6 +264,7 @@ abstract class _SalesSummary implements SalesSummary {
     required final double average,
     final double totalCost,
     final double profit,
+    final double expenses,
   }) = _$SalesSummaryImpl;
 
   factory _SalesSummary.fromJson(Map<String, dynamic> json) =
@@ -253,6 +280,8 @@ abstract class _SalesSummary implements SalesSummary {
   double get totalCost;
   @override
   double get profit;
+  @override
+  double get expenses;
 
   /// Create a copy of SalesSummary
   /// with the given fields replaced by the non-null parameter values.

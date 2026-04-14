@@ -29,7 +29,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
   bool _reloadRequested = false;
 
   SalesSummary? _summary;
-  ExpensesSummary? _expensesSummary;
   List<SalesByDay> _byDay = const [];
   bool _loading = true;
   String _warningMessage = '';
@@ -102,22 +101,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           fallback: const <SalesByDay>[],
           onError: () => warnings.add('No se pudo cargar la tendencia diaria.'),
         ),
-        _safeLoad<Object?>(
-          loader: () => repo.expensesSummary(
-            formatter.format(_from),
-            formatter.format(_to),
-          ),
-          fallback: null,
-          onError: () =>
-              warnings.add('No se pudo cargar el resumen de gastos.'),
-        ),
       ]);
 
       if (!mounted) return;
       setState(() {
         _summary = results[0] as SalesSummary;
         _byDay = results[1] as List<SalesByDay>;
-        _expensesSummary = results[2] as ExpensesSummary?;
         _warningMessage = warnings.join(' ');
         _loading = false;
       });
@@ -458,21 +447,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     final authState = ref.watch(authRepositoryProvider);
     final appConfig = ref.watch(appConfigProvider);
     final summary = _summary;
-    final expensesSummary = _expensesSummary;
     final total = (summary?.total ?? 0).toDouble();
     final totalCost = (summary?.totalCost ?? 0).toDouble();
-    final expensesTotal = (expensesSummary?.total ?? 0).toDouble();
-    final profit = summary == null
-        ? 0.0
-        : (summary.profit != 0 || totalCost != 0)
-        ? summary.profit.toDouble()
-        : total - totalCost;
+    final expensesTotal = (summary?.expenses ?? 0).toDouble();
+    final profit = (summary?.profit ?? 0).toDouble();
     final margin = total > 0 ? (profit / total) * 100 : 0.0;
     final chartData = _byDay.length > 30
         ? _byDay.sublist(_byDay.length - 30)
         : _byDay;
     final activeDays = chartData.isEmpty ? 0 : chartData.length;
-    final averageDay = activeDays == 0 ? 0.0 : total / activeDays;
+    final averageDay = (summary?.average ?? 0).toDouble();
     final hasNoVisibleData = !_loading && chartData.isEmpty && total == 0;
     final peakDay = chartData.isEmpty
         ? null
@@ -1230,10 +1214,7 @@ class _StatPill extends StatelessWidget {
 }
 
 class _MobileMetricStrip extends StatelessWidget {
-  const _MobileMetricStrip({
-    required this.items,
-    required this.onTap,
-  });
+  const _MobileMetricStrip({required this.items, required this.onTap});
 
   final List<_MetricInfo> items;
   final ValueChanged<int> onTap;

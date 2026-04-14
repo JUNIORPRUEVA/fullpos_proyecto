@@ -139,7 +139,12 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     String to,
   ) async {
     const pageSize = 100;
-    final firstPage = await repo.salesList(from, to, page: 1, pageSize: pageSize);
+    final firstPage = await repo.salesList(
+      from,
+      to,
+      page: 1,
+      pageSize: pageSize,
+    );
     if (firstPage.total <= firstPage.data.length) {
       return firstPage;
     }
@@ -434,10 +439,6 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     final theme = Theme.of(context);
     final filtered = _filteredSales;
     final groupedSales = _groupedFilteredSales;
-    final filteredTotal = filtered.fold<double>(
-      0,
-      (sum, sale) => sum + sale.total,
-    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
@@ -447,9 +448,7 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
           _TopInfoStrip(
             rangeLabel: _rangeLabel(),
             salesCount: filtered.length,
-            totalLabel: formatAccountingAmount(
-              filtered.isEmpty ? (_summary?.total ?? 0) : filteredTotal,
-            ),
+            totalLabel: formatAccountingAmount(_summary?.total ?? 0),
           ),
           const SizedBox(height: 8),
           _DailyMetricsStrip(
@@ -500,9 +499,7 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
             ),
           ],
           const SizedBox(height: 10),
-          Expanded(
-            child: _buildSalesPanel(theme, filtered, groupedSales),
-          ),
+          Expanded(child: _buildSalesPanel(theme, filtered, groupedSales)),
         ],
       ),
     );
@@ -564,10 +561,7 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
           separatorBuilder: (_, _) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final entry = groupedSales.entries.elementAt(index);
-            return _SalesDaySection(
-              dateKey: entry.key,
-              sales: entry.value,
-            );
+            return _SalesDaySection(dateKey: entry.key, sales: entry.value);
           },
         ),
       ),
@@ -672,17 +666,11 @@ class _DailyMetricsStrip extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: _MetricCard(
-            label: 'Dias con ventas',
-            value: '$daysWithSales',
-          ),
+          child: _MetricCard(label: 'Dias con ventas', value: '$daysWithSales'),
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: _MetricCard(
-            label: 'Ventas cargadas',
-            value: '$totalCount',
-          ),
+          child: _MetricCard(label: 'Ventas cargadas', value: '$totalCount'),
         ),
         const SizedBox(width: 8),
         Expanded(
@@ -760,7 +748,6 @@ class _SalesDaySection extends StatelessWidget {
     final label = date == null
         ? dateKey
         : DateFormat('EEEE, dd MMM yyyy', 'es').format(date);
-    final total = sales.fold<double>(0, (sum, sale) => sum + sale.total);
 
     return Container(
       decoration: BoxDecoration(
@@ -789,20 +776,15 @@ class _SalesDaySection extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(width: 10),
-              Text(
-                formatAccountingAmount(total),
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 8),
-          ...sales.map((sale) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _CompactSaleRow(sale: sale),
-              )),
+          ...sales.map(
+            (sale) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _CompactSaleRow(sale: sale),
+            ),
+          ),
         ],
       ),
     );

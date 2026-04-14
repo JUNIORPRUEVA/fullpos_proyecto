@@ -13,6 +13,7 @@ _$SalesSummaryImpl _$$SalesSummaryImplFromJson(Map<String, dynamic> json) =>
       average: (json['average'] as num).toDouble(),
       totalCost: (json['totalCost'] as num?)?.toDouble() ?? 0,
       profit: (json['profit'] as num?)?.toDouble() ?? 0,
+      expenses: (json['expenses'] as num?)?.toDouble() ?? 0,
     );
 
 Map<String, dynamic> _$$SalesSummaryImplToJson(_$SalesSummaryImpl instance) =>
@@ -22,6 +23,7 @@ Map<String, dynamic> _$$SalesSummaryImplToJson(_$SalesSummaryImpl instance) =>
       'average': instance.average,
       'totalCost': instance.totalCost,
       'profit': instance.profit,
+      'expenses': instance.expenses,
     };
 
 _$SalesByDayImpl _$$SalesByDayImplFromJson(Map<String, dynamic> json) =>

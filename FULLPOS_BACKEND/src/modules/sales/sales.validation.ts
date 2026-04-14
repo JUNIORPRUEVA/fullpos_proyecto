@@ -22,6 +22,11 @@ export const syncSalesByRncSchema = z
           paymentMethod: z.string().trim().max(50).optional().nullable(),
           paidAmount: z.coerce.number().nonnegative().optional().default(0),
           changeAmount: z.coerce.number().nonnegative().optional().default(0),
+          creditInterestRate: z.coerce.number().nonnegative().optional().default(0),
+          creditTermDays: z.coerce.number().int().positive().optional().nullable(),
+          creditDueDate: z.string().datetime().optional().nullable(),
+          creditInstallments: z.coerce.number().int().positive().optional().nullable(),
+          creditNote: z.string().trim().max(500).optional().nullable(),
           fiscalEnabled: z.coerce.boolean().optional().default(false),
           ncfFull: z.string().trim().max(100).optional().nullable(),
           ncfType: z.string().trim().max(50).optional().nullable(),
@@ -32,6 +37,7 @@ export const syncSalesByRncSchema = z
           items: z
             .array(
               z.object({
+                localId: z.coerce.number().int().positive().optional().nullable(),
                 productCodeSnapshot: z.string().trim().max(100).optional().nullable(),
                 productNameSnapshot: z.string().trim().min(1).max(200),
                 qty: z.coerce.number(),

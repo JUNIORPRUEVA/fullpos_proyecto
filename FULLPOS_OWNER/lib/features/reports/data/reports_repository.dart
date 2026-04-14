@@ -19,11 +19,30 @@ class ReportsRepository {
 
   Future<SalesSummary> salesSummary(String from, String to) async {
     return _guard(() async {
-      final res = await _dio.get(
-        '/api/reports/sales/summary',
-        queryParameters: {'from': from, 'to': to},
+      final results = await Future.wait([
+        _dio.get(
+          '/api/reports/sales/summary',
+          queryParameters: {'from': from, 'to': to},
+        ),
+        _dio.get(
+          '/api/expenses/summary',
+          queryParameters: {'from': from, 'to': to},
+          options: _allowNotFoundOptions(),
+        ),
+      ]);
+
+      final summaryResponse = results[0];
+      final expensesResponse = results[1];
+      final summary = SalesSummary.fromJson(
+        summaryResponse.data as Map<String, dynamic>,
       );
-      return SalesSummary.fromJson(res.data as Map<String, dynamic>);
+      final expenses = expensesResponse.statusCode == 404
+          ? 0.0
+          : ExpensesSummary.fromJson(
+              expensesResponse.data as Map<String, dynamic>,
+            ).total;
+
+      return summary.copyWith(expenses: expenses);
     }, fallback: const SalesSummary(total: 0, count: 0, average: 0));
   }
 

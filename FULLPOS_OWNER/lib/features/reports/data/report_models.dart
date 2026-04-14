@@ -11,6 +11,7 @@ class SalesSummary with _$SalesSummary {
     required double average,
     @Default(0) double totalCost,
     @Default(0) double profit,
+    @Default(0) double expenses,
   }) = _SalesSummary;
 
   factory SalesSummary.fromJson(Map<String, dynamic> json) =>
@@ -62,6 +63,18 @@ Map<String, dynamic> _normalizeSalesSummaryJson(Map<String, dynamic> json) {
   normalized['profit'] =
       asNum(normalized['profit']) ??
       asNum(pick(['profit', 'ganancia', 'utilidad', 'margen', 'margin'])) ??
+      0;
+  normalized['expenses'] =
+      asNum(normalized['expenses']) ??
+      asNum(
+        pick([
+          'expenses',
+          'expenseTotal',
+          'expensesTotal',
+          'gastos',
+          'egresos',
+        ]),
+      ) ??
       0;
 
   return normalized;

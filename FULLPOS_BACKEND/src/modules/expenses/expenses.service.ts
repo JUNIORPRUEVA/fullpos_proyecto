@@ -26,33 +26,15 @@ export async function getExpensesSummary(companyId: number, from: string, to: st
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
 
-  const [expenseResult, cashMovementResult] = await Promise.all([
-    prisma.expense.aggregate({
-      _sum: { amount: true },
-      _count: { _all: true },
-      where: {
-        companyId,
-        incurredAt: { gte: fromDate, lte: toDate },
-      },
-    }),
-    prisma.cashMovement.aggregate({
-      _sum: { amount: true },
-      _count: { _all: true },
-      where: {
-        companyId,
-        type: { in: cashExpenseTypes },
-        createdAt: { gte: fromDate, lte: toDate },
-      },
-    }),
-  ]);
-
-  const expenseCount = expenseResult._count._all;
-  if (expenseCount > 0) {
-    return {
-      total: toNumber(expenseResult._sum.amount),
-      count: expenseCount,
-    };
-  }
+  const cashMovementResult = await prisma.cashMovement.aggregate({
+    _sum: { amount: true },
+    _count: { _all: true },
+    where: {
+      companyId,
+      type: { in: cashExpenseTypes },
+      createdAt: { gte: fromDate, lte: toDate },
+    },
+  });
 
   return {
     total: toNumber(cashMovementResult._sum.amount),
