@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/utils/accounting_format.dart';
 import '../data/report_data.dart';
+import '../data/report_realtime_projection.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
@@ -50,7 +51,10 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream
-        .listen((_) => _load(showLoading: false));
+        .listen((message) {
+          _applyRealtimeMessage(message);
+          unawaited(_load(showLoading: false));
+        });
     _load(showLoading: true);
   }
 
@@ -125,6 +129,23 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
         unawaited(_load(showLoading: false));
       }
     }
+  }
+
+  void _applyRealtimeMessage(SaleRealtimeMessage message) {
+    final report = _reportData;
+    if (report == null || !mounted) return;
+
+    final projected = applySaleRealtimeProjection(
+      current: report,
+      message: message,
+      from: _from,
+      to: _to,
+    );
+
+    setState(() {
+      _reportData = projected;
+      _byDay = projected.salesByDay;
+    });
   }
 
   List<SaleRow> get _filteredSales {
@@ -388,7 +409,7 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
       if (previous?.revision == next.revision) return;
       if (!next.appliesTo('/sales/by-day')) return;
-      unawaited(_load(showLoading: true));
+      unawaited(_load(showLoading: false));
     });
 
     final theme = Theme.of(context);

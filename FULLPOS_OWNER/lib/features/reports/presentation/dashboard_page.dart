@@ -13,6 +13,7 @@ import '../../../core/utils/accounting_format.dart';
 import '../../auth/data/auth_repository.dart';
 import '../data/report_data.dart';
 import '../data/report_models.dart';
+import '../data/report_realtime_projection.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
 
@@ -50,7 +51,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream
-        .listen((_) => _load(showLoading: false));
+        .listen((message) {
+          _applyRealtimeMessage(message);
+          unawaited(_load(showLoading: false));
+        });
   }
 
   @override
@@ -131,6 +135,20 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
         unawaited(_load(showLoading: false));
       }
     }
+  }
+
+  void _applyRealtimeMessage(SaleRealtimeMessage message) {
+    final report = _reportData;
+    if (report == null || !mounted) return;
+
+    setState(() {
+      _reportData = applySaleRealtimeProjection(
+        current: report,
+        message: message,
+        from: _from,
+        to: _to,
+      );
+    });
   }
 
   Future<T> _safeLoad<T>({

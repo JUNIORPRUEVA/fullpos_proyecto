@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/utils/accounting_format.dart';
 import '../data/report_data.dart';
+import '../data/report_realtime_projection.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
@@ -48,7 +49,10 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream
-        .listen((_) => _load(page: 1, showLoading: false));
+        .listen((message) {
+          _applyRealtimeMessage(message);
+          unawaited(_load(page: 1, showLoading: false));
+        });
   }
 
   @override
@@ -109,12 +113,32 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
     }
   }
 
+  void _applyRealtimeMessage(SaleRealtimeMessage message) {
+    final report = _reportData;
+    if (report == null || !mounted) return;
+
+    final projected = applySaleRealtimeProjection(
+      current: report,
+      message: message,
+      from: _from,
+      to: _to,
+    );
+    final totalPages = math.max(1, (projected.sales.length / 20).ceil());
+
+    setState(() {
+      _reportData = projected;
+      if (_currentPage > totalPages) {
+        _currentPage = totalPages;
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
       if (previous?.revision == next.revision) return;
       if (!next.appliesTo('/sales/list')) return;
-      unawaited(_load(page: 1, showLoading: true));
+      unawaited(_load(page: 1, showLoading: false));
     });
 
     final report = _reportData;
