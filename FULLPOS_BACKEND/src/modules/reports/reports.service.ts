@@ -7,7 +7,9 @@ import { buildPagination } from '../../utils/pagination';
 const MAX_RANGE_DAYS = 365;
 const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
 const REPORT_SALE_KINDS = ['invoice', 'sale'];
-const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND', 'REFUNDED'] as const;
+// Fully refunded sales should disappear from owner sales reports, while
+// partially refunded sales must remain visible with their updated status.
+const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND'] as const;
 
 const reportSaleInclude = {
   session: {
