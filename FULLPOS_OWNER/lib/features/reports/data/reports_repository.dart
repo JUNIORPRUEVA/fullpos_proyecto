@@ -159,4 +159,5 @@ class ReportsRepository {
       throw Exception('Error inesperado: ${error.toString()}');
     }
   }
+
 }

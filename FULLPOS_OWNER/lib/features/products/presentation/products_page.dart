@@ -1081,7 +1081,8 @@ class _ProductDetailBodyState extends State<_ProductDetailBody> {
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stackTrace) {
                               return Container(
-                                color: theme.colorScheme.surfaceContainerHighest,
+                                color:
+                                    theme.colorScheme.surfaceContainerHighest,
                                 child: const Center(
                                   child: Icon(
                                     Icons.image_not_supported,
@@ -1095,10 +1096,7 @@ class _ProductDetailBodyState extends State<_ProductDetailBody> {
                       : Container(
                           color: theme.colorScheme.surfaceContainerHighest,
                           child: const Center(
-                            child: Icon(
-                              Icons.image_not_supported,
-                              size: 48,
-                            ),
+                            child: Icon(Icons.image_not_supported, size: 48),
                           ),
                         ),
                 ),
@@ -1229,9 +1227,7 @@ class _ProductDetailBodyState extends State<_ProductDetailBody> {
                         bottom: 0,
                         child: Container(
                           padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-                          constraints: BoxConstraints(
-                            minHeight: infoHeight,
-                          ),
+                          constraints: BoxConstraints(minHeight: infoHeight),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(24),
                             color: Colors.black.withValues(alpha: 0.24),
@@ -1259,7 +1255,9 @@ class _ProductDetailBodyState extends State<_ProductDetailBody> {
                                   Expanded(
                                     child: _DetailOverlayValue(
                                       label: 'Precio',
-                                      value: formatAccountingAmount(product.price),
+                                      value: formatAccountingAmount(
+                                        product.price,
+                                      ),
                                       emphasized: true,
                                     ),
                                   ),
@@ -1267,7 +1265,9 @@ class _ProductDetailBodyState extends State<_ProductDetailBody> {
                                   Expanded(
                                     child: _DetailOverlayValue(
                                       label: 'Costo',
-                                      value: formatAccountingAmount(product.cost),
+                                      value: formatAccountingAmount(
+                                        product.cost,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1368,6 +1368,7 @@ class _ProductImageViewerPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -1382,6 +1383,16 @@ class _ProductImageViewerPage extends StatelessWidget {
                     child: Image.network(
                       imageUrl,
                       fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          alignment: Alignment.center,
+                          child: const Icon(
+                            Icons.image_not_supported,
+                            size: 56,
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),

@@ -102,12 +102,77 @@ function calculateReturnAmounts(params: {
   };
 }
 
+async function resolveOriginalSaleRefundState(
+  tx: Prisma.TransactionClient,
+  originalSaleId: number,
+) {
+  const [saleItems, returnedItems] = await Promise.all([
+    tx.saleItem.findMany({
+      where: { saleId: originalSaleId },
+      select: { id: true, qty: true },
+    }),
+    tx.returnItem.findMany({
+      where: { return: { originalSaleId } },
+      select: { saleItemId: true, qty: true },
+    }),
+  ]);
+
+  if (saleItems.length === 0) {
+    return { status: 'REFUNDED' as const, isFullyRefunded: true };
+  }
+
+  const returnedQtyBySaleItemId = new Map<number, number>();
+  for (const item of returnedItems) {
+    if (item.saleItemId == null) continue;
+    returnedQtyBySaleItemId.set(
+      item.saleItemId,
+      (returnedQtyBySaleItemId.get(item.saleItemId) ?? 0) + toNumber(item.qty),
+    );
+  }
+
+  let hasReturnedQty = false;
+  let isFullyRefunded = true;
+  for (const item of saleItems) {
+    const originalQty = toNumber(item.qty);
+    const returnedQty = returnedQtyBySaleItemId.get(item.id) ?? 0;
+    if (returnedQty > 0.0001) {
+      hasReturnedQty = true;
+    }
+    if (returnedQty + 0.0001 < originalQty) {
+      isFullyRefunded = false;
+    }
+  }
+
+  if (!hasReturnedQty) {
+    isFullyRefunded = false;
+  }
+
+  return {
+    status: isFullyRefunded ? ('REFUNDED' as const) : ('PARTIAL_REFUND' as const),
+    isFullyRefunded,
+  };
+}
+
 async function updateOriginalSaleStatus(tx: Prisma.TransactionClient, originalSaleId: number) {
-  const existingReturns = await tx.return.count({ where: { originalSaleId } });
-  const newStatus = existingReturns > 1 ? 'PARTIAL_REFUND' : 'REFUNDED';
-  await tx.sale.update({
+  const refundState = await resolveOriginalSaleRefundState(tx, originalSaleId);
+  return tx.sale.update({
     where: { id: originalSaleId },
-    data: { status: newStatus },
+    data: {
+      status: refundState.status,
+      deletedAt: refundState.isFullyRefunded ? new Date() : null,
+    },
+    select: {
+      id: true,
+      localCode: true,
+      kind: true,
+      status: true,
+      total: true,
+      paymentMethod: true,
+      customerNameSnapshot: true,
+      createdAt: true,
+      updatedAt: true,
+      deletedAt: true,
+    },
   });
 }
 
@@ -281,15 +346,21 @@ export async function createReturn(companyId: number, input: CreateReturnInput) 
       qty: item.qty,
     })));
 
-    await updateOriginalSaleStatus(tx, originalSale.id);
+    const updatedOriginalSale = await updateOriginalSaleStatus(tx, originalSale.id);
 
-    return { createdReturn, returnSale };
+    return { createdReturn, returnSale, updatedOriginalSale };
   });
 
   await emitSaleEvent({
     companyId,
     type: 'sale.created',
     sale: toSaleRealtimePayload(result.returnSale),
+  });
+
+  await emitSaleEvent({
+    companyId,
+    type: 'sale.updated',
+    sale: toSaleRealtimePayload(result.updatedOriginalSale),
   });
 
   return {
@@ -628,11 +699,16 @@ export async function syncReturnsByRnc(
         normalizedItems.map((item) => ({ productId: item.productId, qty: item.qty })),
       );
 
-      await updateOriginalSaleStatus(tx, originalSale.id);
+      const updatedOriginalSale = await updateOriginalSaleStatus(tx, originalSale.id);
 
       realtimeEvents.push({
         type: hadReturnSale ? 'sale.updated' : 'sale.created',
         sale: toSaleRealtimePayload(returnSale),
+      });
+
+      realtimeEvents.push({
+        type: 'sale.updated',
+        sale: toSaleRealtimePayload(updatedOriginalSale),
       });
     }
   });
