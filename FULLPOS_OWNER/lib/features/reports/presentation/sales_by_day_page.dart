@@ -17,7 +17,10 @@ DateTime _dateOnly(DateTime value) =>
     DateTime(value.year, value.month, value.day);
 
 class SalesByDayPage extends ConsumerStatefulWidget {
-  const SalesByDayPage({super.key});
+  const SalesByDayPage({super.key, this.initialFrom, this.initialTo});
+
+  final DateTime? initialFrom;
+  final DateTime? initialTo;
 
   @override
   ConsumerState<SalesByDayPage> createState() => _SalesByDayPageState();
@@ -46,8 +49,10 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     final today = _dateOnly(DateTime.now());
-    _from = today.subtract(const Duration(days: 6));
-    _to = today;
+    _from = _dateOnly(
+      widget.initialFrom ?? today.subtract(const Duration(days: 6)),
+    );
+    _to = _dateOnly(widget.initialTo ?? today);
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream

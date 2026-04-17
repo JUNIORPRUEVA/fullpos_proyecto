@@ -16,17 +16,62 @@ import '../data/product_models.dart';
 import '../data/product_realtime_service.dart';
 import '../data/products_repository.dart';
 
-class ProductsPageController {
+class ProductsPageController extends ChangeNotifier {
   ProductsPageController({TextEditingController? searchController})
-    : searchController = searchController ?? TextEditingController();
+    : searchController = searchController ?? TextEditingController() {
+    this.searchController.addListener(notifyListeners);
+  }
 
   final TextEditingController searchController;
+  List<String> _categories = const [];
+  String? _selectedCategory;
 
   VoidCallback? onSearch;
   ValueChanged<String>? onChanged;
+  ValueChanged<String?>? onCategorySelected;
 
+  List<String> get categories => _categories;
+  String? get selectedCategory => _selectedCategory;
+  bool get hasSearchQuery => searchController.text.trim().isNotEmpty;
+  bool get hasActiveFilter => _selectedCategory != null;
+
+  void applySearchChange(String value) {
+    onChanged?.call(value);
+    notifyListeners();
+  }
+
+  void submitSearch() {
+    onSearch?.call();
+    notifyListeners();
+  }
+
+  void clearSearch() {
+    if (searchController.text.isEmpty) return;
+    searchController.clear();
+    onChanged?.call('');
+    onSearch?.call();
+    notifyListeners();
+  }
+
+  void selectCategory(String? value) {
+    onCategorySelected?.call(value);
+    notifyListeners();
+  }
+
+  void updateCatalogState({
+    required List<String> categories,
+    required String? selectedCategory,
+  }) {
+    _categories = List<String>.unmodifiable(categories);
+    _selectedCategory = selectedCategory;
+    notifyListeners();
+  }
+
+  @override
   void dispose() {
+    searchController.removeListener(notifyListeners);
     searchController.dispose();
+    super.dispose();
   }
 }
 
@@ -74,6 +119,11 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
           () => _load(showLoading: true),
         );
       };
+      controller.onCategorySelected = _selectCategory;
+      controller.updateCatalogState(
+        categories: _availableCategories,
+        selectedCategory: _selectedCategory,
+      );
     }
 
     _load(showLoading: true);
@@ -129,6 +179,10 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
     setState(() {
       _products = list;
     });
+    widget.controller?.updateCatalogState(
+      categories: _availableCategories,
+      selectedCategory: _selectedCategory,
+    );
   }
 
   List<String> get _availableCategories {
@@ -151,6 +205,10 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
     setState(() {
       _selectedCategory = category;
     });
+    widget.controller?.updateCatalogState(
+      categories: _availableCategories,
+      selectedCategory: _selectedCategory,
+    );
     _applyFilters();
   }
 
@@ -267,8 +325,8 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
   int _catalogColumnsForWidth(double width) {
     if (width < 700) return 2;
 
-    const horizontalPadding = 24.0;
-    const spacing = 12.0;
+    const horizontalPadding = 16.0;
+    const spacing = 10.0;
     const targetTileWidth = 220.0;
     final availableWidth = width - horizontalPadding;
     return ((availableWidth + spacing) / (targetTileWidth + spacing))
@@ -280,7 +338,20 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
     if (width >= 1400) return 0.86;
     if (width >= 1000) return 0.82;
     if (width >= 700) return 0.78;
-    return 0.75;
+    return 0.79;
+  }
+
+  EdgeInsets _catalogGridPaddingForWidth(double width) {
+    if (width < 700) {
+      return const EdgeInsets.fromLTRB(8, 10, 8, 10);
+    }
+    return const EdgeInsets.fromLTRB(10, 10, 10, 10);
+  }
+
+  double _catalogGridSpacingForWidth(double width) {
+    if (width < 700) return 8;
+    if (width < 1000) return 10;
+    return 12;
   }
 
   @override
@@ -336,18 +407,21 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
                           final aspectRatio = _catalogAspectRatioForWidth(
                             constraints.maxWidth,
                           );
+                          final gridPadding = _catalogGridPaddingForWidth(
+                            constraints.maxWidth,
+                          );
+                          final gridSpacing = _catalogGridSpacingForWidth(
+                            constraints.maxWidth,
+                          );
 
                           return GridView.builder(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
+                            padding: gridPadding,
                             itemCount: _products.length,
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
                                   crossAxisCount: columns,
-                                  crossAxisSpacing: 12,
-                                  mainAxisSpacing: 12,
+                                  crossAxisSpacing: gridSpacing,
+                                  mainAxisSpacing: gridSpacing,
                                   childAspectRatio: aspectRatio,
                                 ),
                             itemBuilder: (context, index) {

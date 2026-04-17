@@ -268,6 +268,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
       case _ReportRangeOption.week:
         _applyQuickRange(7);
         return;
+      case _ReportRangeOption.fortnight:
+        _applyQuickRange(15);
+        return;
       case _ReportRangeOption.custom:
         _openCustomRangeSheet();
         return;
@@ -291,18 +294,88 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
         fromDay == today.subtract(const Duration(days: 6))) {
       return _ReportRangeOption.week;
     }
+    if (_isSameDate(toDay, today) &&
+        fromDay == today.subtract(const Duration(days: 14))) {
+      return _ReportRangeOption.fortnight;
+    }
     return _ReportRangeOption.custom;
+  }
+
+  Future<void> _openRangeOptionsSheet() async {
+    final selected = await showGeneralDialog<_ReportRangeOption>(
+      context: context,
+      barrierLabel: 'Filtrar reporte',
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      transitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        return SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: _ReportRangeDialog(
+                  activeOption: _currentRangeOption(),
+                  from: _from,
+                  to: _to,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
+
+    if (selected == null || !mounted) return;
+    _applyPresetRange(selected);
+  }
+
+  String _rangeOptionLabel(
+    _ReportRangeOption option, {
+    required DateTime from,
+    required DateTime to,
+  }) {
+    switch (option) {
+      case _ReportRangeOption.today:
+        return 'Hoy';
+      case _ReportRangeOption.yesterday:
+        return 'Ayer';
+      case _ReportRangeOption.week:
+        return 'Semana';
+      case _ReportRangeOption.fortnight:
+        return 'Quincena';
+      case _ReportRangeOption.custom:
+        return '${DateFormat('dd MMM').format(from)} - ${DateFormat('dd MMM').format(to)}';
+    }
   }
 
   Future<void> _openCustomRangeSheet() async {
     var localFrom = DateTime(_from.year, _from.month, _from.day);
     var localTo = DateTime(_to.year, _to.month, _to.day);
 
-    final picked = await showModalBottomSheet<DateTimeRange>(
+    final picked = await showGeneralDialog<DateTimeRange>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
+      barrierLabel: 'Rango personalizado',
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      transitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             Future<void> pickDate({required bool isStart}) async {
@@ -353,104 +426,146 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
               });
             }
 
-            return FractionallySizedBox(
-              heightFactor: 0.38,
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-                ),
+            return SafeArea(
+              child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 44,
-                          height: 5,
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(999),
+                  padding: const EdgeInsets.all(16),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surface,
+                          borderRadius: BorderRadius.circular(28),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.12),
+                              blurRadius: 26,
+                              offset: const Offset(0, 14),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Rango personalizado',
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Ajusta el periodo exacto que quieres analizar.',
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                            ),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _DateMiniCard(
+                                    label: 'Desde',
+                                    value: DateFormat(
+                                      'dd MMM',
+                                    ).format(localFrom),
+                                    icon: Icons.calendar_today_outlined,
+                                    onTap: () => pickDate(isStart: true),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _DateMiniCard(
+                                    label: 'Hasta',
+                                    value: DateFormat('dd MMM').format(localTo),
+                                    icon: Icons.event_outlined,
+                                    onTap: () => pickDate(isStart: false),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _PresetMiniChip(
+                                    label: '15 días',
+                                    onTap: () => applyInlinePreset(
+                                      _CustomPreset.last15Days,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _PresetMiniChip(
+                                    label: 'Mes actual',
+                                    onTap: () => applyInlinePreset(
+                                      _CustomPreset.currentMonth,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(),
+                                    child: const Text('Cancelar'),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: FilledButton(
+                                    onPressed: () {
+                                      Navigator.of(context).pop(
+                                        DateTimeRange(
+                                          start: localFrom,
+                                          end: localTo,
+                                        ),
+                                      );
+                                    },
+                                    child: const Text('Aplicar'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Rango personalizado',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DateMiniCard(
-                              label: 'Desde',
-                              value: DateFormat('dd MMM').format(localFrom),
-                              icon: Icons.calendar_today_outlined,
-                              onTap: () => pickDate(isStart: true),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _DateMiniCard(
-                              label: 'Hasta',
-                              value: DateFormat('dd MMM').format(localTo),
-                              icon: Icons.event_outlined,
-                              onTap: () => pickDate(isStart: false),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _PresetMiniChip(
-                              label: '15 días',
-                              onTap: () =>
-                                  applyInlinePreset(_CustomPreset.last15Days),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _PresetMiniChip(
-                              label: 'Mes',
-                              onTap: () =>
-                                  applyInlinePreset(_CustomPreset.currentMonth),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () => Navigator.of(context).pop(),
-                              child: const Text('Cancelar'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: () {
-                                Navigator.of(context).pop(
-                                  DateTimeRange(start: localFrom, end: localTo),
-                                );
-                              },
-                              child: const Text('Aplicar'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
             );
           },
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
+            child: child,
+          ),
         );
       },
     );
@@ -486,15 +601,14 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
         : chartData.reduce(
             (left, right) => right.total > left.total ? right : left,
           );
-    final formatter = DateFormat('yyyy-MM-dd');
-    final fromStr = formatter.format(_from);
-    final toStr = formatter.format(_to);
+    final fromStr = DateFormat('yyyy-MM-dd').format(_from);
+    final toStr = DateFormat('yyyy-MM-dd').format(_to);
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final isPhone = width < 700;
-        final columns = width >= 1100 ? 3 : 3;
+        final columns = 3;
         final metricRatio = width >= 1100 ? 2.7 : 2.25;
         final chartHeight = width >= 1100
             ? 300.0
@@ -506,33 +620,46 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           _MetricInfo(
             title: 'Ventas',
             value: _formatReportAmount(total),
-            caption: chartData.isEmpty
-                ? 'Sin movimiento'
-                : '${chartData.length} días medidos',
+            caption: '',
             icon: Icons.payments_outlined,
             color: theme.colorScheme.primary,
           ),
           _MetricInfo(
             title: 'Gastos',
             value: _formatReportAmount(expensesTotal),
-            caption: expensesTotal == 0 ? 'Sin cargos' : 'Egresos del rango',
+            caption: '',
             icon: Icons.receipt_long_outlined,
             color: AppColors.warning,
           ),
           _MetricInfo(
             title: 'Ganancias',
             value: _formatReportAmount(profit),
-            caption: '${margin.toStringAsFixed(1)}% margen',
+            caption: '',
             icon: Icons.trending_up_outlined,
             color: profit >= 0 ? AppColors.success : AppColors.danger,
           ),
         ];
 
+        final filterLabel = _rangeOptionLabel(
+          activeRange,
+          from: _from,
+          to: _to,
+        );
+
         return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _CenteredFilterButton(
+                  label: filterLabel,
+                  compact: isPhone,
+                  onTap: _openRangeOptionsSheet,
+                ),
+              ),
+              const SizedBox(height: 12),
               if (_loading)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 10),
@@ -554,22 +681,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                 ),
                 const SizedBox(height: 12),
               ],
-              _SurfaceCard(
-                padding: EdgeInsets.fromLTRB(
-                  isPhone ? 8 : 12,
-                  8,
-                  isPhone ? 8 : 12,
-                  8,
-                ),
-                child: _FilterBar(
-                  from: _from,
-                  to: _to,
-                  activeOption: activeRange,
-                  compact: isPhone,
-                  onSelectOption: _applyPresetRange,
-                ),
-              ),
-              const SizedBox(height: 12),
               isPhone
                   ? _MobileMetricStrip(
                       items: metricItems,
@@ -609,125 +720,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                           ),
                       ],
                     ),
-              const SizedBox(height: 12),
-              _SurfaceCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Ventas',
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                chartData.isEmpty
-                                    ? 'Sin datos recientes'
-                                    : chartData.length == 1
-                                    ? 'Hoy'
-                                    : '$fromStr · $toStr',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (chartData.isNotEmpty)
-                          FilledButton.tonalIcon(
-                            onPressed: () {
-                              context.go('/sales/list?from=$fromStr&to=$toStr');
-                            },
-                            icon: const Icon(Icons.visibility_outlined),
-                            label: const Text('Detalle'),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    isPhone
-                        ? Row(
-                            children: [
-                              Expanded(
-                                child: _StatPill(
-                                  label: 'Promedio',
-                                  value: _formatReportAmount(averageDay),
-                                  color: theme.colorScheme.primary,
-                                  compact: true,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _StatPill(
-                                  label: 'Margen',
-                                  value: '${margin.toStringAsFixed(1)}%',
-                                  color: AppColors.success,
-                                  compact: true,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _StatPill(
-                                  label: 'Pico',
-                                  value: peakDay == null
-                                      ? '--'
-                                      : _formatDayLabel(peakDay.date),
-                                  color: theme.colorScheme.secondary,
-                                  compact: true,
-                                ),
-                              ),
-                            ],
-                          )
-                        : Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _StatPill(
-                                label: 'Promedio',
-                                value: _formatReportAmount(averageDay),
-                                color: theme.colorScheme.primary,
-                              ),
-                              _StatPill(
-                                label: 'Margen',
-                                value: '${margin.toStringAsFixed(1)}%',
-                                color: AppColors.success,
-                              ),
-                              _StatPill(
-                                label: 'Gastos',
-                                value: _formatReportAmount(expensesTotal),
-                                color: AppColors.warning,
-                              ),
-                              _StatPill(
-                                label: 'Pico',
-                                value: peakDay == null
-                                    ? '--'
-                                    : '${_formatDayLabel(peakDay.date)} · ${_formatReportAmount(peakDay.total)}',
-                                color: theme.colorScheme.secondary,
-                              ),
-                            ],
-                          ),
-                    const SizedBox(height: 14),
-                    if (chartData.isEmpty)
-                      const _EmptyState()
-                    else
-                      SizedBox(
-                        height: chartHeight,
-                        child: _SalesTrendChart(
-                          data: chartData,
-                          formatAmount: _formatReportAmount,
-                        ),
-                      ),
-                  ],
-                ),
+              const SizedBox(height: 18),
+              _SalesOverviewSection(
+                fromLabel: fromStr,
+                toLabel: toStr,
+                chartData: chartData,
+                chartHeight: chartHeight,
+                isPhone: isPhone,
+                averageDay: averageDay,
+                margin: margin,
+                expensesTotal: expensesTotal,
+                peakDay: peakDay,
+                formatAmount: _formatReportAmount,
+                onOpenDetails: () {
+                  context.go('/sales/list?from=$fromStr&to=$toStr');
+                },
               ),
             ],
           ),
@@ -737,121 +744,440 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
   }
 }
 
-class _FilterBar extends StatelessWidget {
-  const _FilterBar({
-    required this.from,
-    required this.to,
-    required this.activeOption,
-    required this.compact,
-    required this.onSelectOption,
-  });
-
-  final DateTime from;
-  final DateTime to;
-  final _ReportRangeOption activeOption;
-  final bool compact;
-  final ValueChanged<_ReportRangeOption> onSelectOption;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final dateLabel =
-        '${DateFormat('dd MMM').format(from)} · ${DateFormat('dd MMM').format(to)}';
-
-    final buttons = const <({String label, _ReportRangeOption option})>[
-      (label: 'Hoy', option: _ReportRangeOption.today),
-      (label: 'Ayer', option: _ReportRangeOption.yesterday),
-      (label: 'Semana', option: _ReportRangeOption.week),
-      (label: 'Personalizado', option: _ReportRangeOption.custom),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: EdgeInsets.all(compact ? 3 : 4),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerLowest,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-          ),
-          child: Row(
-            children: buttons
-                .map(
-                  (item) => Expanded(
-                    child: _RangeSegmentButton(
-                      label: item.label,
-                      selected: activeOption == item.option,
-                      compact: compact,
-                      onTap: () => onSelectOption(item.option),
-                    ),
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-        if (!compact) ...[
-          const SizedBox(height: 10),
-          Text(
-            dateLabel,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _RangeSegmentButton extends StatelessWidget {
-  const _RangeSegmentButton({
+class _CenteredFilterButton extends StatelessWidget {
+  const _CenteredFilterButton({
     required this.label,
-    required this.selected,
     required this.compact,
     required this.onTap,
   });
 
   final String label;
-  final bool selected;
   final bool compact;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      child: Material(
-        color: selected ? theme.colorScheme.primary : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: 4,
-              vertical: compact ? 8 : 9,
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Ink(
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 10 : 12,
+            vertical: compact ? 6 : 7,
+          ),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.82),
             ),
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: selected
-                    ? theme.colorScheme.onPrimary
-                    : theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w800,
-                fontSize: compact ? 11.5 : 13,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
-            ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: compact ? 24 : 26,
+                height: compact ? 24 : 26,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.tune_rounded,
+                  color: theme.colorScheme.primary,
+                  size: 15,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                  fontSize: compact ? 11 : 11.5,
+                  letterSpacing: -0.1,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: theme.colorScheme.onSurfaceVariant,
+                size: 18,
+              ),
+            ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ReportRangeDialog extends StatelessWidget {
+  const _ReportRangeDialog({
+    required this.activeOption,
+    required this.from,
+    required this.to,
+  });
+
+  final _ReportRangeOption activeOption;
+  final DateTime from;
+  final DateTime to;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final options =
+        <
+          ({
+            String title,
+            String subtitle,
+            IconData icon,
+            _ReportRangeOption option,
+          })
+        >[
+          (
+            title: 'Hoy',
+            subtitle: 'Dia actual',
+            icon: Icons.today_outlined,
+            option: _ReportRangeOption.today,
+          ),
+          (
+            title: 'Ayer',
+            subtitle: 'Dia anterior',
+            icon: Icons.history_toggle_off_rounded,
+            option: _ReportRangeOption.yesterday,
+          ),
+          (
+            title: 'Semana',
+            subtitle: 'Ultimos 7 dias',
+            icon: Icons.date_range_outlined,
+            option: _ReportRangeOption.week,
+          ),
+          (
+            title: 'Quincena',
+            subtitle: 'Ultimos 15 dias',
+            icon: Icons.calendar_view_week_outlined,
+            option: _ReportRangeOption.fortnight,
+          ),
+          (
+            title: 'Personalizado',
+            subtitle:
+                '${DateFormat('dd MMM').format(from)} - ${DateFormat('dd MMM').format(to)}',
+            icon: Icons.edit_calendar_outlined,
+            option: _ReportRangeOption.custom,
+          ),
+        ];
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 26,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Filtrar reporte',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(height: 12),
+            for (final item in options) ...[
+              _RangeMenuTile(
+                title: item.title,
+                subtitle: item.subtitle,
+                icon: item.icon,
+                selected: activeOption == item.option,
+                onTap: () => Navigator.of(context).pop(item.option),
+              ),
+              if (item != options.last) const SizedBox(height: 8),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RangeMenuTile extends StatelessWidget {
+  const _RangeMenuTile({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: selected
+                ? theme.colorScheme.primary.withValues(alpha: 0.08)
+                : theme.colorScheme.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected
+                  ? theme.colorScheme.primary.withValues(alpha: 0.24)
+                  : theme.colorScheme.outlineVariant,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? theme.colorScheme.primary.withValues(alpha: 0.13)
+                      : theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  icon,
+                  color: selected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Icon(
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.chevron_right_rounded,
+                color: selected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SalesOverviewSection extends StatelessWidget {
+  const _SalesOverviewSection({
+    required this.fromLabel,
+    required this.toLabel,
+    required this.chartData,
+    required this.chartHeight,
+    required this.isPhone,
+    required this.averageDay,
+    required this.margin,
+    required this.expensesTotal,
+    required this.peakDay,
+    required this.formatAmount,
+    required this.onOpenDetails,
+  });
+
+  final String fromLabel;
+  final String toLabel;
+  final List<SalesByDay> chartData;
+  final double chartHeight;
+  final bool isPhone;
+  final double averageDay;
+  final double margin;
+  final double expensesTotal;
+  final SalesByDay? peakDay;
+  final String Function(num value) formatAmount;
+  final VoidCallback onOpenDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pills = [
+      _StatPill(
+        label: 'Promedio',
+        value: formatAmount(averageDay),
+        color: theme.colorScheme.primary,
+        compact: isPhone,
+      ),
+      _StatPill(
+        label: 'Margen',
+        value: '${margin.toStringAsFixed(1)}%',
+        color: AppColors.success,
+        compact: isPhone,
+      ),
+      _StatPill(
+        label: 'Gastos',
+        value: formatAmount(expensesTotal),
+        color: AppColors.warning,
+        compact: isPhone,
+      ),
+      _StatPill(
+        label: 'Pico',
+        value: peakDay == null
+            ? '--'
+            : isPhone
+            ? _formatDayLabel(peakDay!.date)
+            : '${_formatDayLabel(peakDay!.date)} - ${formatAmount(peakDay!.total)}',
+        color: theme.colorScheme.secondary,
+        compact: isPhone,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wideLayout = constraints.maxWidth >= 980;
+        final pillWidth = isPhone
+            ? (constraints.maxWidth - 8) / 2
+            : math.min(240.0, (constraints.maxWidth - 8) / 2);
+        final chartPanel = _SurfaceCard(
+          padding: EdgeInsets.fromLTRB(
+            isPhone ? 12 : 16,
+            14,
+            isPhone ? 12 : 16,
+            12,
+          ),
+          child: chartData.isEmpty
+              ? const _EmptyState()
+              : SizedBox(
+                  height: chartHeight,
+                  child: _SalesTrendChart(
+                    data: chartData,
+                    formatAmount: formatAmount,
+                  ),
+                ),
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Ventas',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$fromLabel - $toLabel',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                FilledButton.tonalIcon(
+                  onPressed: chartData.isEmpty ? null : onOpenDetails,
+                  icon: const Icon(Icons.visibility_outlined, size: 18),
+                  label: const Text('Detalle'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (wideLayout)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 5, child: chartPanel),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                      children: [
+                        for (var index = 0; index < pills.length; index++) ...[
+                          SizedBox(width: double.infinity, child: pills[index]),
+                          if (index != pills.length - 1)
+                            const SizedBox(height: 10),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            else ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final pill in pills)
+                    SizedBox(width: pillWidth, child: pill),
+                ],
+              ),
+              const SizedBox(height: 14),
+              chartPanel,
+            ],
+          ],
+        );
+      },
     );
   }
 }
@@ -1129,16 +1455,17 @@ class _MetricCard extends StatelessWidget {
             ),
           ),
           SizedBox(height: large ? 12 : 4),
-          Text(
-            caption,
-            maxLines: large ? 3 : 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-              fontSize: large ? 15 : null,
+          if (caption.isNotEmpty)
+            Text(
+              caption,
+              maxLines: large ? 3 : 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+                fontSize: large ? 15 : 11,
+              ),
             ),
-          ),
           if (large) ...[
             const SizedBox(height: 18),
             Container(
@@ -1217,6 +1544,7 @@ class _StatPill extends StatelessWidget {
             style: theme.textTheme.labelMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w700,
+              fontSize: 10.5,
             ),
           ),
           const SizedBox(height: 4),
@@ -1227,7 +1555,7 @@ class _StatPill extends StatelessWidget {
             style: theme.textTheme.titleSmall?.copyWith(
               color: color,
               fontWeight: FontWeight.w800,
-              fontSize: compact ? 13 : null,
+              fontSize: compact ? 12 : 12.5,
             ),
           ),
         ],
@@ -1437,7 +1765,7 @@ class _MetricInfo {
   final Color color;
 }
 
-enum _ReportRangeOption { today, yesterday, week, custom }
+enum _ReportRangeOption { today, yesterday, week, fortnight, custom }
 
 enum _CustomPreset { last15Days, currentMonth }
 

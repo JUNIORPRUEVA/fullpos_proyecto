@@ -68,7 +68,9 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
 
   List<String> get _availableCategories {
     final categories = {
-      ..._all.map((product) => _normalizeCategory(product.category)).whereType<String>(),
+      ..._all
+          .map((product) => _normalizeCategory(product.category))
+          .whereType<String>(),
       ..._syncedCategories.map(_normalizeCategory).whereType<String>(),
     }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return categories;
@@ -187,6 +189,80 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
               icon: metric.icon,
               color: metric.color,
               large: true,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showProductDetail(BuildContext context, Product item) async {
+    final theme = Theme.of(context);
+    final category = _normalizeCategory(item.category);
+    final detailRows = <({String label, String value})>[
+      (label: 'Nombre', value: item.name),
+      (label: 'Codigo', value: item.code.isEmpty ? '--' : item.code),
+      (label: 'Stock', value: item.stock.toStringAsFixed(0)),
+      (label: 'Costo', value: formatAccountingAmount(item.cost)),
+      (label: 'Precio', value: formatAccountingAmount(item.price)),
+      if (category != null) (label: 'Categoria', value: category),
+      if (item.description != null && item.description!.trim().isNotEmpty)
+        (label: 'Descripcion', value: item.description!.trim()),
+    ];
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withAlpha((0.34 * 255).round()),
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Detalle del producto',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Cerrar',
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          for (final row in detailRows)
+                            _InventoryDetailRow(
+                              label: row.label,
+                              value: row.value,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -359,95 +435,182 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
                                   height: listHeight,
                                   child: Card(
                                     clipBehavior: Clip.antiAlias,
-                                    child: filtered.isEmpty
-                                        ? const Center(
-                                            child: Text(
-                                              'Sin productos para el filtro actual.',
-                                            ),
-                                          )
-                                        : ListView.separated(
-                                            itemCount: filtered.length,
-                                            separatorBuilder:
-                                                (context, index) =>
-                                                    const Divider(height: 1),
-                                            itemBuilder: (context, index) {
-                                              final item = filtered[index];
-                                              final isOut = item.stock <= 0;
-                                              return ListTile(
-                                                dense: true,
-                                                leading: CircleAvatar(
-                                                  backgroundColor: isOut
-                                                      ? theme.colorScheme.error
-                                                            .withValues(
-                                                              alpha: 0.15,
-                                                            )
-                                                      : theme
-                                                            .colorScheme
-                                                            .primary
-                                                            .withValues(
-                                                              alpha: 0.12,
-                                                            ),
-                                                  child: Text(
-                                                    item.code.isNotEmpty
-                                                        ? item.code
-                                                              .trim()
-                                                              .substring(
-                                                                0,
-                                                                math.min(
-                                                                  2,
-                                                                  item
-                                                                      .code
-                                                                      .length,
-                                                                ),
-                                                              )
-                                                              .toUpperCase()
-                                                        : '--',
-                                                  ),
-                                                ),
-                                                title: Text(
-                                                  item.name,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                                subtitle: Text(
-                                                  _normalizeCategory(
-                                                            item.category,
-                                                          ) !=
-                                                          null
-                                                      ? 'Código: ${item.code} • Stock: ${item.stock.toStringAsFixed(0)} • ${_normalizeCategory(item.category)!}'
-                                                      : 'Código: ${item.code} • Stock: ${item.stock.toStringAsFixed(0)}',
-                                                ),
-                                                trailing: Column(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.end,
-                                                  children: [
-                                                    Text(
-                                                      'Costo: ${formatAccountingAmount(item.cost)}',
-                                                      style: theme
-                                                          .textTheme
-                                                          .bodySmall,
-                                                    ),
-                                                    Text(
-                                                      'Precio: ${formatAccountingAmount(item.price)}',
-                                                      style: theme
-                                                          .textTheme
-                                                          .bodySmall
-                                                          ?.copyWith(
-                                                            color: theme
-                                                                .colorScheme
-                                                                .primary,
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                          ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              );
-                                            },
+                                    child: Column(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            12,
+                                            10,
+                                            12,
+                                            8,
                                           ),
+                                          color: theme
+                                              .colorScheme
+                                              .surfaceContainerLow,
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                flex: 6,
+                                                child: Text(
+                                                  'Producto',
+                                                  style: theme
+                                                      .textTheme
+                                                      .labelMedium
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                      ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              SizedBox(
+                                                width: 52,
+                                                child: Text(
+                                                  'Stock',
+                                                  textAlign: TextAlign.center,
+                                                  style: theme
+                                                      .textTheme
+                                                      .labelMedium
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                      ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              SizedBox(
+                                                width: 92,
+                                                child: Text(
+                                                  'Costo',
+                                                  textAlign: TextAlign.right,
+                                                  style: theme
+                                                      .textTheme
+                                                      .labelMedium
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                      ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: filtered.isEmpty
+                                              ? const Center(
+                                                  child: Text(
+                                                    'Sin productos para el filtro actual.',
+                                                  ),
+                                                )
+                                              : ListView.separated(
+                                                  itemCount: filtered.length,
+                                                  separatorBuilder:
+                                                      (context, index) =>
+                                                          const Divider(
+                                                            height: 1,
+                                                          ),
+                                                  itemBuilder: (context, index) {
+                                                    final item =
+                                                        filtered[index];
+                                                    final isOut =
+                                                        item.stock <= 0;
+                                                    return InkWell(
+                                                      onTap: () =>
+                                                          _showProductDetail(
+                                                            context,
+                                                            item,
+                                                          ),
+                                                      child: Padding(
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 12,
+                                                              vertical: 11,
+                                                            ),
+                                                        child: Row(
+                                                          children: [
+                                                            Expanded(
+                                                              flex: 6,
+                                                              child: Text(
+                                                                item.name,
+                                                                maxLines: 1,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                                style: theme
+                                                                    .textTheme
+                                                                    .bodyMedium
+                                                                    ?.copyWith(
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w700,
+                                                                    ),
+                                                              ),
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 10,
+                                                            ),
+                                                            SizedBox(
+                                                              width: 52,
+                                                              child: Text(
+                                                                item.stock
+                                                                    .toStringAsFixed(
+                                                                      0,
+                                                                    ),
+                                                                textAlign:
+                                                                    TextAlign
+                                                                        .center,
+                                                                style: theme
+                                                                    .textTheme
+                                                                    .bodySmall
+                                                                    ?.copyWith(
+                                                                      color:
+                                                                          isOut
+                                                                          ? theme.colorScheme.error
+                                                                          : theme.colorScheme.onSurface,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w700,
+                                                                    ),
+                                                              ),
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 10,
+                                                            ),
+                                                            SizedBox(
+                                                              width: 92,
+                                                              child: Text(
+                                                                formatAccountingAmount(
+                                                                  item.cost,
+                                                                ),
+                                                                textAlign:
+                                                                    TextAlign
+                                                                        .right,
+                                                                maxLines: 1,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                                style: theme
+                                                                    .textTheme
+                                                                    .bodySmall
+                                                                    ?.copyWith(
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w700,
+                                                                      color: theme
+                                                                          .colorScheme
+                                                                          .onSurfaceVariant,
+                                                                    ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ],
@@ -518,8 +681,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
             offset: const Offset(0, 48),
             onSelected: (value) {
               setState(() {
-                _selectedCategory =
-                    value == allCategoriesValue ? null : value;
+                _selectedCategory = value == allCategoriesValue ? null : value;
               });
             },
             itemBuilder: (context) => [
@@ -647,6 +809,46 @@ class _StatCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: content,
+      ),
+    );
+  }
+}
+
+class _InventoryDetailRow extends StatelessWidget {
+  const _InventoryDetailRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              value,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

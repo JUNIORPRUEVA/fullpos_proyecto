@@ -1,4 +1,4 @@
- import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/auth/data/auth_repository.dart';
 import '../../features/auth/presentation/login_page.dart';
@@ -81,7 +81,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/sales/by-day',
-            builder: (context, state) => const SalesByDayPage(),
+            builder: (context, state) {
+              DateTime? from;
+              DateTime? to;
+              try {
+                final qp = state.uri.queryParameters;
+                final fromStr = qp['from'];
+                final toStr = qp['to'];
+                if (fromStr != null) from = DateTime.tryParse(fromStr);
+                if (toStr != null) to = DateTime.tryParse(toStr);
+              } catch (_) {
+                // Ignore parse errors.
+              }
+
+              return SalesByDayPage(initialFrom: from, initialTo: to);
+            },
           ),
           GoRoute(
             path: '/inventory',
