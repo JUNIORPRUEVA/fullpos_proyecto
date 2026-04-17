@@ -3,6 +3,8 @@ import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
 import {
+  getNestedValue,
+  normalizeSyncProductOperationsInput,
   createProductSchema,
   listProductsSchema,
   productIdParamsSchema,
@@ -21,6 +23,74 @@ import {
   updateProduct,
   updateProductStock,
 } from './products.service';
+
+function summarizeProductSyncOperation(operation: Record<string, any>) {
+  const product =
+    operation.product && typeof operation.product === 'object'
+      ? operation.product
+      : {};
+
+  return {
+    operationType: operation.operationType ?? null,
+    localProductId: operation.localProductId ?? null,
+    serverProductId: operation.serverProductId ?? null,
+    clientMutationId: operation.clientMutationId ?? null,
+    code: product.code ?? null,
+    name: product.name ?? null,
+    price: product.price ?? null,
+    stock: product.stock ?? null,
+    isActive: product.isActive ?? null,
+    imageUrl: product.imageUrl ?? null,
+  };
+}
+
+function validateSyncProductOperationsRequest(req: any, res: any, next: any) {
+  const rawBody = req.body;
+  const normalizedBody = normalizeSyncProductOperationsInput(rawBody);
+
+  console.info('[products.sync.operations] request_received', {
+    companyId: rawBody?.companyId ?? null,
+    companyRnc: rawBody?.companyRnc ?? null,
+    companyCloudId: rawBody?.companyCloudId ?? null,
+    operations: Array.isArray(rawBody?.operations)
+      ? rawBody.operations.map((operation: Record<string, any>) =>
+          summarizeProductSyncOperation(operation),
+        )
+      : null,
+  });
+
+  const parsed = syncProductOperationsSchema.safeParse(normalizedBody);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue) => ({
+      path: issue.path,
+      reason: issue.code,
+      message: issue.message,
+      value: getNestedValue(rawBody, issue.path as Array<string | number>) ?? null,
+    }));
+
+    console.warn('[products.sync.operations] validation_failed', { issues });
+    return res.status(400).json({
+      message: 'Validation error',
+      errorCode: 'VALIDATION_ERROR',
+      issues: issues.map((issue) => ({
+        path: issue.path,
+        reason: issue.reason,
+        message: issue.message,
+      })),
+    });
+  }
+
+  req.body = parsed.data;
+  console.info('[products.sync.operations] validation_passed', {
+    companyId: parsed.data.companyId ?? null,
+    companyRnc: parsed.data.companyRnc ?? null,
+    companyCloudId: parsed.data.companyCloudId ?? null,
+    operations: parsed.data.operations.map((operation) =>
+      summarizeProductSyncOperation(operation as unknown as Record<string, any>),
+    ),
+  });
+  next();
+}
 
 const router = Router();
 
@@ -56,7 +126,7 @@ router.post(
 router.post(
   '/sync/operations',
   overrideKeyGuard,
-  validate(syncProductOperationsSchema),
+  validateSyncProductOperationsRequest,
   async (req, res, next) => {
     try {
       const result = await syncProductOperations({
@@ -67,6 +137,11 @@ router.post(
       });
       res.json(result);
     } catch (err) {
+      console.warn('[products.sync.operations] service_failed', {
+        message: (err as any)?.message ?? 'Unknown error',
+        errorCode: (err as any)?.errorCode ?? null,
+        status: (err as any)?.status ?? null,
+      });
       next(err);
     }
   },

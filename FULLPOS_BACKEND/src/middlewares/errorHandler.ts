@@ -7,7 +7,11 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
     return res.status(400).json({
       message: 'Validation error',
       errorCode: 'VALIDATION_ERROR',
-      issues: err.issues.map((issue) => ({ path: issue.path, message: issue.message })),
+      issues: err.issues.map((issue) => ({
+        path: issue.path,
+        reason: issue.code,
+        message: issue.message,
+      })),
     });
   }
 

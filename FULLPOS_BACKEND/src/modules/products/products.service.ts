@@ -24,6 +24,11 @@ function parseIsoDate(value?: string | null) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function normalizeOptionalText(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
 function productEventTypeFromOperation(operationType: string, created: boolean) {
   if (operationType === 'delete') return 'product.deleted' as const;
   if (operationType === 'stock') return 'product.stock_updated' as const;
@@ -150,8 +155,8 @@ async function findExistingProduct(params: {
 }
 
 async function persistSyncOperation(companyId: number, operation: ProductSyncOperation) {
-  const code = operation.product.code.trim();
-  const name = operation.product.name.trim();
+  const code = normalizeOptionalText(operation.product.code);
+  const name = normalizeOptionalText(operation.product.name);
   const now = new Date();
   const deletedAt =
     operation.operationType === 'delete'
@@ -210,7 +215,7 @@ async function persistSyncOperation(companyId: number, operation: ProductSyncOpe
           ...(operation.localProductId != null
               ? [{ localId: operation.localProductId }]
               : []),
-          { code },
+          ...(code ? [{ code }] : []),
         ],
       },
     });
@@ -239,23 +244,54 @@ async function persistSyncOperation(companyId: number, operation: ProductSyncOpe
       return { created: false, product: null };
     }
 
+    const fallbackProduct = txExisting ?? existing;
+    const resolvedCode = code ?? fallbackProduct?.code;
+    const resolvedName = name ?? fallbackProduct?.name;
+
+    if (!resolvedCode) {
+      throw {
+        status: 400,
+        message: 'No se pudo resolver product.code para la operación',
+        errorCode: 'PRODUCT_SYNC_CODE_REQUIRED',
+      };
+    }
+
+    if (!resolvedName) {
+      throw {
+        status: 400,
+        message: 'No se pudo resolver product.name para la operación',
+        errorCode: 'PRODUCT_SYNC_NAME_REQUIRED',
+      };
+    }
+
     const baseData = {
-      code,
-      name,
-        category: operation.product.category?.trim() || null,
-      description: null,
-      price: operation.product.price,
-      cost: operation.product.cost ?? 0,
-      stock: operation.product.stock ?? 0,
-      imageUrl: operation.product.imageUrl?.trim() || null,
+      code: resolvedCode,
+      name: resolvedName,
+      category:
+        operation.product.category !== undefined
+          ? operation.product.category?.trim() || null
+          : fallbackProduct?.category ?? null,
+      description: fallbackProduct?.description ?? null,
+      price: operation.product.price ?? toNumber(fallbackProduct?.price ?? null),
+      cost: operation.product.cost ?? toNumber(fallbackProduct?.cost ?? null),
+      stock: operation.product.stock ?? toNumber(fallbackProduct?.stock ?? null),
+      imageUrl:
+        operation.product.imageUrl !== undefined
+          ? operation.product.imageUrl?.trim() || null
+          : fallbackProduct?.imageUrl ?? null,
       isDemo: false,
       isActive:
         operation.operationType === 'delete'
           ? false
-          : operation.product.isActive ?? true,
+          : operation.product.isActive ?? fallbackProduct?.isActive ?? true,
       lastModifiedBy: operation.lastModifiedBy?.trim() || 'fullpos_sync',
       lastClientMutationId: operation.clientMutationId?.trim() || null,
-      deletedAt: operation.operationType === 'delete' ? deletedAt : deletedAt,
+      deletedAt:
+        operation.operationType === 'delete'
+          ? deletedAt
+          : operation.product.deletedAt !== undefined
+            ? deletedAt
+            : fallbackProduct?.deletedAt ?? null,
     };
 
     if (!txExisting) {
@@ -265,7 +301,7 @@ async function persistSyncOperation(companyId: number, operation: ProductSyncOpe
           localId: operation.localProductId,
           ...baseData,
           version: 1,
-          deletedAt: operation.operationType === 'delete' ? deletedAt ?? now : null,
+          deletedAt: operation.operationType === 'delete' ? deletedAt ?? now : baseData.deletedAt,
         },
       });
       return { created: true, product: created };
@@ -501,10 +537,33 @@ export async function syncProductOperations(params: {
   companyCloudId?: string;
   operations: ProductSyncOperation[];
 }) {
-  const company = await resolveCompany({
-    companyId: params.companyId,
-    companyRnc: params.companyRnc,
-    companyCloudId: params.companyCloudId,
+  let company;
+  try {
+    company = await resolveCompany({
+      companyId: params.companyId,
+      companyRnc: params.companyRnc,
+      companyCloudId: params.companyCloudId,
+    });
+  } catch (error: any) {
+    console.warn('[products.sync.operations] company_lookup_failed', {
+      companyId: params.companyId ?? null,
+      companyRnc: params.companyRnc ?? null,
+      companyCloudId: params.companyCloudId ?? null,
+      message: error?.message ?? 'Empresa no encontrada',
+      errorCode: error?.errorCode ?? null,
+    });
+    throw error;
+  }
+
+  console.info('[products.sync.operations] service_start', {
+    companyId: company.id,
+    operations: params.operations.map((operation) => ({
+      operationType: operation.operationType,
+      localProductId: operation.localProductId ?? null,
+      serverProductId: operation.serverProductId ?? null,
+      code: operation.product.code ?? null,
+      imageUrl: operation.product.imageUrl ?? null,
+    })),
   });
 
   const results: Array<{
@@ -547,7 +606,7 @@ export async function syncProductsByRnc(
     const result = await persistSyncOperation(company.id, {
       operationType: 'upsert',
       product: {
-        businessId: company.cloudCompanyId ?? company.rnc,
+        businessId: company.cloudCompanyId ?? company.rnc ?? undefined,
         code: item.code,
         name: item.name,
         category: item.category?.trim() || null,
