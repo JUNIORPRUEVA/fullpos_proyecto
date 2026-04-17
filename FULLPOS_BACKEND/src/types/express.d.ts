@@ -5,6 +5,7 @@ declare global {
     // eslint-disable-next-line @typescript-eslint/naming-convention
     interface Request {
       user?: JwtUser;
+      requestId?: string;
       integration?: {
         tokenId: number;
         companyId: number;

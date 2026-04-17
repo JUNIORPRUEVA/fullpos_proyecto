@@ -36,6 +36,12 @@ model Company {
   clients        Client[]
   categories     Category[]
   suppliers      Supplier[]
+  electronicInvoices ElectronicInvoice[]
+  electronicSequences ElectronicSequence[]
+  electronicCertificates ElectronicCertificate[]
+  electronicInboundEndpointConfigs ElectronicInboundEndpointConfig[]
+  electronicAuditLogs ElectronicAuditLog[]
+  electronicAuthSeeds ElectronicAuthSeed[]
 
   integrationTokens IntegrationToken[]
 
@@ -456,6 +462,7 @@ model Sale {
   payments             Payment[]
   originalReturns      Return[]     @relation("ReturnOriginalSale")
   generatedReturn      Return?      @relation("ReturnSale")
+  electronicInvoices   ElectronicInvoice[]
 
   @@unique([companyId, localCode])
   @@index([companyId, createdAt])
@@ -559,4 +566,223 @@ model ReturnItem {
 
   @@unique([returnId, localId])
   @@index([returnId])
+}
+
+enum ElectronicInvoiceDirection {
+  outbound
+  inbound
+}
+
+enum ElectronicInvoiceInternalStatus {
+  DRAFT
+  GENERATED
+  SIGNED
+  SUBMISSION_PENDING
+  SUBMITTED
+  ACCEPTED
+  ACCEPTED_CONDITIONAL
+  REJECTED
+  COMMERCIAL_APPROVED
+  COMMERCIAL_REJECTED
+  VOID_PENDING
+  VOIDED
+  ERROR
+}
+
+enum ElectronicInvoiceCommercialStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ElectronicInvoiceDgiiStatus {
+  NOT_SENT
+  RECEIVED
+  IN_PROCESS
+  ACCEPTED
+  ACCEPTED_CONDITIONAL
+  REJECTED
+  ERROR
+}
+
+enum ElectronicSequenceStatus {
+  ACTIVE
+  PAUSED
+  EXHAUSTED
+  INACTIVE
+}
+
+enum ElectronicCertificateStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  INACTIVE
+  INVALID
+}
+
+enum ElectronicAuditSeverity {
+  INFO
+  WARN
+  ERROR
+  CRITICAL
+}
+
+model ElectronicInvoice {
+  id                    Int                              @id @default(autoincrement())
+  companyId             Int
+  company               Company                          @relation(fields: [companyId], references: [id])
+  branchId              Int                              @default(0)
+  saleId                Int?
+  sale                  Sale?                            @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  originalInvoiceId     Int?
+  originalInvoice       ElectronicInvoice?               @relation("ElectronicInvoiceCorrection", fields: [originalInvoiceId], references: [id], onDelete: SetNull)
+  corrections           ElectronicInvoice[]              @relation("ElectronicInvoiceCorrection")
+  certificateId         Int?
+  certificate           ElectronicCertificate?           @relation(fields: [certificateId], references: [id], onDelete: SetNull)
+  direction             ElectronicInvoiceDirection
+  documentTypeCode      String
+  ecf                   String
+  sequenceNumber        Int
+  issuerRnc             String
+  issuerName            String
+  buyerRnc              String?
+  buyerName             String?
+  issueDate             DateTime
+  totalAmount           Decimal                          @db.Decimal(14, 2)
+  taxAmount             Decimal                          @db.Decimal(14, 2)
+  currencyCode          String                           @default("DOP")
+  xmlUnsigned           String?
+  xmlSigned             String?
+  xmlHash               String?
+  dgiiTrackId           String?
+  dgiiStatus            ElectronicInvoiceDgiiStatus      @default(NOT_SENT)
+  commercialStatus      ElectronicInvoiceCommercialStatus @default(NONE)
+  internalStatus        ElectronicInvoiceInternalStatus  @default(DRAFT)
+  rejectionCode         String?
+  rejectionMessage      String?
+  dgiiRawResponseJson   Json?
+  signedAt              DateTime?
+  submittedAt           DateTime?
+  acceptedAt            DateTime?
+  rejectedAt            DateTime?
+  canceledAt            DateTime?
+  createdAt             DateTime                         @default(now())
+  updatedAt             DateTime                         @updatedAt
+
+  statusHistory         ElectronicInvoiceStatusHistory[]
+  auditLogs             ElectronicAuditLog[]
+
+  @@unique([companyId, ecf])
+  @@index([companyId, direction, createdAt])
+  @@index([companyId, internalStatus, createdAt])
+  @@index([companyId, dgiiTrackId])
+  @@index([saleId])
+}
+
+model ElectronicInvoiceStatusHistory {
+  id                 Int               @id @default(autoincrement())
+  electronicInvoiceId Int
+  electronicInvoice  ElectronicInvoice @relation(fields: [electronicInvoiceId], references: [id], onDelete: Cascade)
+  fromStatus         String?
+  toStatus           String
+  note               String?
+  rawPayloadJson     Json?
+  createdAt          DateTime          @default(now())
+  createdBy          String?
+
+  @@index([electronicInvoiceId, createdAt])
+}
+
+model ElectronicSequence {
+  id               Int                    @id @default(autoincrement())
+  companyId        Int
+  company          Company                @relation(fields: [companyId], references: [id])
+  branchId         Int                    @default(0)
+  documentTypeCode String
+  prefix           String
+  currentNumber    Int                    @default(0)
+  maxNumber        Int
+  status           ElectronicSequenceStatus @default(ACTIVE)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@unique([companyId, branchId, documentTypeCode])
+  @@index([companyId, status])
+}
+
+model ElectronicCertificate {
+  id                Int                      @id @default(autoincrement())
+  companyId         Int
+  company           Company                  @relation(fields: [companyId], references: [id])
+  alias             String
+  filePath          String?
+  secretReference   String?
+  passwordEncrypted String
+  serialNumber      String
+  issuer            String
+  subject           String
+  validFrom         DateTime
+  validTo           DateTime
+  status            ElectronicCertificateStatus @default(ACTIVE)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  invoices          ElectronicInvoice[]
+
+  @@unique([companyId, alias])
+  @@index([companyId, status])
+}
+
+model ElectronicInboundEndpointConfig {
+  id               Int       @id @default(autoincrement())
+  companyId        Int
+  company          Company   @relation(fields: [companyId], references: [id])
+  branchId         Int       @default(0)
+  authEnabled      Boolean   @default(true)
+  authPath         String
+  receptionPath    String
+  approvalPath     String
+  publicBaseUrl    String
+  active           Boolean   @default(true)
+  outboundEnabled  Boolean   @default(false)
+  environment      String    @default("precertification")
+  tokenTtlSeconds  Int       @default(300)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([companyId, branchId])
+}
+
+model ElectronicAuditLog {
+  id           Int                   @id @default(autoincrement())
+  companyId    Int
+  company      Company               @relation(fields: [companyId], references: [id])
+  invoiceId    Int?
+  invoice      ElectronicInvoice?    @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  eventType    String
+  eventSource  String
+  severity     ElectronicAuditSeverity @default(INFO)
+  message      String
+  payloadJson  Json?
+  requestId    String?
+  createdAt    DateTime              @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([invoiceId, createdAt])
+}
+
+model ElectronicAuthSeed {
+  id            String    @id @default(cuid())
+  companyId     Int
+  company       Company   @relation(fields: [companyId], references: [id])
+  nonce         String
+  challengeHash String
+  expiresAt     DateTime
+  validatedAt   DateTime?
+  usedAt        DateTime?
+  tokenHash     String?
+  createdAt     DateTime  @default(now())
+
+  @@index([companyId, expiresAt])
 }

@@ -18,6 +18,7 @@ import integrationsRoutes from '../modules/integrations/integrations.routes';
 import clientsRoutes from '../modules/clients/clients.routes';
 import categoriesRoutes from '../modules/categories/categories.routes';
 import suppliersRoutes from '../modules/suppliers/suppliers.routes';
+import { adminElectronicInvoicingRouter } from '../modules/electronic-invoicing/electronic-invoicing.module';
 
 const router = Router();
 
@@ -40,5 +41,6 @@ router.use('/integrations', integrationsRoutes);
 router.use('/clients', clientsRoutes);
 router.use('/categories', categoriesRoutes);
 router.use('/suppliers', suppliersRoutes);
+router.use('/electronic-invoicing', adminElectronicInvoicingRouter);
 
 export default router;

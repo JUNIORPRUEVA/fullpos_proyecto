@@ -34,7 +34,19 @@ const envSchema = z.object({
   OWNER_APP_ANDROID_URL: z.string().optional(),
   OWNER_APP_IOS_URL: z.string().optional(),
   OWNER_APP_VERSION: z.string().optional(),
-  DANGER_ACTION_PIN: z.string().min(4).optional()
+  DANGER_ACTION_PIN: z.string().min(4).optional(),
+  FE_MASTER_ENCRYPTION_KEY: z.string().min(32),
+  FE_SEED_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+  FE_PUBLIC_TOKEN_TTL_SECONDS: z.coerce.number().int().min(30).max(86400).default(300),
+  DGII_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(15000),
+  DGII_REQUEST_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(2),
+  DGII_HTTP_USER_AGENT: z.string().optional(),
+  DGII_PRECERT_SUBMIT_URL: z.string().url().optional(),
+  DGII_PRECERT_RESULT_URL_TEMPLATE: z.string().optional(),
+  DGII_PRECERT_BEARER_TOKEN: z.string().optional(),
+  DGII_PRODUCTION_SUBMIT_URL: z.string().url().optional(),
+  DGII_PRODUCTION_RESULT_URL_TEMPLATE: z.string().optional(),
+  DGII_PRODUCTION_BEARER_TOKEN: z.string().optional()
 });
 
 const env = envSchema.parse(process.env);
