@@ -30,6 +30,9 @@ test('DgiiSignatureService signs and verifies XML', () => {
   const verification = service.verifySignedXml(signed);
 
   assert.match(signed, /<Signature/);
+  assert.match(signed, /<DigestValue>/);
+  assert.match(signed, /<SignatureValue>/);
+  assert.match(signed, /<X509Certificate>/);
   assert.equal(verification.valid, true);
   assert.equal(verification.errors.length, 0);
 });

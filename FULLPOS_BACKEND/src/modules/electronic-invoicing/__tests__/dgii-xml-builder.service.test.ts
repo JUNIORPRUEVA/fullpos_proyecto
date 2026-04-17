@@ -40,3 +40,39 @@ test('DgiiXmlBuilderService builds deterministic e-CF XML', () => {
   assert.match(xml, /<RazonSocialComprador>Cliente Fiscal SRL<\/RazonSocialComprador>/);
   assert.match(xml, /<ITBISTotal>36\.00<\/ITBISTotal>/);
 });
+
+test('DgiiXmlBuilderService builds consumer invoice XML for type 32 without buyer RNC', () => {
+  const service = new DgiiXmlBuilderService();
+  const xml = service.build({
+    ecf: 'E320000000001',
+    documentTypeCode: '32',
+    issueDate: new Date('2025-01-03T10:00:00.000Z'),
+    currencyCode: 'DOP',
+    issuer: {
+      rnc: '101010101',
+      name: 'Comercio Demo SRL',
+      address: 'Av. Principal 1',
+    },
+    buyer: {
+      rnc: null,
+      name: 'Consumidor Final',
+    },
+    lines: [
+      {
+        lineNumber: 1,
+        description: 'Producto B',
+        quantity: 1,
+        unitPrice: 50,
+        lineExtensionAmount: 50,
+        taxAmount: 9,
+      },
+    ],
+    subtotalAmount: 50,
+    taxAmount: 9,
+    totalAmount: 59,
+  });
+
+  assert.match(xml, /<TipoeCF>32<\/TipoeCF>/);
+  assert.match(xml, /<RazonSocialComprador>Consumidor Final<\/RazonSocialComprador>/);
+  assert.doesNotMatch(xml, /<RNCComprador>/);
+});
