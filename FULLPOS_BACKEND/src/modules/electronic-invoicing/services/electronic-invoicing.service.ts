@@ -34,12 +34,25 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   ERROR: ['GENERATED', 'SIGNED', 'SUBMISSION_PENDING'],
 };
 
+function getRequiredFeMasterKey() {
+  const key = env.FE_MASTER_ENCRYPTION_KEY?.trim();
+  if (!key) {
+    throw {
+      status: 503,
+      message: 'La facturación electrónica requiere FE_MASTER_ENCRYPTION_KEY configurada',
+      errorCode: 'FE_MASTER_ENCRYPTION_KEY_MISSING',
+    };
+  }
+
+  return key;
+}
+
 function money(value: number) {
   return Math.round(value * 100) / 100;
 }
 
 function deriveSecretKey() {
-  return crypto.createHash('sha256').update(env.FE_MASTER_ENCRYPTION_KEY).digest();
+  return crypto.createHash('sha256').update(getRequiredFeMasterKey()).digest();
 }
 
 function encryptSecret(secret: string) {

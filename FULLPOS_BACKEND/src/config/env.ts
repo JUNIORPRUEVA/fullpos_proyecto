@@ -35,7 +35,7 @@ const envSchema = z.object({
   OWNER_APP_IOS_URL: z.string().optional(),
   OWNER_APP_VERSION: z.string().optional(),
   DANGER_ACTION_PIN: z.string().min(4).optional(),
-  FE_MASTER_ENCRYPTION_KEY: z.string().min(32),
+  FE_MASTER_ENCRYPTION_KEY: z.string().min(32).optional(),
   FE_SEED_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
   FE_PUBLIC_TOKEN_TTL_SECONDS: z.coerce.number().int().min(30).max(86400).default(300),
   DGII_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(15000),

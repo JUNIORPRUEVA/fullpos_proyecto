@@ -8,8 +8,21 @@ import { ElectronicInvoicingMapperService } from './electronic-invoicing-mapper.
 import { buildXmlDocument, deepFindFirstString, parseXml } from '../utils/xml.utils';
 import { hashForStorage, sha256Hex } from '../utils/hash.utils';
 
+function getRequiredFeMasterKey() {
+  const key = env.FE_MASTER_ENCRYPTION_KEY?.trim();
+  if (!key) {
+    throw {
+      status: 503,
+      message: 'La facturación electrónica requiere FE_MASTER_ENCRYPTION_KEY configurada',
+      errorCode: 'FE_MASTER_ENCRYPTION_KEY_MISSING',
+    };
+  }
+
+  return key;
+}
+
 function tokenSecret() {
-  return sha256Hex(env.FE_MASTER_ENCRYPTION_KEY);
+  return sha256Hex(getRequiredFeMasterKey());
 }
 
 export class DgiiAuthService {
