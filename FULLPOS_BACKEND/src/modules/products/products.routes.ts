@@ -32,13 +32,15 @@ router.post(
   validate(syncProductsByRncSchema),
   async (req, res, next) => {
     try {
-      const { companyRnc, companyCloudId, products, deletedProducts } = req.body;
+      const { companyId, companyRnc, companyCloudId, products, deletedProducts } = req.body;
       console.info('[cloud_sync] products.sync.by-rnc', {
+        companyId: companyId ?? null,
         companyRnc: companyRnc ?? null,
         companyCloudId: companyCloudId ?? null,
         count: Array.isArray(products) ? products.length : 0,
       });
       const result = await syncProductsByRnc(
+        companyId,
         companyRnc,
         products ?? [],
         companyCloudId,
@@ -58,6 +60,7 @@ router.post(
   async (req, res, next) => {
     try {
       const result = await syncProductOperations({
+        companyId: req.body.companyId,
         companyRnc: req.body.companyRnc,
         companyCloudId: req.body.companyCloudId,
         operations: req.body.operations,

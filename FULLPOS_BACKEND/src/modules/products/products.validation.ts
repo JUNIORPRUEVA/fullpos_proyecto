@@ -59,6 +59,7 @@ const syncOperationProductSchema = z.object({
 
 export const syncProductOperationsSchema = z
   .object({
+    companyId: z.coerce.number().int().positive().optional(),
     companyRnc: z.string().trim().min(3).optional(),
     companyCloudId: z.string().trim().min(6).optional(),
     operations: z
@@ -77,13 +78,14 @@ export const syncProductOperationsSchema = z
       .min(1)
       .max(100),
   })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
-    path: ['companyRnc'],
+  .refine((data) => data.companyId != null || !!data.companyRnc || !!data.companyCloudId, {
+    message: 'companyId, RNC o companyCloudId requerido',
+    path: ['companyId'],
   });
 
 export const syncProductsByRncSchema = z
   .object({
+    companyId: z.coerce.number().int().positive().optional(),
     companyRnc: z.string().trim().min(3).optional(),
     companyCloudId: z.string().trim().min(6).optional(),
     products: z
@@ -103,7 +105,7 @@ export const syncProductsByRncSchema = z
       .default([]),
     deletedProducts: z.array(z.string().trim().min(1)).max(2000).default([]),
   })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
-    path: ['companyRnc'],
+  .refine((data) => data.companyId != null || !!data.companyRnc || !!data.companyCloudId, {
+    message: 'companyId, RNC o companyCloudId requerido',
+    path: ['companyId'],
   });

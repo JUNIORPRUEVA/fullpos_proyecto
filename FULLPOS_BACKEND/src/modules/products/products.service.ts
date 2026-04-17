@@ -78,7 +78,12 @@ async function resolveCompany(params: {
 
   const rnc = params.companyRnc?.trim() ?? '';
   if (!rnc) {
-    throw { status: 400, message: 'RNC o ID interno requerido' };
+    throw {
+      status: cloudId ? 404 : 400,
+      message: cloudId
+        ? 'Empresa no encontrada para el companyCloudId enviado'
+        : 'companyId, RNC o companyCloudId requerido',
+    };
   }
 
   const exact = await prisma.company.findFirst({
@@ -491,11 +496,13 @@ export async function updateProductStock(
 }
 
 export async function syncProductOperations(params: {
+  companyId?: number;
   companyRnc?: string;
   companyCloudId?: string;
   operations: ProductSyncOperation[];
 }) {
   const company = await resolveCompany({
+    companyId: params.companyId,
     companyRnc: params.companyRnc,
     companyCloudId: params.companyCloudId,
   });
@@ -527,12 +534,13 @@ export async function syncProductOperations(params: {
 }
 
 export async function syncProductsByRnc(
+  companyId: number | undefined,
   companyRnc: string | undefined,
   products: SyncProductInput[],
   companyCloudId?: string,
   deletedProducts?: string[],
 ) {
-  const company = await resolveCompany({ companyRnc, companyCloudId });
+  const company = await resolveCompany({ companyId, companyRnc, companyCloudId });
   const events: Array<{ type: ReturnType<typeof productEventTypeFromOperation>; product: Product }> = [];
 
   for (const item of products) {
