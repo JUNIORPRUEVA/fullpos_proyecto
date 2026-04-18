@@ -118,7 +118,7 @@ function createInMemoryPrisma() {
 test('ElectronicInvoicingService registers certificate on happy path and rejects invalid password', async () => {
   const validCert = createTempPkcs12({ password: 'secret123' });
   const invalidCert = createTempPkcs12({ password: 'correct-password' });
-  const { prisma } = createInMemoryPrisma();
+  const { prisma, state } = createInMemoryPrisma();
   const auditEvents: Array<any> = [];
   const service = new ElectronicInvoicingService(
     prisma as any,
@@ -134,25 +134,71 @@ test('ElectronicInvoicingService registers certificate on happy path and rejects
   try {
     const registered = await service.registerCertificate(
       1,
-      { alias: 'precert-main', filePath: validCert.filePath, password: 'secret123' },
+      {
+        alias: 'precert-main',
+        certificateBuffer: require('fs').readFileSync(validCert.filePath),
+        password: 'secret123',
+      },
       'owner',
       'req-cert',
     );
 
     assert.equal(registered.alias, 'precert-main');
+    assert.equal(registered.success, true);
+    assert.equal(state.certificates[0]?.filePath, null);
+    assert.match(state.certificates[0]?.secretReference ?? '', /^inline-p12:/);
     assert.equal(auditEvents[0]?.eventType, 'certificate.registered');
 
     await assert.rejects(
       service.registerCertificate(
         1,
-        { alias: 'bad-pass', filePath: invalidCert.filePath, password: 'wrong-password' },
+        { alias: 'bad-pass', certificateBuffer: require('fs').readFileSync(invalidCert.filePath), password: 'wrong-password' },
         'owner',
         'req-cert-bad',
       ),
+      (error: any) => error?.status === 400 && error?.errorCode === 'ELECTRONIC_CERTIFICATE_PASSWORD_INVALID',
     );
   } finally {
     validCert.cleanup();
     invalidCert.cleanup();
+  }
+});
+
+test('ElectronicInvoicingService allows expired certificate registration with warning', async () => {
+  const expiredCert = createTempPkcs12({
+    password: 'secret123',
+    validFrom: new Date('2020-01-01T00:00:00.000Z'),
+    validTo: new Date('2021-01-01T00:00:00.000Z'),
+  });
+  const { prisma, state } = createInMemoryPrisma();
+  const service = new ElectronicInvoicingService(
+    prisma as any,
+    {} as any,
+    {} as any,
+    new DgiiXmlBuilderService(),
+    new DgiiSignatureService(),
+    {} as any,
+    {} as any,
+    { log: async () => undefined } as any,
+  );
+
+  try {
+    const registered = await service.registerCertificate(
+      1,
+      {
+        alias: 'expired-cert',
+        certificateBuffer: require('fs').readFileSync(expiredCert.filePath),
+        password: 'secret123',
+      },
+      'owner',
+      'req-cert-expired',
+    );
+
+    assert.equal(registered.success, true);
+    assert.match(registered.warning ?? '', /expirado/i);
+    assert.equal(state.certificates[0]?.status, 'EXPIRED');
+  } finally {
+    expiredCert.cleanup();
   }
 });
 

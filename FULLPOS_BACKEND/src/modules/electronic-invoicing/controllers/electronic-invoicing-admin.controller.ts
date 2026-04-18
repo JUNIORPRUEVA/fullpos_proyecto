@@ -1,7 +1,15 @@
-import { Request, Response } from 'express';
+import path from 'path';
+import multer from 'multer';
+import { NextFunction, Request, RequestHandler, Response } from 'express';
 import { z } from 'zod';
+import { authGuard } from '../../../middlewares/authGuard';
+import { overrideKeyGuard } from '../../../middlewares/overrideKeyGuard';
 import { ElectronicInvoicingService } from '../services/electronic-invoicing.service';
-import { createCertificateDtoSchema } from '../dto/certificate.dto';
+import {
+  createCertificateDtoSchema,
+  createCertificateUploadBodySchema,
+  RegisterCertificateDto,
+} from '../dto/certificate.dto';
 import { upsertElectronicConfigDtoSchema } from '../dto/config.dto';
 import { createSequenceDtoSchema } from '../dto/sequence.dto';
 import { createEcfDtoSchema } from '../dto/create-ecf.dto';
@@ -34,6 +42,89 @@ export const auditTimelineParamsSchema = z.object({
   invoiceId: z.coerce.number().int().positive(),
 });
 
+const certificateUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+function isMultipartRequest(req: Request) {
+  const contentType = req.headers['content-type'];
+  return typeof contentType === 'string' && contentType.toLowerCase().includes('multipart/form-data');
+}
+
+export const uploadElectronicCertificate = certificateUpload.single('file');
+
+export const electronicCertificateAccessGuard: RequestHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (typeof req.headers['x-cloud-key'] === 'string') {
+    return overrideKeyGuard(req, res, next);
+  }
+  return authGuard(req, res, next);
+};
+
+export const validateCreateCertificateRequest: RequestHandler = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const requestWithFile = req as Request & {
+    file?: {
+      buffer: Buffer;
+      originalname: string;
+      mimetype: string;
+      size: number;
+    };
+  };
+
+  if (requestWithFile.file || isMultipartRequest(req)) {
+    console.info('[electronic-invoicing.certificates] upload_received', {
+      alias: req.body?.alias ?? null,
+      hasFile: !!requestWithFile.file,
+      originalName: requestWithFile.file?.originalname ?? null,
+      mimetype: requestWithFile.file?.mimetype ?? null,
+      size: requestWithFile.file?.size ?? null,
+    });
+
+    if (!requestWithFile.file) {
+      return res.status(400).json({
+        message: 'Archivo .p12 requerido',
+        errorCode: 'ELECTRONIC_CERTIFICATE_FILE_REQUIRED',
+      });
+    }
+
+    if (path.extname(requestWithFile.file.originalname || '').toLowerCase() !== '.p12') {
+      return res.status(400).json({
+        message: 'Archivo de certificado inválido. Se requiere .p12',
+        errorCode: 'ELECTRONIC_CERTIFICATE_INVALID_FILE',
+      });
+    }
+
+    const parsed = createCertificateUploadBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return next(parsed.error);
+    }
+
+    req.body = {
+      ...parsed.data,
+      certificateBuffer: requestWithFile.file.buffer,
+      originalName: requestWithFile.file.originalname,
+      mimeType: requestWithFile.file.mimetype,
+    } satisfies RegisterCertificateDto;
+    return next();
+  }
+
+  const parsed = createCertificateDtoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return next(parsed.error);
+  }
+
+  req.body = parsed.data;
+  return next();
+};
+
 export function createElectronicInvoicingAdminController(service: ElectronicInvoicingService) {
   return {
     getConfig: async (req: Request, res: Response) => {
@@ -55,8 +146,10 @@ export function createElectronicInvoicingAdminController(service: ElectronicInvo
     },
 
     createCertificate: async (req: Request, res: Response) => {
-      const dto = req.body as typeof createCertificateDtoSchema['_output'];
-      const certificate = await service.registerCertificate(req.user!.companyId, dto, req.user!.username, req.requestId);
+      const dto = req.body as RegisterCertificateDto;
+      const companyId = req.user?.companyId ?? await service.resolveCertificateCompanyId(dto);
+      const username = req.user?.username ?? dto.uploadedBy?.trim() ?? 'fullpos_pos';
+      const certificate = await service.registerCertificate(companyId, dto, username, req.requestId);
       res.status(201).json(certificate);
     },
 

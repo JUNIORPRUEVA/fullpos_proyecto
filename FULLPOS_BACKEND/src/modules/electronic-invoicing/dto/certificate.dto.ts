@@ -12,4 +12,28 @@ export const createCertificateDtoSchema = z
     path: ['filePath'],
   });
 
+export const createCertificateUploadBodySchema = z.object({
+  alias: z.string().trim().min(2).max(100),
+  password: z.string().min(1),
+  companyId: z.coerce.number().int().positive().optional(),
+  companyRnc: z.string().trim().min(1).optional(),
+  companyCloudId: z.string().trim().min(1).optional(),
+  uploadedBy: z.string().trim().min(1).optional(),
+});
+
 export type CreateCertificateDto = z.infer<typeof createCertificateDtoSchema>;
+export type CreateCertificateUploadBodyDto = z.infer<typeof createCertificateUploadBodySchema>;
+
+export type RegisterCertificateDto = {
+  alias: string;
+  password: string;
+  filePath?: string;
+  secretReference?: string;
+  certificateBuffer?: Buffer;
+  originalName?: string;
+  mimeType?: string;
+  companyId?: number;
+  companyRnc?: string;
+  companyCloudId?: string;
+  uploadedBy?: string;
+};

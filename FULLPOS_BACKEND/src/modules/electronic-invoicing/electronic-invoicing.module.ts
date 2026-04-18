@@ -21,9 +21,12 @@ import {
   auditTimelineParamsSchema,
   configQuerySchema,
   createElectronicInvoicingAdminController,
+  electronicCertificateAccessGuard,
   invoiceIdParamsSchema,
   invoiceIdVariantParamsSchema,
   listQuerySchema,
+  uploadElectronicCertificate,
+  validateCreateCertificateRequest,
 } from './controllers/electronic-invoicing-admin.controller';
 import { createElectronicInvoicingDgiiController } from './controllers/electronic-invoicing-dgii.controller';
 import {
@@ -31,7 +34,6 @@ import {
   validateCommercialApprovalRequest,
   validateReceiveEcfRequest,
 } from './controllers/electronic-invoicing-public.controller';
-import { createCertificateDtoSchema } from './dto/certificate.dto';
 import { upsertElectronicConfigDtoSchema } from './dto/config.dto';
 import { createCreditNoteDtoSchema } from './dto/credit-note.dto';
 import { createEcfDtoSchema } from './dto/create-ecf.dto';
@@ -71,12 +73,14 @@ const publicController = createElectronicInvoicingPublicController(
 );
 
 export const adminElectronicInvoicingRouter = Router();
+
+adminElectronicInvoicingRouter.post('/certificates', electronicCertificateAccessGuard, uploadElectronicCertificate, validateCreateCertificateRequest, asyncHandler(adminController.createCertificate));
+
 adminElectronicInvoicingRouter.use(authGuard);
 
 adminElectronicInvoicingRouter.get('/config', requireRoles('admin', 'owner'), validate(configQuerySchema, 'query'), asyncHandler(adminController.getConfig));
 adminElectronicInvoicingRouter.put('/config', requireRoles('admin', 'owner'), validate(upsertElectronicConfigDtoSchema), asyncHandler(adminController.upsertConfig));
 adminElectronicInvoicingRouter.post('/sequences', requireRoles('admin', 'owner'), validate(createSequenceDtoSchema), asyncHandler(adminController.createSequence));
-adminElectronicInvoicingRouter.post('/certificates', requireRoles('admin', 'owner'), validate(createCertificateDtoSchema), asyncHandler(adminController.createCertificate));
 adminElectronicInvoicingRouter.post('/outbound/generate', requireRoles('admin', 'owner'), validate(createEcfDtoSchema), asyncHandler(adminController.generateOutbound));
 adminElectronicInvoicingRouter.post('/outbound/sign', requireRoles('admin', 'owner'), validate(sendEcfDtoSchema), asyncHandler(adminController.signOutbound));
 adminElectronicInvoicingRouter.post('/outbound/submit', requireRoles('admin', 'owner'), validate(sendEcfDtoSchema), asyncHandler(dgiiController.submitOutbound));

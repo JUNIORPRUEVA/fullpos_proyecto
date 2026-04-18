@@ -15,6 +15,8 @@ import {
   invoiceIdParamsSchema,
   invoiceIdVariantParamsSchema,
   listQuerySchema,
+  uploadElectronicCertificate,
+  validateCreateCertificateRequest,
 } from '../controllers/electronic-invoicing-admin.controller';
 import { createElectronicInvoicingDgiiController } from '../controllers/electronic-invoicing-dgii.controller';
 import {
@@ -22,7 +24,6 @@ import {
   validateCommercialApprovalRequest,
   validateReceiveEcfRequest,
 } from '../controllers/electronic-invoicing-public.controller';
-import { createCertificateDtoSchema } from '../dto/certificate.dto';
 import { upsertElectronicConfigDtoSchema } from '../dto/config.dto';
 import { createCreditNoteDtoSchema } from '../dto/credit-note.dto';
 import { createEcfDtoSchema } from '../dto/create-ecf.dto';
@@ -30,7 +31,10 @@ import { queryTrackDtoSchema } from '../dto/query-track.dto';
 import { createSequenceDtoSchema } from '../dto/sequence.dto';
 import { sendEcfDtoSchema } from '../dto/send-ecf.dto';
 import { requestSeedDtoSchema, validateSeedDtoSchema } from '../dto/validate-seed.dto';
-import { ensureFeTestEnv } from './test-helpers';
+import { createTempPkcs12, ensureFeTestEnv } from './test-helpers';
+const { ElectronicInvoicingService } = require('../services/electronic-invoicing.service');
+const { DgiiXmlBuilderService } = require('../services/dgii-xml-builder.service');
+const { DgiiSignatureService } = require('../services/dgii-signature.service');
 
 ensureFeTestEnv();
 
@@ -116,7 +120,7 @@ function createAdminTestApp(serviceOverrides?: Record<string, any>) {
   router.get('/config', requireRoles('admin', 'owner'), validate(configQuerySchema, 'query'), asyncHandler(adminController.getConfig));
   router.put('/config', requireRoles('admin', 'owner'), validate(upsertElectronicConfigDtoSchema), asyncHandler(adminController.upsertConfig));
   router.post('/sequences', requireRoles('admin', 'owner'), validate(createSequenceDtoSchema), asyncHandler(adminController.createSequence));
-  router.post('/certificates', requireRoles('admin', 'owner'), validate(createCertificateDtoSchema), asyncHandler(adminController.createCertificate));
+  router.post('/certificates', requireRoles('admin', 'owner'), uploadElectronicCertificate, validateCreateCertificateRequest, asyncHandler(adminController.createCertificate));
   router.post('/outbound/generate', requireRoles('admin', 'owner'), validate(createEcfDtoSchema), asyncHandler(adminController.generateOutbound));
   router.post('/outbound/sign', requireRoles('admin', 'owner'), validate(sendEcfDtoSchema), asyncHandler(adminController.signOutbound));
   router.post('/outbound/submit', requireRoles('admin', 'owner'), validate(sendEcfDtoSchema), asyncHandler(dgiiController.submitOutbound));
@@ -131,6 +135,87 @@ function createAdminTestApp(serviceOverrides?: Record<string, any>) {
   app.use(notFound);
   app.use(errorHandler);
   return app;
+}
+
+function createCertificatePrisma() {
+  let certificateId = 1;
+  const state = {
+    certificates: [] as Array<any>,
+    auditLogs: [] as Array<any>,
+  };
+
+  return {
+    state,
+    prisma: {
+      electronicCertificate: {
+        async upsert(input: { where: { companyId_alias: { companyId: number; alias: string } }; create: any; update: any }) {
+          const existingIndex = state.certificates.findIndex(
+            (item) =>
+              item.companyId === input.where.companyId_alias.companyId &&
+              item.alias === input.where.companyId_alias.alias,
+          );
+          if (existingIndex >= 0) {
+            state.certificates[existingIndex] = {
+              ...state.certificates[existingIndex],
+              ...input.update,
+              updatedAt: new Date(),
+            };
+            return state.certificates[existingIndex];
+          }
+
+          const record = {
+            id: certificateId++,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            ...input.create,
+          };
+          state.certificates.push(record);
+          return record;
+        },
+      },
+      electronicAuditLog: {
+        async create(input: { data: any }) {
+          state.auditLogs.push(input.data);
+          return input.data;
+        },
+      },
+    },
+  };
+}
+
+function createAdminCertificateUploadApp() {
+  const { prisma, state } = createCertificatePrisma();
+  const app = express();
+  const token = buildAdminToken();
+  const service = new ElectronicInvoicingService(
+    prisma as any,
+    {} as any,
+    {} as any,
+    new DgiiXmlBuilderService(),
+    new DgiiSignatureService(),
+    {} as any,
+    {} as any,
+    { log: async (input: any) => state.auditLogs.push(input) } as any,
+  );
+  const adminController = createElectronicInvoicingAdminController(service as any);
+
+  app.use(express.json());
+
+  const router = express.Router();
+  router.use(authGuard);
+  router.post(
+    '/certificates',
+    requireRoles('admin', 'owner'),
+    uploadElectronicCertificate,
+    validateCreateCertificateRequest,
+    asyncHandler(adminController.createCertificate),
+  );
+
+  app.use('/api/electronic-invoicing', router);
+  app.use(notFound);
+  app.use(errorHandler);
+
+  return { app, token, state };
 }
 
 test('invalid public FE payload returns 400 JSON and does not crash', async () => {
@@ -217,4 +302,94 @@ test('invalid inbound FE payload returns 400 JSON instead of uncaught crash', as
   assert.equal(response.body.errorCode, 'VALIDATION_ERROR');
   assert.ok(Array.isArray(response.body.issues));
   assert.equal(response.body.issues[0]?.path?.[0], 'xml');
+});
+
+test('multipart electronic certificate upload succeeds and stores encrypted inline payload', async () => {
+  const cert = createTempPkcs12({ password: 'secret123' });
+  const { app, token, state } = createAdminCertificateUploadApp();
+
+  try {
+    const response = await request(app)
+      .post('/api/electronic-invoicing/certificates')
+      .set('Authorization', `Bearer ${token}`)
+      .field('alias', 'main-cert')
+      .field('password', 'secret123')
+      .attach('file', cert.filePath);
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.success, true);
+    assert.equal(response.body.alias, 'main-cert');
+    assert.equal(response.body.serial, '1001');
+    assert.match(state.certificates[0]?.secretReference ?? '', /^inline-p12:/);
+    assert.equal(state.certificates[0]?.filePath, null);
+  } finally {
+    cert.cleanup();
+  }
+});
+
+test('multipart electronic certificate upload returns 400 for wrong password', async () => {
+  const cert = createTempPkcs12({ password: 'correct-password' });
+  const { app, token } = createAdminCertificateUploadApp();
+
+  try {
+    const response = await request(app)
+      .post('/api/electronic-invoicing/certificates')
+      .set('Authorization', `Bearer ${token}`)
+      .field('alias', 'bad-pass')
+      .field('password', 'wrong-password')
+      .attach('file', cert.filePath);
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.errorCode, 'ELECTRONIC_CERTIFICATE_PASSWORD_INVALID');
+  } finally {
+    cert.cleanup();
+  }
+});
+
+test('multipart electronic certificate upload allows expired certificate with warning', async () => {
+  const cert = createTempPkcs12({
+    password: 'secret123',
+    validFrom: new Date('2020-01-01T00:00:00.000Z'),
+    validTo: new Date('2021-01-01T00:00:00.000Z'),
+  });
+  const { app, token, state } = createAdminCertificateUploadApp();
+
+  try {
+    const response = await request(app)
+      .post('/api/electronic-invoicing/certificates')
+      .set('Authorization', `Bearer ${token}`)
+      .field('alias', 'expired-cert')
+      .field('password', 'secret123')
+      .attach('file', cert.filePath);
+
+    assert.equal(response.status, 201);
+    assert.equal(response.body.success, true);
+    assert.match(response.body.warning ?? '', /expirado/i);
+    assert.equal(state.certificates[0]?.status, 'EXPIRED');
+  } finally {
+    cert.cleanup();
+  }
+});
+
+test('multipart electronic certificate upload rejects invalid file extension', async () => {
+  const { app, token } = createAdminCertificateUploadApp();
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const invalidPath = path.join(os.tmpdir(), `fullpos-invalid-${Date.now()}.txt`);
+  fs.writeFileSync(invalidPath, 'not-a-certificate', 'utf8');
+
+  try {
+    const response = await request(app)
+      .post('/api/electronic-invoicing/certificates')
+      .set('Authorization', `Bearer ${token}`)
+      .field('alias', 'invalid-file')
+      .field('password', 'secret123')
+      .attach('file', invalidPath);
+
+    assert.equal(response.status, 400);
+    assert.equal(response.body.errorCode, 'ELECTRONIC_CERTIFICATE_INVALID_FILE');
+  } finally {
+    fs.rmSync(invalidPath, { force: true });
+  }
 });

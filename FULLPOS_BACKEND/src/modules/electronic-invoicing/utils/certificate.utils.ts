@@ -41,6 +41,10 @@ export function resolveCertificateFilePath(filePath?: string | null, secretRefer
 
 export function loadPkcs12Certificate(certificatePath: string, password: string): LoadedPkcs12Certificate {
   const fileBuffer = fs.readFileSync(certificatePath);
+  return loadPkcs12CertificateFromBuffer(fileBuffer, password);
+}
+
+export function loadPkcs12CertificateFromBuffer(fileBuffer: Buffer, password: string): LoadedPkcs12Certificate {
   const asn1 = forge.asn1.fromDer(bufferToBinary(fileBuffer));
   const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, false, password);
   const shroudedBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag] ?? [];

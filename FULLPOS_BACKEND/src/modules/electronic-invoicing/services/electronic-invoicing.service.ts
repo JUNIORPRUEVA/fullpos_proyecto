@@ -8,15 +8,22 @@ import { DgiiResultService } from './dgii-result.service';
 import { ElectronicInvoicingMapperService } from './electronic-invoicing-mapper.service';
 import { ElectronicInvoicingAuditService } from './electronic-invoicing-audit.service';
 import { SequenceService } from './sequence.service';
-import { loadPkcs12Certificate, resolveCertificateFilePath, assertCertificateIsCurrentlyValid } from '../utils/certificate.utils';
+import {
+  loadPkcs12Certificate,
+  loadPkcs12CertificateFromBuffer,
+  resolveCertificateFilePath,
+  assertCertificateIsCurrentlyValid,
+} from '../utils/certificate.utils';
 import { sha256Hex } from '../utils/hash.utils';
-import { CreateCertificateDto } from '../dto/certificate.dto';
+import { RegisterCertificateDto } from '../dto/certificate.dto';
 import { CreateSequenceDto } from '../dto/sequence.dto';
 import { CreateEcfDto } from '../dto/create-ecf.dto';
 import { SendEcfDto } from '../dto/send-ecf.dto';
 import { CreateCreditNoteDto } from '../dto/credit-note.dto';
 import { OutboundInvoiceListFilters, SupportedDocumentTypeCode } from '../types/electronic-invoice.types';
 import { UpsertElectronicConfigDto } from '../dto/config.dto';
+
+const INLINE_CERTIFICATE_PREFIX = 'inline-p12:';
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['GENERATED', 'ERROR'],
@@ -35,7 +42,7 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
 };
 
 function getRequiredFeMasterKey() {
-  const key = env.FE_MASTER_ENCRYPTION_KEY?.trim();
+  const key = process.env.FE_MASTER_ENCRYPTION_KEY?.trim() || env.FE_MASTER_ENCRYPTION_KEY?.trim();
   if (!key) {
     throw {
       status: 503,
@@ -72,6 +79,37 @@ function decryptSecret(secret: string) {
     decipher.final(),
   ]);
   return decrypted.toString('utf8');
+}
+
+function encryptBinarySecret(buffer: Buffer) {
+  return encryptSecret(buffer.toString('base64'));
+}
+
+function decryptBinarySecret(secret: string) {
+  return Buffer.from(decryptSecret(secret), 'base64');
+}
+
+function normalizeCertificateParseError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido');
+  const lower = message.toLowerCase();
+
+  if (lower.includes('invalid password') || lower.includes('mac could not be verified')) {
+    return {
+      status: 400,
+      message: 'La contraseña del certificado es incorrecta',
+      errorCode: 'ELECTRONIC_CERTIFICATE_PASSWORD_INVALID',
+    };
+  }
+
+  return {
+    status: 400,
+    message: 'Archivo de certificado inválido o no legible',
+    errorCode: 'ELECTRONIC_CERTIFICATE_INVALID_FILE',
+  };
+}
+
+function isInlineCertificateReference(secretReference?: string | null) {
+  return !!secretReference?.startsWith(INLINE_CERTIFICATE_PREFIX);
 }
 
 export class ElectronicInvoicingService {
@@ -182,9 +220,78 @@ export class ElectronicInvoicingService {
     return config;
   }
 
-  async registerCertificate(companyId: number, dto: CreateCertificateDto, username: string, requestId?: string) {
-    const certificatePath = resolveCertificateFilePath(dto.filePath, dto.secretReference);
-    const loaded = loadPkcs12Certificate(certificatePath, dto.password);
+  async resolveCertificateCompanyId(dto: RegisterCertificateDto) {
+    if (dto.companyId != null) {
+      const company = await this.prisma.company.findUnique({
+        where: { id: dto.companyId },
+        select: { id: true },
+      });
+      if (company) return company.id;
+    }
+
+    const companyCloudId = dto.companyCloudId?.trim();
+    if (companyCloudId != null && companyCloudId.length > 0) {
+      const company = await this.prisma.company.findFirst({
+        where: { cloudCompanyId: companyCloudId },
+        select: { id: true },
+      });
+      if (company) return company.id;
+    }
+
+    const companyRnc = dto.companyRnc?.trim();
+    if (companyRnc != null && companyRnc.length > 0) {
+      const company = await this.prisma.company.findFirst({
+        where: { rnc: companyRnc },
+        select: { id: true },
+      });
+      if (company) return company.id;
+    }
+
+    throw {
+      status: 400,
+      message: 'No se pudo identificar la empresa para el certificado',
+      errorCode: 'ELECTRONIC_CERTIFICATE_COMPANY_REQUIRED',
+    };
+  }
+
+  async registerCertificate(companyId: number, dto: RegisterCertificateDto, username: string, requestId?: string) {
+    console.info('[electronic-invoicing.certificates] parsing_started', {
+      companyId,
+      alias: dto.alias,
+      source: dto.certificateBuffer ? 'multipart' : dto.filePath ? 'filePath' : 'secretReference',
+      originalName: dto.originalName ?? null,
+      mimeType: dto.mimeType ?? null,
+    });
+
+    let loaded;
+    try {
+      if (dto.certificateBuffer) {
+        loaded = loadPkcs12CertificateFromBuffer(dto.certificateBuffer, dto.password);
+      } else {
+        const certificatePath = resolveCertificateFilePath(dto.filePath, dto.secretReference);
+        loaded = loadPkcs12Certificate(certificatePath, dto.password);
+      }
+    } catch (error) {
+      const normalized = normalizeCertificateParseError(error);
+      console.warn('[electronic-invoicing.certificates] parsing_failure', {
+        companyId,
+        alias: dto.alias,
+        source: dto.certificateBuffer ? 'multipart' : dto.filePath ? 'filePath' : 'secretReference',
+        originalName: dto.originalName ?? null,
+        errorCode: normalized.errorCode,
+        message: normalized.message,
+      });
+      throw normalized;
+    }
+
+    console.info('[electronic-invoicing.certificates] parsing_success', {
+      companyId,
+      alias: dto.alias,
+      serial: loaded.serialNumber,
+      validFrom: loaded.validFrom.toISOString(),
+      validTo: loaded.validTo.toISOString(),
+    });
+
     let status: 'ACTIVE' | 'EXPIRED' = 'ACTIVE';
     try {
       assertCertificateIsCurrentlyValid(loaded.validFrom, loaded.validTo);
@@ -192,11 +299,25 @@ export class ElectronicInvoicingService {
       status = 'EXPIRED';
     }
 
+    console.info('[electronic-invoicing.certificates] validation_result', {
+      companyId,
+      alias: dto.alias,
+      status,
+      expired: status === 'EXPIRED',
+      validFrom: loaded.validFrom.toISOString(),
+      validTo: loaded.validTo.toISOString(),
+    });
+
+    const storedSecretReference = dto.certificateBuffer
+      ? `${INLINE_CERTIFICATE_PREFIX}${encryptBinarySecret(dto.certificateBuffer)}`
+      : dto.secretReference ?? null;
+    const storedFilePath = dto.certificateBuffer ? null : dto.filePath ?? null;
+
     const record = await this.prisma.electronicCertificate.upsert({
       where: { companyId_alias: { companyId, alias: dto.alias } },
       update: {
-        filePath: dto.filePath ?? null,
-        secretReference: dto.secretReference ?? null,
+        filePath: storedFilePath,
+        secretReference: storedSecretReference,
         passwordEncrypted: encryptSecret(dto.password),
         serialNumber: loaded.serialNumber,
         issuer: loaded.issuer,
@@ -208,8 +329,8 @@ export class ElectronicInvoicingService {
       create: {
         companyId,
         alias: dto.alias,
-        filePath: dto.filePath ?? null,
-        secretReference: dto.secretReference ?? null,
+        filePath: storedFilePath,
+        secretReference: storedSecretReference,
         passwordEncrypted: encryptSecret(dto.password),
         serialNumber: loaded.serialNumber,
         issuer: loaded.issuer,
@@ -232,19 +353,18 @@ export class ElectronicInvoicingService {
         validFrom: loaded.validFrom,
         validTo: loaded.validTo,
         status,
+        source: dto.certificateBuffer ? 'multipart' : 'reference',
       },
       requestId,
     });
 
     return {
-      id: record.id,
+      success: true,
       alias: record.alias,
-      serialNumber: record.serialNumber,
-      subject: record.subject,
-      issuer: record.issuer,
+      serial: record.serialNumber,
       validFrom: record.validFrom,
       validTo: record.validTo,
-      status: record.status,
+      ...(record.status === 'EXPIRED' ? { warning: 'El certificado está expirado, pero fue registrado' } : {}),
     };
   }
 
@@ -392,9 +512,13 @@ export class ElectronicInvoicingService {
     }
 
     const certificate = await this.getActiveCertificate(companyId);
-    const filePath = resolveCertificateFilePath(certificate.filePath, certificate.secretReference);
     const password = decryptSecret(certificate.passwordEncrypted);
-    const loaded = loadPkcs12Certificate(filePath, password);
+    const loaded = isInlineCertificateReference(certificate.secretReference)
+      ? loadPkcs12CertificateFromBuffer(
+          decryptBinarySecret(certificate.secretReference!.slice(INLINE_CERTIFICATE_PREFIX.length)),
+          password,
+        )
+      : loadPkcs12Certificate(resolveCertificateFilePath(certificate.filePath, certificate.secretReference), password);
     assertCertificateIsCurrentlyValid(loaded.validFrom, loaded.validTo);
 
     const xmlSigned = this.signatureService.signXml(invoice.xmlUnsigned, loaded.privateKeyPem, loaded.certPem);
