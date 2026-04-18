@@ -51,6 +51,18 @@ function normalizeSyncImageUrl(value: unknown) {
   return trimmed;
 }
 
+function normalizeOptionalPositiveInt(value: unknown) {
+  if (value == null) return undefined;
+  if (typeof value === 'string' && value.trim().length === 0) return undefined;
+
+  const coerced = Number(value);
+  if (!Number.isFinite(coerced) || !Number.isInteger(coerced)) {
+    return value;
+  }
+
+  return coerced > 0 ? coerced : undefined;
+}
+
 export function normalizeSyncProductOperationsInput(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return value;
@@ -92,6 +104,8 @@ export function normalizeSyncProductOperationsInput(value: unknown) {
       return {
         ...operation,
         clientMutationId: trimToUndefined(operation.clientMutationId),
+        localProductId: normalizeOptionalPositiveInt(operation.localProductId),
+        serverProductId: normalizeOptionalPositiveInt(operation.serverProductId),
         lastModifiedBy: trimToUndefined(operation.lastModifiedBy),
         occurredAt: trimToUndefined(operation.occurredAt),
         product,

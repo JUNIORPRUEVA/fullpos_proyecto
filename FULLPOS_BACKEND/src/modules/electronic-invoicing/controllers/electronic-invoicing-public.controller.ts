@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, RequestHandler, Response } from 'express';
 import { DgiiAuthService } from '../services/dgii-auth.service';
 import { InboundReceptionService } from '../services/inbound-reception.service';
 import { InboundApprovalService } from '../services/inbound-approval.service';
@@ -13,6 +13,28 @@ function resolveXmlPayload(req: Request) {
   }
   return req.body?.xml;
 }
+
+function validateResolvedBody<T>(resolver: (req: Request) => unknown, schema: { safeParse: (value: unknown) => any }): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    const parsed = schema.safeParse(resolver(req));
+    if (!parsed.success) {
+      return next(parsed.error);
+    }
+
+    req.body = parsed.data;
+    next();
+  };
+}
+
+export const validateReceiveEcfRequest = validateResolvedBody(
+  (req) => ({ ...(typeof req.body === 'object' && req.body ? req.body : {}), xml: resolveXmlPayload(req) }),
+  receiveEcfDtoSchema,
+);
+
+export const validateCommercialApprovalRequest = validateResolvedBody(
+  (req) => ({ ...(typeof req.body === 'object' && req.body ? req.body : {}), xml: resolveXmlPayload(req) }),
+  commercialApprovalDtoSchema,
+);
 
 export function createElectronicInvoicingPublicController(
   authService: DgiiAuthService,
@@ -42,13 +64,13 @@ export function createElectronicInvoicingPublicController(
 
   return {
     createSeed: async (req: Request, res: Response) => {
-      const dto = requestSeedDtoSchema.parse(req.body);
+      const dto = req.body as typeof requestSeedDtoSchema['_output'];
       const seed = await authService.createSeed(dto.companyRnc, dto.companyCloudId, dto.branchId, req.requestId);
       res.status(201).json(seed);
     },
 
     validateSeed: async (req: Request, res: Response) => {
-      const dto = validateSeedDtoSchema.parse(req.body);
+      const dto = req.body as typeof validateSeedDtoSchema['_output'];
       const token = await authService.validateSignedSeed(
         dto.companyRnc,
         dto.companyCloudId,
@@ -60,8 +82,7 @@ export function createElectronicInvoicingPublicController(
     },
 
     receiveEcf: async (req: Request, res: Response) => {
-      const xml = resolveXmlPayload(req);
-      const dto = receiveEcfDtoSchema.parse({ ...(typeof req.body === 'object' ? req.body : {}), xml });
+      const dto = req.body as typeof receiveEcfDtoSchema['_output'];
       const response = await receptionService.receive(
         dto.xml!,
         dto.companyRnc,
@@ -73,9 +94,8 @@ export function createElectronicInvoicingPublicController(
     },
 
     receiveCommercialApproval: async (req: Request, res: Response) => {
-      const xml = resolveXmlPayload(req);
-      const dto = commercialApprovalDtoSchema.parse({ ...(typeof req.body === 'object' ? req.body : {}), xml });
-      const approved = dto.approved ?? inferApprovalFromXml(xml);
+      const dto = req.body as typeof commercialApprovalDtoSchema['_output'];
+      const approved = dto.approved ?? inferApprovalFromXml(dto.xml);
       if (approved == null) {
         res.status(400).json({ message: 'No se pudo determinar el estado de aprobación comercial' });
         return;
@@ -87,7 +107,7 @@ export function createElectronicInvoicingPublicController(
         approved,
         dto.reason,
         req.header('authorization'),
-        xml,
+        dto.xml,
         req.requestId,
       );
       res.json(response);

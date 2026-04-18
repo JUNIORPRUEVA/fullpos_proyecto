@@ -1,7 +1,10 @@
 import express, { Router } from 'express';
+import { z } from 'zod';
 import { prisma } from '../../config/prisma';
 import { authGuard } from '../../middlewares/authGuard';
+import { asyncHandler } from '../../middlewares/asyncHandler';
 import { requireRoles } from '../../middlewares/requireRoles';
+import { validate } from '../../middlewares/validate';
 import { DgiiDirectoryService } from './services/dgii-directory.service';
 import { ElectronicInvoicingAuditService } from './services/electronic-invoicing-audit.service';
 import { SequenceService } from './services/sequence.service';
@@ -14,9 +17,28 @@ import { DgiiAuthService } from './services/dgii-auth.service';
 import { InboundReceptionService } from './services/inbound-reception.service';
 import { InboundApprovalService } from './services/inbound-approval.service';
 import { ElectronicInvoicingService } from './services/electronic-invoicing.service';
-import { createElectronicInvoicingAdminController } from './controllers/electronic-invoicing-admin.controller';
+import {
+  auditTimelineParamsSchema,
+  configQuerySchema,
+  createElectronicInvoicingAdminController,
+  invoiceIdParamsSchema,
+  invoiceIdVariantParamsSchema,
+  listQuerySchema,
+} from './controllers/electronic-invoicing-admin.controller';
 import { createElectronicInvoicingDgiiController } from './controllers/electronic-invoicing-dgii.controller';
-import { createElectronicInvoicingPublicController } from './controllers/electronic-invoicing-public.controller';
+import {
+  createElectronicInvoicingPublicController,
+  validateCommercialApprovalRequest,
+  validateReceiveEcfRequest,
+} from './controllers/electronic-invoicing-public.controller';
+import { createCertificateDtoSchema } from './dto/certificate.dto';
+import { upsertElectronicConfigDtoSchema } from './dto/config.dto';
+import { createCreditNoteDtoSchema } from './dto/credit-note.dto';
+import { createEcfDtoSchema } from './dto/create-ecf.dto';
+import { queryTrackDtoSchema } from './dto/query-track.dto';
+import { createSequenceDtoSchema } from './dto/sequence.dto';
+import { sendEcfDtoSchema } from './dto/send-ecf.dto';
+import { requestSeedDtoSchema, validateSeedDtoSchema } from './dto/validate-seed.dto';
 
 const directory = new DgiiDirectoryService();
 const audit = new ElectronicInvoicingAuditService(prisma);
@@ -51,30 +73,32 @@ const publicController = createElectronicInvoicingPublicController(
 export const adminElectronicInvoicingRouter = Router();
 adminElectronicInvoicingRouter.use(authGuard);
 
-adminElectronicInvoicingRouter.get('/config', requireRoles('admin', 'owner'), adminController.getConfig);
-adminElectronicInvoicingRouter.put('/config', requireRoles('admin', 'owner'), adminController.upsertConfig);
-adminElectronicInvoicingRouter.post('/sequences', requireRoles('admin', 'owner'), adminController.createSequence);
-adminElectronicInvoicingRouter.post('/certificates', requireRoles('admin', 'owner'), adminController.createCertificate);
-adminElectronicInvoicingRouter.post('/outbound/generate', requireRoles('admin', 'owner'), adminController.generateOutbound);
-adminElectronicInvoicingRouter.post('/outbound/sign', requireRoles('admin', 'owner'), adminController.signOutbound);
-adminElectronicInvoicingRouter.post('/outbound/submit', requireRoles('admin', 'owner'), dgiiController.submitOutbound);
-adminElectronicInvoicingRouter.get('/outbound/result/:trackId', requireRoles('admin', 'owner'), dgiiController.queryTrackResult);
-adminElectronicInvoicingRouter.get('/outbound/:id/xml/:variant', requireRoles('admin', 'owner'), adminController.getXmlVariant);
-adminElectronicInvoicingRouter.get('/outbound/:id', requireRoles('admin', 'owner'), adminController.getOutbound);
-adminElectronicInvoicingRouter.get('/outbound', requireRoles('admin', 'owner'), adminController.listOutbound);
-adminElectronicInvoicingRouter.get('/audit/:invoiceId', requireRoles('admin', 'owner'), adminController.getAuditTimeline);
-adminElectronicInvoicingRouter.post('/corrections/credit-note', requireRoles('admin', 'owner'), adminController.createCreditNote);
+adminElectronicInvoicingRouter.get('/config', requireRoles('admin', 'owner'), validate(configQuerySchema, 'query'), asyncHandler(adminController.getConfig));
+adminElectronicInvoicingRouter.put('/config', requireRoles('admin', 'owner'), validate(upsertElectronicConfigDtoSchema), asyncHandler(adminController.upsertConfig));
+adminElectronicInvoicingRouter.post('/sequences', requireRoles('admin', 'owner'), validate(createSequenceDtoSchema), asyncHandler(adminController.createSequence));
+adminElectronicInvoicingRouter.post('/certificates', requireRoles('admin', 'owner'), validate(createCertificateDtoSchema), asyncHandler(adminController.createCertificate));
+adminElectronicInvoicingRouter.post('/outbound/generate', requireRoles('admin', 'owner'), validate(createEcfDtoSchema), asyncHandler(adminController.generateOutbound));
+adminElectronicInvoicingRouter.post('/outbound/sign', requireRoles('admin', 'owner'), validate(sendEcfDtoSchema), asyncHandler(adminController.signOutbound));
+adminElectronicInvoicingRouter.post('/outbound/submit', requireRoles('admin', 'owner'), validate(sendEcfDtoSchema), asyncHandler(dgiiController.submitOutbound));
+adminElectronicInvoicingRouter.get('/outbound/result/:trackId', requireRoles('admin', 'owner'), validate(queryTrackDtoSchema, 'params'), asyncHandler(dgiiController.queryTrackResult));
+adminElectronicInvoicingRouter.get('/outbound/:id/xml/:variant', requireRoles('admin', 'owner'), validate(invoiceIdVariantParamsSchema, 'params'), asyncHandler(adminController.getXmlVariant));
+adminElectronicInvoicingRouter.get('/outbound/:id', requireRoles('admin', 'owner'), validate(invoiceIdParamsSchema, 'params'), asyncHandler(adminController.getOutbound));
+adminElectronicInvoicingRouter.get('/outbound', requireRoles('admin', 'owner'), validate(listQuerySchema, 'query'), asyncHandler(adminController.listOutbound));
+adminElectronicInvoicingRouter.get('/audit/:invoiceId', requireRoles('admin', 'owner'), validate(auditTimelineParamsSchema, 'params'), asyncHandler(adminController.getAuditTimeline));
+adminElectronicInvoicingRouter.post('/corrections/credit-note', requireRoles('admin', 'owner'), validate(createCreditNoteDtoSchema), asyncHandler(adminController.createCreditNote));
 
 export const publicElectronicInvoicingRouter = Router();
-publicElectronicInvoicingRouter.post('/autenticacion/api/semilla', publicController.createSeed);
-publicElectronicInvoicingRouter.post('/autenticacion/api/semilla/validacioncertificado', publicController.validateSeed);
+publicElectronicInvoicingRouter.post('/autenticacion/api/semilla', validate(requestSeedDtoSchema), asyncHandler(publicController.createSeed));
+publicElectronicInvoicingRouter.post('/autenticacion/api/semilla/validacioncertificado', validate(validateSeedDtoSchema), asyncHandler(publicController.validateSeed));
 publicElectronicInvoicingRouter.post(
   '/recepcion/api/ecf',
   express.text({ type: ['application/xml', 'text/xml'] }),
-  publicController.receiveEcf,
+  validateReceiveEcfRequest,
+  asyncHandler(publicController.receiveEcf),
 );
 publicElectronicInvoicingRouter.post(
   '/aprobacioncomercial/api/ecf',
   express.text({ type: ['application/xml', 'text/xml'] }),
-  publicController.receiveCommercialApproval,
+  validateCommercialApprovalRequest,
+  asyncHandler(publicController.receiveCommercialApproval),
 );

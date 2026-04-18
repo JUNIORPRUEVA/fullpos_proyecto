@@ -162,3 +162,27 @@ test('normalizeSyncProductOperationsInput converts uploads paths and strips empt
   assert.equal(normalized.operations[0].product.imageUrl, '/uploads/products/p-1.png');
   assert.equal(normalized.operations[0].product.businessId, undefined);
 });
+
+test('syncProductOperationsSchema accepts stale payloads with non-positive identifiers after normalization', () => {
+  const parsed = syncProductOperationsSchema.parse(
+    normalizeSyncProductOperationsInput({
+      companyId: 1,
+      operations: [
+        {
+          localProductId: 0,
+          serverProductId: '0',
+          operationType: 'status',
+          product: {
+            code: 'A-100',
+            isActive: false,
+          },
+        },
+      ],
+    }),
+  );
+
+  assert.equal(parsed.operations[0].localProductId, undefined);
+  assert.equal(parsed.operations[0].serverProductId, undefined);
+  assert.equal(parsed.operations[0].product.code, 'A-100');
+  assert.equal(parsed.operations[0].product.isActive, false);
+});

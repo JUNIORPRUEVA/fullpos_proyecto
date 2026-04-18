@@ -49,10 +49,9 @@ function validateSyncProductOperationsRequest(req: any, res: any, next: any) {
   const normalizedBody = normalizeSyncProductOperationsInput(rawBody);
 
   console.info('[products.sync.operations] request_received', {
-    companyId: rawBody?.companyId ?? null,
-    companyRnc: rawBody?.companyRnc ?? null,
-    companyCloudId: rawBody?.companyCloudId ?? null,
-    operations: Array.isArray(rawBody?.operations)
+    rawBody,
+    normalizedBody,
+    rawSummary: Array.isArray(rawBody?.operations)
       ? rawBody.operations.map((operation: Record<string, any>) =>
           summarizeProductSyncOperation(operation),
         )
@@ -66,9 +65,17 @@ function validateSyncProductOperationsRequest(req: any, res: any, next: any) {
       reason: issue.code,
       message: issue.message,
       value: getNestedValue(rawBody, issue.path as Array<string | number>) ?? null,
+      normalizedValue:
+        getNestedValue(normalizedBody, issue.path as Array<string | number>) ?? null,
     }));
 
-    console.warn('[products.sync.operations] validation_failed', { issues });
+    console.warn('[products.sync.operations] validation_failed', {
+      normalizedBody,
+      issues,
+      failingPath: issues[0]?.path ?? null,
+      failingValue: issues[0]?.value ?? null,
+      failingNormalizedValue: issues[0]?.normalizedValue ?? null,
+    });
     return res.status(400).json({
       message: 'Validation error',
       errorCode: 'VALIDATION_ERROR',
@@ -82,10 +89,8 @@ function validateSyncProductOperationsRequest(req: any, res: any, next: any) {
 
   req.body = parsed.data;
   console.info('[products.sync.operations] validation_passed', {
-    companyId: parsed.data.companyId ?? null,
-    companyRnc: parsed.data.companyRnc ?? null,
-    companyCloudId: parsed.data.companyCloudId ?? null,
-    operations: parsed.data.operations.map((operation) =>
+    parsedBody: parsed.data,
+    parsedSummary: parsed.data.operations.map((operation) =>
       summarizeProductSyncOperation(operation as unknown as Record<string, any>),
     ),
   });

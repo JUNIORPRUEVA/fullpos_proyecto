@@ -538,6 +538,11 @@ export async function syncProductOperations(params: {
   operations: ProductSyncOperation[];
 }) {
   let company;
+  console.info('[products.sync.operations] company_lookup_started', {
+    companyId: params.companyId ?? null,
+    companyRnc: params.companyRnc ?? null,
+    companyCloudId: params.companyCloudId ?? null,
+  });
   try {
     company = await resolveCompany({
       companyId: params.companyId,
@@ -554,6 +559,15 @@ export async function syncProductOperations(params: {
     });
     throw error;
   }
+
+  console.info('[products.sync.operations] company_lookup_succeeded', {
+    requestedCompanyId: params.companyId ?? null,
+    requestedCompanyRnc: params.companyRnc ?? null,
+    requestedCompanyCloudId: params.companyCloudId ?? null,
+    resolvedCompanyId: company.id,
+    resolvedCompanyRnc: company.rnc ?? null,
+    resolvedCompanyCloudId: company.cloudCompanyId ?? null,
+  });
 
   console.info('[products.sync.operations] service_start', {
     companyId: company.id,
