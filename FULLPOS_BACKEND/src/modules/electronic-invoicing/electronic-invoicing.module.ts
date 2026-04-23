@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../config/prisma';
 import { authGuard } from '../../middlewares/authGuard';
+import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { asyncHandler } from '../../middlewares/asyncHandler';
 import { requireRoles } from '../../middlewares/requireRoles';
 import { validate } from '../../middlewares/validate';
@@ -70,6 +71,94 @@ const publicController = createElectronicInvoicingPublicController(
   authService,
   receptionService,
   approvalService,
+);
+
+const posLocatorsSchema = z
+  .object({
+    companyRnc: z.string().trim().min(3).optional(),
+    companyCloudId: z.string().trim().min(6).optional(),
+  })
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });
+
+const posGenerateByRncSchema = posLocatorsSchema
+  .extend({
+    saleId: z.coerce.number().int().positive(),
+    saleLocalCode: z.string().trim().min(1).optional(),
+    documentTypeCode: z.string().trim().min(2),
+    branchId: z.coerce.number().int().min(0).optional().default(0),
+  })
+  .strict();
+
+const posQueryByRncSchema = posLocatorsSchema
+  .extend({
+    branchId: z.coerce.number().int().min(0).optional().default(0),
+  })
+  .strict();
+
+export const posElectronicInvoicingRouter = Router();
+
+// Rutas para FULLPOS (POS) — no tiene JWT. Se protege con overrideKeyGuard.
+posElectronicInvoicingRouter.post(
+  '/outbound/generate/by-rnc',
+  overrideKeyGuard,
+  validate(posGenerateByRncSchema),
+  asyncHandler(async (req, res) => {
+    const dto = req.body as typeof posGenerateByRncSchema._output;
+    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+    console.info('[electronic-invoicing.pos] outbound.generate.by-rnc', {
+      companyId: company.id,
+      companyRnc: dto.companyRnc ?? null,
+      companyCloudId: dto.companyCloudId ?? null,
+      saleId: dto.saleId,
+      saleLocalCode: dto.saleLocalCode ?? null,
+      documentTypeCode: dto.documentTypeCode,
+      branchId: dto.branchId,
+    });
+
+    const invoice = await electronicInvoicingService.generateOutbound(
+      company.id,
+      {
+        saleId: dto.saleId,
+        documentTypeCode: dto.documentTypeCode as any,
+        branchId: dto.branchId,
+      },
+      'fullpos_pos',
+      req.requestId,
+    );
+
+    res.status(201).json(invoice);
+  }),
+);
+
+posElectronicInvoicingRouter.get(
+  '/outbound/result/by-rnc/:trackId',
+  overrideKeyGuard,
+  validate(queryTrackDtoSchema, 'params'),
+  validate(posQueryByRncSchema, 'query'),
+  asyncHandler(async (req, res) => {
+    const params = req.params as unknown as typeof queryTrackDtoSchema._output;
+    const query = req.query as unknown as typeof posQueryByRncSchema._output;
+    const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
+
+    console.info('[electronic-invoicing.pos] outbound.result.by-rnc', {
+      companyId: company.id,
+      companyRnc: query.companyRnc ?? null,
+      companyCloudId: query.companyCloudId ?? null,
+      trackId: params.trackId,
+      branchId: query.branchId,
+    });
+
+    const result = await electronicInvoicingService.queryOutboundResult(
+      company.id,
+      params.trackId,
+      'fullpos_pos',
+      req.requestId,
+    );
+    res.json(result);
+  }),
 );
 
 export const adminElectronicInvoicingRouter = Router();
