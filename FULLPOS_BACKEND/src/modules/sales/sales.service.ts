@@ -139,6 +139,8 @@ export async function syncSalesByRnc(
     return { ok: true, upserted: 0, companyId };
   }
 
+  const resultsByLocalCode = new Map<string, { localCode: string; id: number }>();
+
   const localCodes = Array.from(new Set(sales.map((sale) => sale.localCode).filter(Boolean)));
   const existingSales =
     localCodes.length === 0
@@ -269,6 +271,11 @@ export async function syncSalesByRnc(
         },
       });
 
+      resultsByLocalCode.set(upserted.localCode, {
+        localCode: upserted.localCode,
+        id: upserted.id,
+      });
+
       const changed =
         !previous ||
         previous.kind !== upserted.kind ||
@@ -344,5 +351,10 @@ export async function syncSalesByRnc(
     });
   }
 
-  return { ok: true, upserted: sales.length, companyId };
+  return {
+    ok: true,
+    upserted: sales.length,
+    companyId,
+    results: Array.from(resultsByLocalCode.values()),
+  };
 }
