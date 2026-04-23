@@ -73,30 +73,38 @@ const publicController = createElectronicInvoicingPublicController(
   approvalService,
 );
 
-const posLocatorsSchema = z
-  .object({
-    companyRnc: z.string().trim().min(3).optional(),
-    companyCloudId: z.string().trim().min(6).optional(),
-  })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
-    path: ['companyRnc'],
-  });
+const posLocatorsBaseSchema = z.object({
+  companyRnc: z.string().trim().min(3).optional(),
+  companyCloudId: z.string().trim().min(6).optional(),
+});
 
-const posGenerateByRncSchema = posLocatorsSchema
+const requirePosLocators = (data: {
+  companyRnc?: string | undefined;
+  companyCloudId?: string | undefined;
+}) => !!data.companyRnc || !!data.companyCloudId;
+
+const posGenerateByRncSchema = posLocatorsBaseSchema
   .extend({
     saleId: z.coerce.number().int().positive(),
     saleLocalCode: z.string().trim().min(1).optional(),
     documentTypeCode: z.string().trim().min(2),
     branchId: z.coerce.number().int().min(0).optional().default(0),
   })
-  .strict();
+  .strict()
+  .refine(requirePosLocators, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });
 
-const posQueryByRncSchema = posLocatorsSchema
+const posQueryByRncSchema = posLocatorsBaseSchema
   .extend({
     branchId: z.coerce.number().int().min(0).optional().default(0),
   })
-  .strict();
+  .strict()
+  .refine(requirePosLocators, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });
 
 export const posElectronicInvoicingRouter = Router();
 
