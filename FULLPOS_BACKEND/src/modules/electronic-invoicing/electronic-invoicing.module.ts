@@ -1,5 +1,6 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
+import env from '../../config/env';
 import { prisma } from '../../config/prisma';
 import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
@@ -106,6 +107,40 @@ const posQueryByRncSchema = posLocatorsBaseSchema
     path: ['companyRnc'],
   });
 
+const posConfigByRncSchema = posLocatorsBaseSchema
+  .extend({
+    branchId: z.coerce.number().int().min(0).optional().default(0),
+  })
+  .strict()
+  .refine(requirePosLocators, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });
+
+const posOutboundListByRncSchema = posLocatorsBaseSchema
+  .extend({
+    branchId: z.coerce.number().int().min(0).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(18),
+  })
+  .strict()
+  .refine(requirePosLocators, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });
+
+function documentLabel(documentTypeCode: string) {
+  switch ((documentTypeCode || '').trim()) {
+    case '31':
+      return 'Factura crédito fiscal';
+    case '32':
+      return 'Factura de consumo';
+    case '34':
+      return 'Nota de crédito';
+    default:
+      return 'Documento electrónico';
+  }
+}
+
 const posSendByRncSchema = posLocatorsBaseSchema
   .extend({
     invoiceId: z.coerce.number().int().positive(),
@@ -121,6 +156,116 @@ const posSendByRncSchema = posLocatorsBaseSchema
 export const posElectronicInvoicingRouter = Router();
 
 // Rutas para FULLPOS (POS) — no tiene JWT. Se protege con overrideKeyGuard.
+posElectronicInvoicingRouter.get(
+  '/config/by-rnc',
+  overrideKeyGuard,
+  validate(posConfigByRncSchema, 'query'),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as typeof posConfigByRncSchema._output;
+    const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
+    const branchId = query.branchId;
+
+    const [config, certificate, sequences] = await Promise.all([
+      electronicInvoicingService.getConfig(company.id, branchId),
+      prisma.electronicCertificate.findFirst({
+        where: { companyId: company.id },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      prisma.electronicSequence.findMany({
+        where: { companyId: company.id, branchId },
+        orderBy: [{ documentTypeCode: 'asc' }],
+      }),
+    ]);
+
+    if (!config) {
+      return res.status(404).json({
+        message: 'La compañía no tiene configuración de facturación electrónica',
+        errorCode: 'ELECTRONIC_CONFIG_MISSING',
+      });
+    }
+
+    const now = Date.now();
+    const certificateReady =
+      !!certificate &&
+      certificate.status === 'ACTIVE' &&
+      certificate.validFrom.getTime() <= now &&
+      certificate.validTo.getTime() >= now;
+    const sequenceMap = new Map(sequences.map((item) => [item.documentTypeCode, item]));
+    const requiredSequenceCodes = ['31', '32', '34'];
+    const sequenceChecklist = Object.fromEntries(
+      requiredSequenceCodes.map((code) => {
+        const seq = sequenceMap.get(code);
+        const ready = !!seq && seq.maxNumber > 0 && seq.currentNumber <= seq.maxNumber;
+        return [`sequence_${code}`, ready];
+      }),
+    ) as Record<string, boolean>;
+
+    const dgiiSubmitConfigured = config.environment === 'production'
+      ? !!env.DGII_PRODUCTION_SUBMIT_URL?.trim()
+      : !!env.DGII_PRECERT_SUBMIT_URL?.trim();
+    const dgiiTokenConfigured = config.environment === 'production'
+      ? !!(
+          env.DGII_PRODUCTION_BEARER_TOKEN?.trim() ||
+          (env.DGII_PRODUCTION_AUTH_SEED_URL?.trim() && env.DGII_PRODUCTION_AUTH_VALIDATE_URL?.trim())
+        )
+      : !!(
+          env.DGII_PRECERT_BEARER_TOKEN?.trim() ||
+          (env.DGII_PRECERT_AUTH_SEED_URL?.trim() && env.DGII_PRECERT_AUTH_VALIDATE_URL?.trim())
+        );
+
+    const checklist: Record<string, boolean> = {
+      configActive: config.active,
+      outboundEnabled: config.outboundEnabled,
+      certificateReady,
+      dgiiSubmitConfigured,
+      dgiiTokenConfigured,
+      ...sequenceChecklist,
+    };
+
+    const missing = Object.entries(checklist)
+      .filter(([, value]) => !value)
+      .map(([key]) => key);
+
+    const readinessStatus = missing.length === 0 ? 'READY' : config.active ? 'PARTIAL' : 'NOT_READY';
+
+    res.json({
+      company: {
+        companyId: company.id,
+        companyCloudId: company.cloudCompanyId,
+        companyName: company.name,
+        rnc: company.rnc,
+        address: null,
+        city: null,
+        phone: null,
+        email: null,
+      },
+      config: {
+        ...config,
+        uiEnvironment: config.environment === 'production' ? 'produccion' : 'pruebas',
+      },
+      certificate: certificate
+        ? {
+            alias: certificate.alias,
+            status: certificate.status,
+            validFrom: certificate.validFrom,
+            validTo: certificate.validTo,
+          }
+        : null,
+      sequences,
+      dgii: {
+        submitConfigured: dgiiSubmitConfigured,
+        tokenConfigured: dgiiTokenConfigured,
+      },
+      readiness: {
+        status: readinessStatus,
+        missing,
+        messages: missing.length === 0 ? [] : ['Configuración FE parcial. Revise checklist.'],
+        checklist,
+      },
+    });
+  }),
+);
+
 posElectronicInvoicingRouter.post(
   '/outbound/generate/by-rnc',
   overrideKeyGuard,
@@ -230,6 +375,54 @@ posElectronicInvoicingRouter.post(
     );
 
     res.json(invoice);
+  }),
+);
+
+posElectronicInvoicingRouter.get(
+  '/outbound/by-rnc',
+  overrideKeyGuard,
+  validate(posOutboundListByRncSchema, 'query'),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as typeof posOutboundListByRncSchema._output;
+    const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
+
+    const invoices = await prisma.electronicInvoice.findMany({
+      where: {
+        companyId: company.id,
+        direction: 'outbound',
+        ...(query.branchId != null ? { branchId: query.branchId } : {}),
+      },
+      include: {
+        sale: {
+          select: {
+            localCode: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: query.limit,
+    });
+
+    res.json(
+      invoices.map((item) => ({
+        id: item.id,
+        saleId: item.saleId,
+        saleLocalCode: item.sale?.localCode ?? null,
+        documentNumber: item.ecf,
+        documentTypeCode: item.documentTypeCode,
+        documentLabel: documentLabel(item.documentTypeCode),
+        dgiiTrackId: item.dgiiTrackId,
+        internalStatus: item.internalStatus,
+        dgiiStatus: item.dgiiStatus,
+        rejectionCode: item.rejectionCode,
+        rejectionMessage: item.rejectionMessage,
+        totalAmount: item.totalAmount,
+        customerName: item.buyerName,
+        customerRnc: item.buyerRnc,
+        referenceDocument: item.originalInvoiceId,
+        createdAt: item.createdAt,
+      })),
+    );
   }),
 );
 
