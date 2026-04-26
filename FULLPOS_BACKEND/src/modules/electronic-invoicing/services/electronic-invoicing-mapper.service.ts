@@ -80,7 +80,16 @@ export class ElectronicInvoicingMapperService {
     return company;
   }
 
-  async mapSaleToOutbound(companyId: number, saleId: number, documentTypeCode: SupportedDocumentTypeCode): Promise<ElectronicInvoiceBuildInput> {
+  async mapSaleToOutbound(
+    companyId: number,
+    saleId: number,
+    documentTypeCode: SupportedDocumentTypeCode,
+    options?: {
+      localCode?: string | null;
+      companyCloudId?: string | null;
+      companyRnc?: string | null;
+    },
+  ): Promise<ElectronicInvoiceBuildInput> {
     if (documentTypeCode !== '31' && documentTypeCode !== '32') {
       throw {
         status: 400,
@@ -89,7 +98,20 @@ export class ElectronicInvoicingMapperService {
       };
     }
 
-    const sale = await this.prisma.sale.findFirst({
+    const requestedLocalCode = options?.localCode?.trim() ?? '';
+    const requestedCompanyCloudId = options?.companyCloudId?.trim() ?? '';
+    const requestedCompanyRnc = normalizeRnc(options?.companyRnc);
+
+    console.info('[electronic-invoicing.mapper] sale_lookup_start', {
+      saleId,
+      localCode: requestedLocalCode || null,
+      companyId,
+      companyCloudId: requestedCompanyCloudId || null,
+      companyRnc: requestedCompanyRnc || null,
+      documentTypeCode,
+    });
+
+    let sale = await this.prisma.sale.findFirst({
       where: { id: saleId, companyId },
       include: {
         items: true,
@@ -97,9 +119,101 @@ export class ElectronicInvoicingMapperService {
       },
     });
 
-    if (!sale) {
-      throw { status: 404, message: 'Venta no encontrada', errorCode: 'SALE_NOT_FOUND' };
+    console.info('[electronic-invoicing.mapper] sale_lookup_by_id_result', {
+      saleId,
+      companyId,
+      found: !!sale,
+    });
+
+    const triedCriteria: string[] = ['id+companyId'];
+
+    if (!sale && requestedLocalCode) {
+      triedCriteria.push('companyId+localCode');
+      sale = await this.prisma.sale.findFirst({
+        where: {
+          companyId,
+          localCode: requestedLocalCode,
+        },
+        include: {
+          items: true,
+          company: { include: { config: true } },
+        },
+      });
+
+      console.info('[electronic-invoicing.mapper] sale_lookup_by_local_code_company_id_result', {
+        saleId,
+        localCode: requestedLocalCode,
+        companyId,
+        found: !!sale,
+      });
     }
+
+    if (!sale && requestedLocalCode && requestedCompanyCloudId) {
+      triedCriteria.push('companyCloudId+localCode');
+      sale = await this.prisma.sale.findFirst({
+        where: {
+          localCode: requestedLocalCode,
+          company: {
+            cloudCompanyId: requestedCompanyCloudId,
+            isActive: true,
+          },
+        },
+        include: {
+          items: true,
+          company: { include: { config: true } },
+        },
+      });
+
+      console.info('[electronic-invoicing.mapper] sale_lookup_by_local_code_company_cloud_id_result', {
+        saleId,
+        localCode: requestedLocalCode,
+        companyCloudId: requestedCompanyCloudId,
+        found: !!sale,
+      });
+    }
+
+    if (!sale && requestedLocalCode && requestedCompanyRnc) {
+      triedCriteria.push('companyRnc+localCode');
+      sale = await this.prisma.sale.findFirst({
+        where: {
+          localCode: requestedLocalCode,
+          company: {
+            rnc: requestedCompanyRnc,
+            isActive: true,
+          },
+        },
+        include: {
+          items: true,
+          company: { include: { config: true } },
+        },
+      });
+
+      console.info('[electronic-invoicing.mapper] sale_lookup_by_local_code_company_rnc_result', {
+        saleId,
+        localCode: requestedLocalCode,
+        companyRnc: requestedCompanyRnc,
+        found: !!sale,
+      });
+    }
+
+    if (!sale) {
+      throw {
+        status: 404,
+        message: `Venta no encontrada. saleId=${saleId}, localCode=${requestedLocalCode || 'N/A'}, companyId=${companyId}, criterios=${triedCriteria.join(' -> ')}`,
+        errorCode: 'SALE_NOT_FOUND',
+      };
+    }
+
+    console.info('[electronic-invoicing.mapper] sale_lookup_found', {
+      saleIdRequested: saleId,
+      localCodeRequested: requestedLocalCode || null,
+      companyIdRequested: companyId,
+      sale: {
+        id: sale.id,
+        localCode: sale.localCode,
+        companyId: sale.companyId,
+      },
+    });
     if (sale.deletedAt) {
       throw { status: 409, message: 'La venta está anulada o eliminada', errorCode: 'SALE_NOT_ACTIVE' };
     }

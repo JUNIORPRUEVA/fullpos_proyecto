@@ -441,7 +441,20 @@ export class ElectronicInvoicingService {
       };
     }
 
-    const mapped = await this.mapper.mapSaleToOutbound(companyId, dto.saleId, dto.documentTypeCode);
+    console.info('[electronic-invoicing.outbound] generate_request_received', { companyId, saleId: dto.saleId, saleLocalCode: dto.saleLocalCode ?? 'UNDEFINED', documentTypeCode: dto.documentTypeCode, branchId: dto.branchId, requestId });
+    let mapped;
+    try {
+      mapped = await this.mapper.mapSaleToOutbound(companyId, dto.saleId, dto.documentTypeCode);
+    } catch (error: any) {
+      const errorCode = error?.errorCode ?? 'UNKNOWN_ERROR';
+      const errorMessage = error?.message ?? 'Error desconocido';
+      if (errorCode === 'SALE_NOT_FOUND') {
+        console.error('[electronic-invoicing.outbound] sale_not_found_on_generate', { companyId, saleId: dto.saleId, saleLocalCode: dto.saleLocalCode ?? 'UNDEFINED', documentTypeCode: dto.documentTypeCode, branchId: dto.branchId, requestId, searchCriteria: { searchedById: dto.saleId, searchedByCompanyId: companyId }, errorMessage, errorCode });
+        throw { status: 404, message: `Venta no encontrada. Se busco por: saleId=${dto.saleId}, companyId=${companyId}. ${dto.saleLocalCode ? `localCode=${dto.saleLocalCode}` : 'Sin localCode'}`, errorCode: 'SALE_NOT_FOUND', context: { searchedById: dto.saleId, searchedByCompanyId: companyId, saleLocalCode: dto.saleLocalCode ?? null } };
+      }
+      throw error;
+    }
+    console.info('[electronic-invoicing.outbound] sale_found_and_mapped', { companyId, saleId: dto.saleId, documentTypeCode: dto.documentTypeCode, mapped: { issuerRnc: mapped.issuer.rnc, issuerName: mapped.issuer.name, buyerRnc: mapped.buyer.rnc, buyerName: mapped.buyer.name, totalAmount: mapped.totalAmount, lineCount: mapped.lines.length } });
     const draft = await this.createDraftInvoice(
       companyId,
       dto.branchId,
