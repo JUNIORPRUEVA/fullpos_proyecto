@@ -41,11 +41,18 @@ const envSchema = z.object({
   DGII_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(15000),
   DGII_REQUEST_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(2),
   DGII_HTTP_USER_AGENT: z.string().optional(),
+  DGII_ALLOW_PRODUCTION: z.coerce.boolean().default(false),
+  DGII_DEFAULT_ENVIRONMENT: z.enum(['precertification', 'production']).default('precertification'),
+  DGII_TOKEN_CACHE_SKEW_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
   DGII_PRECERT_SUBMIT_URL: z.string().url().optional(),
   DGII_PRECERT_RESULT_URL_TEMPLATE: z.string().optional(),
+  DGII_PRECERT_AUTH_SEED_URL: z.string().url().optional(),
+  DGII_PRECERT_AUTH_VALIDATE_URL: z.string().url().optional(),
   DGII_PRECERT_BEARER_TOKEN: z.string().optional(),
   DGII_PRODUCTION_SUBMIT_URL: z.string().url().optional(),
   DGII_PRODUCTION_RESULT_URL_TEMPLATE: z.string().optional(),
+  DGII_PRODUCTION_AUTH_SEED_URL: z.string().url().optional(),
+  DGII_PRODUCTION_AUTH_VALIDATE_URL: z.string().url().optional(),
   DGII_PRODUCTION_BEARER_TOKEN: z.string().optional()
 });
 

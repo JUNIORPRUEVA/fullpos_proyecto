@@ -40,6 +40,7 @@ model Company {
   electronicSequences ElectronicSequence[]
   electronicCertificates ElectronicCertificate[]
   electronicInboundEndpointConfigs ElectronicInboundEndpointConfig[]
+  electronicDgiiTokenCaches ElectronicDgiiTokenCache[]
   electronicAuditLogs ElectronicAuditLog[]
   electronicAuthSeeds ElectronicAuthSeed[]
 
@@ -752,6 +753,24 @@ model ElectronicInboundEndpointConfig {
   updatedAt        DateTime  @updatedAt
 
   @@unique([companyId, branchId])
+}
+
+model ElectronicDgiiTokenCache {
+  id              Int      @id @default(autoincrement())
+  companyId       Int
+  company         Company  @relation(fields: [companyId], references: [id])
+  environment     String
+  tokenEncrypted  String
+  issuedAt        DateTime @default(now())
+  expiresAt       DateTime
+  lastValidatedAt DateTime?
+  lastErrorCode   String?
+  lastErrorMessage String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([companyId, environment])
+  @@index([companyId, expiresAt])
 }
 
 model ElectronicAuditLog {

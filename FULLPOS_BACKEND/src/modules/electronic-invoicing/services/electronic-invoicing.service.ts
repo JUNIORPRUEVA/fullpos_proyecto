@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import env from '../../../config/env';
 import { DgiiXmlBuilderService } from './dgii-xml-builder.service';
@@ -15,6 +14,14 @@ import {
   assertCertificateIsCurrentlyValid,
 } from '../utils/certificate.utils';
 import { sha256Hex } from '../utils/hash.utils';
+import {
+  decryptBinarySecret,
+  decryptSecret,
+  encryptBinarySecret,
+  encryptSecret,
+  INLINE_CERTIFICATE_PREFIX,
+  isInlineCertificateReference,
+} from '../utils/credential-crypto.utils';
 import { RegisterCertificateDto } from '../dto/certificate.dto';
 import { CreateSequenceDto } from '../dto/sequence.dto';
 import { CreateEcfDto } from '../dto/create-ecf.dto';
@@ -22,8 +29,6 @@ import { SendEcfDto } from '../dto/send-ecf.dto';
 import { CreateCreditNoteDto } from '../dto/credit-note.dto';
 import { OutboundInvoiceListFilters, SupportedDocumentTypeCode } from '../types/electronic-invoice.types';
 import { UpsertElectronicConfigDto } from '../dto/config.dto';
-
-const INLINE_CERTIFICATE_PREFIX = 'inline-p12:';
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['GENERATED', 'ERROR'],
@@ -41,52 +46,8 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   ERROR: ['GENERATED', 'SIGNED', 'SUBMISSION_PENDING'],
 };
 
-function getRequiredFeMasterKey() {
-  const key = process.env.FE_MASTER_ENCRYPTION_KEY?.trim() || env.FE_MASTER_ENCRYPTION_KEY?.trim();
-  if (!key) {
-    throw {
-      status: 503,
-      message: 'La facturación electrónica requiere FE_MASTER_ENCRYPTION_KEY configurada',
-      errorCode: 'FE_MASTER_ENCRYPTION_KEY_MISSING',
-    };
-  }
-
-  return key;
-}
-
 function money(value: number) {
   return Math.round(value * 100) / 100;
-}
-
-function deriveSecretKey() {
-  return crypto.createHash('sha256').update(getRequiredFeMasterKey()).digest();
-}
-
-function encryptSecret(secret: string) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', deriveSecretKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `${iv.toString('base64')}.${tag.toString('base64')}.${encrypted.toString('base64')}`;
-}
-
-function decryptSecret(secret: string) {
-  const [ivB64, tagB64, payloadB64] = secret.split('.');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', deriveSecretKey(), Buffer.from(ivB64, 'base64'));
-  decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(payloadB64, 'base64')),
-    decipher.final(),
-  ]);
-  return decrypted.toString('utf8');
-}
-
-function encryptBinarySecret(buffer: Buffer) {
-  return encryptSecret(buffer.toString('base64'));
-}
-
-function decryptBinarySecret(secret: string) {
-  return Buffer.from(decryptSecret(secret), 'base64');
 }
 
 function normalizeCertificateParseError(error: unknown) {
@@ -106,10 +67,6 @@ function normalizeCertificateParseError(error: unknown) {
     message: 'Archivo de certificado inválido o no legible',
     errorCode: 'ELECTRONIC_CERTIFICATE_INVALID_FILE',
   };
-}
-
-function isInlineCertificateReference(secretReference?: string | null) {
-  return !!secretReference?.startsWith(INLINE_CERTIFICATE_PREFIX);
 }
 
 export class ElectronicInvoicingService {
@@ -758,7 +715,13 @@ export class ElectronicInvoicingService {
       },
     );
 
-    const result = await this.submissionService.submit(config.environment as any, invoice.xmlSigned);
+    const result = await this.submissionService.submit(
+      companyId,
+      config.environment as any,
+      invoice.xmlSigned,
+      requestId,
+      dto.dgiiManualToken,
+    );
     const updated = await this.applyDgiiOutcome(invoice.id, username, result);
 
     await this.audit.log({
@@ -783,7 +746,7 @@ export class ElectronicInvoicingService {
     }
 
     const config = await this.getEndpointConfig(companyId, invoice.branchId);
-    const result = await this.resultService.query(config.environment as any, trackId);
+    const result = await this.resultService.query(companyId, config.environment as any, trackId, requestId);
     const updated = await this.applyDgiiOutcome(invoice.id, username, result);
 
     await this.audit.log({

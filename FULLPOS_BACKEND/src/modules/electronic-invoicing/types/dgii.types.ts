@@ -4,7 +4,8 @@ export interface DgiiEnvironmentConfig {
   environment: DgiiEnvironment;
   submitUrl: string;
   resultUrlTemplate: string;
-  bearerToken?: string;
+  authSeedUrl?: string;
+  authValidateUrl?: string;
   timeoutMs: number;
   maxRetries: number;
   userAgent: string;

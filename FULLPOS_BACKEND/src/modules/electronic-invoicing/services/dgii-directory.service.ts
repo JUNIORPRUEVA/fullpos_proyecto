@@ -8,6 +8,14 @@ export class DgiiDirectoryService {
     const userAgent = env.DGII_HTTP_USER_AGENT?.trim() || 'FULLPOS-Backend/1.0';
 
     if (environment === 'production') {
+      if (!env.DGII_ALLOW_PRODUCTION) {
+        throw {
+          status: 409,
+          message: 'El ambiente DGII de producción está bloqueado en este backend',
+          errorCode: 'DGII_PRODUCTION_DISABLED',
+        };
+      }
+
       if (!env.DGII_PRODUCTION_SUBMIT_URL || !env.DGII_PRODUCTION_RESULT_URL_TEMPLATE) {
         throw {
           status: 500,
@@ -20,7 +28,8 @@ export class DgiiDirectoryService {
         environment,
         submitUrl: env.DGII_PRODUCTION_SUBMIT_URL,
         resultUrlTemplate: env.DGII_PRODUCTION_RESULT_URL_TEMPLATE,
-        bearerToken: env.DGII_PRODUCTION_BEARER_TOKEN,
+        authSeedUrl: env.DGII_PRODUCTION_AUTH_SEED_URL,
+        authValidateUrl: env.DGII_PRODUCTION_AUTH_VALIDATE_URL,
         timeoutMs,
         maxRetries,
         userAgent,
@@ -39,7 +48,8 @@ export class DgiiDirectoryService {
       environment,
       submitUrl: env.DGII_PRECERT_SUBMIT_URL,
       resultUrlTemplate: env.DGII_PRECERT_RESULT_URL_TEMPLATE,
-      bearerToken: env.DGII_PRECERT_BEARER_TOKEN,
+      authSeedUrl: env.DGII_PRECERT_AUTH_SEED_URL,
+      authValidateUrl: env.DGII_PRECERT_AUTH_VALIDATE_URL,
       timeoutMs,
       maxRetries,
       userAgent,

@@ -5,6 +5,9 @@ import { extractEmbeddedCertificate } from '../utils/xml.utils';
 
 export class DgiiSignatureService {
   signXml(xml: string, privateKeyPem: string, certPem: string) {
+    const document = new DOMParser().parseFromString(xml, 'text/xml');
+    const rootName = document.documentElement?.localName || document.documentElement?.nodeName || 'eCF';
+    const rootXpath = `/*[local-name()='${rootName.replace(/^.*:/, '')}']`;
     const signature = new SignedXml();
     (signature as any).signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
     (signature as any).canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
@@ -16,7 +19,7 @@ export class DgiiSignatureService {
     };
 
     signature.addReference({
-      xpath: "/*[local-name()='eCF']",
+      xpath: rootXpath,
       transforms: [
         'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
         'http://www.w3.org/2001/10/xml-exc-c14n#',
@@ -26,7 +29,7 @@ export class DgiiSignatureService {
 
     signature.computeSignature(xml, {
       location: {
-        reference: "/*[local-name()='eCF']",
+        reference: rootXpath,
         action: 'append',
       },
     });

@@ -30,7 +30,7 @@ test('DgiiAuthService creates a seed with nonce, expiration, and audit log', asy
     },
   };
 
-  const service = new DgiiAuthService(prisma as any, mapper as any, {} as any, audit as any);
+  const service = new DgiiAuthService(prisma as any, mapper as any, {} as any, audit as any, {} as any);
   const result = await service.createSeed('101010101', undefined, 0, 'req-seed');
 
   assert.equal(result.seedId, 'seed-1');
@@ -64,7 +64,7 @@ test('DgiiAuthService rejects expired signed seeds', async () => {
     },
   };
 
-  const service = new DgiiAuthService(prisma as any, mapper as any, signatureService as any, { log: async () => undefined } as any);
+  const service = new DgiiAuthService(prisma as any, mapper as any, signatureService as any, { log: async () => undefined } as any, {} as any);
 
   await assert.rejects(
     service.validateSignedSeed(
@@ -89,7 +89,7 @@ test('DgiiAuthService enforces Bearer token for inbound routes when auth is enab
     },
   };
 
-  const service = new DgiiAuthService(prisma as any, {} as any, {} as any, {} as any);
+  const service = new DgiiAuthService(prisma as any, {} as any, {} as any, {} as any, {} as any);
 
   await assert.rejects(
     service.assertInboundToken(1, 0, undefined),
@@ -97,4 +97,38 @@ test('DgiiAuthService enforces Bearer token for inbound routes when auth is enab
   );
 
   await assert.doesNotReject(service.assertInboundToken(1, 0, `Bearer ${validToken}`));
+});
+
+test('DgiiAuthService falls back to legacy env token when automatic auth endpoints are missing', async () => {
+  process.env.DGII_PRECERT_BEARER_TOKEN = 'legacy-precert-token';
+
+  const service = new DgiiAuthService(
+    {
+      electronicDgiiTokenCache: {
+        async findUnique() {
+          return null;
+        },
+      },
+    } as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {
+      getEnvironmentConfig() {
+        return {
+          environment: 'precertification',
+          submitUrl: 'https://precert.example.com/submit',
+          resultUrlTemplate: 'https://precert.example.com/result/{trackId}',
+          timeoutMs: 1000,
+          maxRetries: 0,
+          userAgent: 'FULLPOS-Test',
+        };
+      },
+    } as any,
+  );
+
+  const token = await service.getCompanyBearerToken(1, 'precertification');
+
+  assert.equal(token, 'legacy-precert-token');
+
 });

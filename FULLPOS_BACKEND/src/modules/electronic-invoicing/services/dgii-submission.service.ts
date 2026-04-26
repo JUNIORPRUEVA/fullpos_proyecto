@@ -1,4 +1,5 @@
 import { DgiiDirectoryService } from './dgii-directory.service';
+import { DgiiAuthService } from './dgii-auth.service';
 import { DgiiEnvironment, DgiiSubmissionResponse } from '../types/dgii.types';
 import { deepFindFirstString, parseXml } from '../utils/xml.utils';
 
@@ -26,6 +27,12 @@ function extractCommonFields(raw: unknown) {
   };
 }
 
+function isAuthFailure(httpStatus: number, code?: string, message?: string) {
+  if (httpStatus === 401 || httpStatus === 403) return true;
+  const fingerprint = `${code ?? ''} ${message ?? ''}`.toLowerCase();
+  return fingerprint.includes('token') || fingerprint.includes('bearer') || fingerprint.includes('unauthor') || fingerprint.includes('autoriz');
+}
+
 async function parseResponse(response: Response) {
   const contentType = response.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {
@@ -43,25 +50,39 @@ async function parseResponse(response: Response) {
 }
 
 export class DgiiSubmissionService {
-  constructor(private readonly directory: DgiiDirectoryService) {}
+  constructor(
+    private readonly directory: DgiiDirectoryService,
+    private readonly authService: DgiiAuthService,
+  ) {}
 
-  async submit(environment: DgiiEnvironment, signedXml: string): Promise<DgiiSubmissionResponse> {
+  async submit(
+    companyId: number,
+    environment: DgiiEnvironment,
+    signedXml: string,
+    requestId?: string,
+    manualToken?: string,
+  ): Promise<DgiiSubmissionResponse> {
     const config = this.directory.getEnvironmentConfig(environment);
     let attempt = 0;
     let lastError: unknown = null;
+    let forceRefresh = false;
 
     while (attempt <= config.maxRetries) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
 
       try {
+        const bearerToken = await this.authService.getCompanyBearerToken(companyId, environment, requestId, {
+          forceRefresh,
+          manualToken,
+        });
         const response = await fetch(config.submitUrl, {
           method: 'POST',
           headers: {
             'content-type': 'application/xml; charset=utf-8',
             accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
             'user-agent': config.userAgent,
-            ...(config.bearerToken ? { authorization: `Bearer ${config.bearerToken}` } : {}),
+            authorization: `Bearer ${bearerToken}`,
           },
           body: signedXml,
           signal: controller.signal,
@@ -71,6 +92,13 @@ export class DgiiSubmissionService {
         const raw = await parseResponse(response);
         const common = extractCommonFields(raw);
         const normalizedStatus = normalizeStatus(raw, response.status);
+
+        if (!manualToken && !forceRefresh && isAuthFailure(response.status, common.code, common.message)) {
+          await this.authService.invalidateCompanyBearerToken(companyId, environment, common.message ?? common.code);
+          forceRefresh = true;
+          attempt += 1;
+          continue;
+        }
 
         return {
           httpStatus: response.status,
