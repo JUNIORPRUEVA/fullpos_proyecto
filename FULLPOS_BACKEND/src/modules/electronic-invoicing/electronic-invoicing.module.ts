@@ -179,6 +179,17 @@ const posSendByRncSchema = posLocatorsBaseSchema
     path: ['companyRnc'],
   });
 
+const posDebugDgiiAuthByRncSchema = posLocatorsBaseSchema
+  .extend({
+    environment: z.enum(['precertification', 'production']).optional(),
+    forceRefresh: z.coerce.boolean().optional().default(true),
+  })
+  .strict()
+  .refine(requirePosLocators, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });
+
 export const posElectronicInvoicingRouter = Router();
 
 // Rutas para FULLPOS (POS) — no tiene JWT. Se protege con overrideKeyGuard.
@@ -339,6 +350,25 @@ posElectronicInvoicingRouter.post(
     );
 
     res.status(201).json(invoice);
+  }),
+);
+
+posElectronicInvoicingRouter.post(
+  '/debug/dgii-auth/by-rnc',
+  overrideKeyGuard,
+  validate(posDebugDgiiAuthByRncSchema),
+  asyncHandler(async (req, res) => {
+    const body = req.body as unknown as typeof posDebugDgiiAuthByRncSchema._output;
+    const result = await authService.debugAuthenticateByLocators(
+      {
+        companyRnc: body.companyRnc,
+        companyCloudId: body.companyCloudId,
+        environment: body.environment,
+        forceRefresh: body.forceRefresh,
+      },
+      req.requestId,
+    );
+    res.status(200).json(result);
   }),
 );
 
