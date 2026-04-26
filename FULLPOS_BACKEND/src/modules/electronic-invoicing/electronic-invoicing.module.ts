@@ -106,6 +106,18 @@ const posQueryByRncSchema = posLocatorsBaseSchema
     path: ['companyRnc'],
   });
 
+const posSendByRncSchema = posLocatorsBaseSchema
+  .extend({
+    invoiceId: z.coerce.number().int().positive(),
+    force: z.coerce.boolean().optional().default(false),
+    dgiiManualToken: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .refine(requirePosLocators, {
+    message: 'RNC o ID interno requerido',
+    path: ['companyRnc'],
+  });
+
 export const posElectronicInvoicingRouter = Router();
 
 // Rutas para FULLPOS (POS) — no tiene JWT. Se protege con overrideKeyGuard.
@@ -156,6 +168,68 @@ posElectronicInvoicingRouter.post(
     );
 
     res.status(201).json(invoice);
+  }),
+);
+
+posElectronicInvoicingRouter.post(
+  '/outbound/sign/by-rnc',
+  overrideKeyGuard,
+  validate(posSendByRncSchema),
+  asyncHandler(async (req, res) => {
+    const dto = req.body as typeof posSendByRncSchema._output;
+    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+
+    console.info('[electronic-invoicing.pos] outbound.sign.by-rnc', {
+      companyId: company.id,
+      companyRnc: dto.companyRnc ?? null,
+      companyCloudId: dto.companyCloudId ?? null,
+      invoiceId: dto.invoiceId,
+      force: dto.force,
+    });
+
+    const invoice = await electronicInvoicingService.signOutbound(
+      company.id,
+      {
+        invoiceId: dto.invoiceId,
+        force: dto.force,
+      },
+      'fullpos_pos',
+      req.requestId,
+    );
+
+    res.json(invoice);
+  }),
+);
+
+posElectronicInvoicingRouter.post(
+  '/outbound/submit/by-rnc',
+  overrideKeyGuard,
+  validate(posSendByRncSchema),
+  asyncHandler(async (req, res) => {
+    const dto = req.body as typeof posSendByRncSchema._output;
+    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+
+    console.info('[electronic-invoicing.pos] outbound.submit.by-rnc', {
+      companyId: company.id,
+      companyRnc: dto.companyRnc ?? null,
+      companyCloudId: dto.companyCloudId ?? null,
+      invoiceId: dto.invoiceId,
+      force: dto.force,
+      hasManualToken: !!dto.dgiiManualToken,
+    });
+
+    const invoice = await electronicInvoicingService.submitOutbound(
+      company.id,
+      {
+        invoiceId: dto.invoiceId,
+        force: dto.force,
+        dgiiManualToken: dto.dgiiManualToken,
+      },
+      'fullpos_pos',
+      req.requestId,
+    );
+
+    res.json(invoice);
   }),
 );
 
