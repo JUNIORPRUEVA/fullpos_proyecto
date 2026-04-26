@@ -115,13 +115,28 @@ posElectronicInvoicingRouter.post(
   validate(posGenerateByRncSchema),
   asyncHandler(async (req, res) => {
     const dto = req.body as typeof posGenerateByRncSchema._output;
+    const body = req.body as typeof posGenerateByRncSchema._output & {
+      localCode?: string;
+      sale?: { localCode?: string };
+    };
+    const saleLocalCode = body.saleLocalCode ?? body.localCode ?? body.sale?.localCode ?? null;
     const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
     console.info('[electronic-invoicing.pos] outbound.generate.by-rnc', {
       companyId: company.id,
       companyRnc: dto.companyRnc ?? null,
       companyCloudId: dto.companyCloudId ?? null,
       saleId: dto.saleId,
-      saleLocalCode: dto.saleLocalCode ?? null,
+      saleLocalCode,
+      documentTypeCode: dto.documentTypeCode,
+      branchId: dto.branchId,
+    });
+
+    console.info('[electronic-invoicing.pos] generate.by-rnc.service_payload', {
+      companyId: company.id,
+      companyRnc: dto.companyRnc ?? null,
+      companyCloudId: dto.companyCloudId ?? null,
+      saleId: dto.saleId,
+      saleLocalCode,
       documentTypeCode: dto.documentTypeCode,
       branchId: dto.branchId,
     });
@@ -130,7 +145,7 @@ posElectronicInvoicingRouter.post(
       company.id,
       {
         saleId: dto.saleId,
-        saleLocalCode: dto.saleLocalCode ?? null,
+        saleLocalCode,
         companyCloudId: dto.companyCloudId ?? null,
         companyRnc: dto.companyRnc ?? null,
         documentTypeCode: dto.documentTypeCode as any,
