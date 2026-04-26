@@ -707,18 +707,23 @@ export class DgiiAuthService {
   ): Promise<{ token: string; issuedAt: Date; expiresAt: Date; validatedAt: Date; meta: ValidateSeedMeta }> {
     const validatedXml = validateSignedSeedXmlForDgii(signedSeedXml);
 
-    const callValidate = async (payload: {
+    const validateUrls = buildValidateUrlCandidates(url);
+
+    const callValidate = async (
+      validateUrl: string,
+      payload: {
       requestContentType: string;
       payloadMode: ValidateSeedMeta['payloadMode'];
       fieldName: ValidateSeedMeta['fieldName'];
       body: BodyInit;
       headers: Record<string, string>;
-    }) => {
+      },
+    ) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const response = await fetch(url, {
+        const response = await fetch(validateUrl, {
           method: 'POST',
           headers: {
             accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
@@ -738,7 +743,7 @@ export class DgiiAuthService {
           rawText,
           token,
           meta: {
-            validateUrl: url,
+            validateUrl,
             requestContentType: payload.requestContentType,
             payloadMode: payload.payloadMode,
             fieldName: payload.fieldName,
@@ -803,67 +808,85 @@ export class DgiiAuthService {
     let lastFailureMeta: ValidateSeedMeta | null = null;
 
     try {
-      for (const attempt of attempts) {
-        const result = await callValidate(attempt);
+      console.info('[electronic-invoicing.dgii.auth] validate.urls', {
+        companyId,
+        environment,
+        configuredValidateUrl: url,
+        candidates: validateUrls,
+      });
 
-        console.info('[electronic-invoicing.dgii.auth] validate.attempt', {
-          companyId,
-          environment,
-          validateUrl: url,
-          requestContentType: result.meta.requestContentType,
-          payloadMode: result.meta.payloadMode,
-          fieldName: result.meta.fieldName,
-          httpStatus: result.response.status,
-          responseContentType: result.meta.responseContentType,
-          tokenFound: !!result.token,
-          signedXmlRoot: result.meta.signedXmlRoot,
-          signedXmlHasSignature: result.meta.signedXmlHasSignature,
-          signedXmlSize: result.meta.signedXmlSize,
-          rawTextSummary: result.meta.rawTextSummary,
-        });
+      for (const validateUrl of validateUrls) {
+        for (const attempt of attempts) {
+          const result = await callValidate(validateUrl, attempt);
 
-        if (result.response.ok && result.token) {
-          return {
-            token: result.token,
-            issuedAt: new Date(),
-            expiresAt: extractDgiiExpiry(result.raw, result.token),
-            validatedAt: new Date(),
-            meta: result.meta,
-          };
-        }
-
-        lastFailureMeta = result.meta;
-        const rawValueMessage =
-          typeof result.raw === 'string' && result.raw.trim().length > 0 ? result.raw.trim() : undefined;
-        const rawTextMessage =
-          typeof result.rawText === 'string' && result.rawText.trim().length > 0 ? result.rawText.trim() : undefined;
-        const responseMessage =
-          deepFindFirstString(result.raw, ['Mensaje', 'mensaje', 'Message', 'message', 'descripcion', 'Descripcion']) ||
-          rawValueMessage ||
-          rawTextMessage ||
-          'DGII no devolvió token válido';
-
-        lastFailure = {
-          status: result.response.status === 400 ? 400 : 502,
-          message: responseMessage,
-          errorCode: result.response.status === 400 ? 'DGII_SEED_VALIDATE_BAD_REQUEST' : 'DGII_TOKEN_MISSING',
-          details: {
+          console.info('[electronic-invoicing.dgii.auth] validate.attempt', {
+            companyId,
             environment,
-            httpStatus: result.response.status,
-            raw: result.raw,
+            validateUrl,
             requestContentType: result.meta.requestContentType,
             payloadMode: result.meta.payloadMode,
             fieldName: result.meta.fieldName,
-            rawTextSummary: result.meta.rawTextSummary,
+            httpStatus: result.response.status,
+            responseContentType: result.meta.responseContentType,
+            tokenFound: !!result.token,
             signedXmlRoot: result.meta.signedXmlRoot,
             signedXmlHasSignature: result.meta.signedXmlHasSignature,
             signedXmlSize: result.meta.signedXmlSize,
-          },
-        };
+            rawTextSummary: result.meta.rawTextSummary,
+          });
 
-        // 400 funcional solo rota formato; si no es 400 o ya no tiene sentido continuar, corta.
-        if (result.response.status !== 400) {
-          break;
+          if (result.response.ok && result.token) {
+            return {
+              token: result.token,
+              issuedAt: new Date(),
+              expiresAt: extractDgiiExpiry(result.raw, result.token),
+              validatedAt: new Date(),
+              meta: result.meta,
+            };
+          }
+
+          lastFailureMeta = result.meta;
+          const rawValueMessage =
+            typeof result.raw === 'string' && result.raw.trim().length > 0 ? result.raw.trim() : undefined;
+          const rawTextMessage =
+            typeof result.rawText === 'string' && result.rawText.trim().length > 0 ? result.rawText.trim() : undefined;
+          const responseMessage =
+            deepFindFirstString(result.raw, ['Mensaje', 'mensaje', 'Message', 'message', 'descripcion', 'Descripcion']) ||
+            rawValueMessage ||
+            rawTextMessage ||
+            'DGII no devolvió token válido';
+
+          lastFailure = {
+            status: result.response.status === 400 ? 400 : 502,
+            message: responseMessage,
+            errorCode: result.response.status === 400 ? 'DGII_SEED_VALIDATE_BAD_REQUEST' : 'DGII_TOKEN_MISSING',
+            details: {
+              environment,
+              httpStatus: result.response.status,
+              raw: result.raw,
+              validateUrl,
+              requestContentType: result.meta.requestContentType,
+              payloadMode: result.meta.payloadMode,
+              fieldName: result.meta.fieldName,
+              rawTextSummary: result.meta.rawTextSummary,
+              signedXmlRoot: result.meta.signedXmlRoot,
+              signedXmlHasSignature: result.meta.signedXmlHasSignature,
+              signedXmlSize: result.meta.signedXmlSize,
+            },
+          };
+
+          // Si el endpoint no es válido o método no permitido, pasa al siguiente endpoint candidato.
+          if (result.response.status === 404 || result.response.status === 405) {
+            break;
+          }
+
+          // 400 funcional rota formato dentro del endpoint actual.
+          if (result.response.status === 400) {
+            continue;
+          }
+
+          // Otros estados: no seguir probando variantes de payload/endpoint.
+          throw lastFailure;
         }
       }
 
@@ -1145,4 +1168,26 @@ export class DgiiAuthService {
       };
     }
   }
+}
+
+function buildValidateUrlCandidates(url: string) {
+  const out = new Set<string>();
+  const trimmed = url.trim();
+  if (trimmed) out.add(trimmed);
+
+  if (trimmed.includes('/autenticacion/api/autenticacion/validarsemilla')) {
+    out.add(trimmed.replace('/autenticacion/api/autenticacion/validarsemilla', '/autenticacion/api/semilla/validacioncertificado'));
+    out.add(
+      trimmed.replace(
+        '/autenticacion/api/autenticacion/validarsemilla',
+        '/emisorreceptor/fe/autenticacion/api/validacioncertificado',
+      ),
+    );
+  }
+
+  if (trimmed.includes('/autenticacion/api/semilla/validacioncertificado')) {
+    out.add(trimmed.replace('/autenticacion/api/semilla/validacioncertificado', '/autenticacion/api/autenticacion/validarsemilla'));
+  }
+
+  return [...out];
 }
