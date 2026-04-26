@@ -3,6 +3,14 @@ import { DgiiAuthService } from './dgii-auth.service';
 import { DgiiEnvironment, DgiiSubmissionResponse } from '../types/dgii.types';
 import { deepFindFirstString, parseXml } from '../utils/xml.utils';
 
+type UnknownErrorShape = {
+  errorCode?: string;
+  message?: string;
+  status?: number;
+  details?: unknown;
+  stack?: string;
+};
+
 function isTransientStatus(status: number) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
@@ -82,6 +90,44 @@ function sanitizeResponseHeaders(response: Response) {
   return out;
 }
 
+function summarizeStack(stack?: string) {
+  if (!stack) return undefined;
+  return stack.split('\n').slice(0, 5).join('\n');
+}
+
+function summarizeRawBody(rawText?: string) {
+  if (!rawText) return undefined;
+  const trimmed = rawText.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}...` : trimmed;
+}
+
+function normalizeUnknownError(
+  error: unknown,
+  phase: 'token' | 'submit',
+  hasManualToken: boolean,
+): { code: string; message: string; status?: number; details?: unknown; stack?: string } {
+  if (error instanceof Error) {
+    return {
+      code: phase === 'token' && !hasManualToken ? 'DGII_TOKEN_GENERATION_FAILED' : 'SEND_ERROR',
+      message: error.message,
+      stack: summarizeStack(error.stack),
+    };
+  }
+
+  const shaped = (error ?? {}) as UnknownErrorShape;
+  const candidateCode = typeof shaped.errorCode === 'string' ? shaped.errorCode : undefined;
+  const candidateMessage = typeof shaped.message === 'string' ? shaped.message : undefined;
+
+  return {
+    code: candidateCode ?? (phase === 'token' && !hasManualToken ? 'DGII_TOKEN_GENERATION_FAILED' : 'SEND_ERROR'),
+    message: candidateMessage ?? 'Error enviando documento a DGII',
+    status: typeof shaped.status === 'number' ? shaped.status : undefined,
+    details: shaped.details,
+    stack: summarizeStack(shaped.stack),
+  };
+}
+
 export class DgiiSubmissionService {
   constructor(
     private readonly directory: DgiiDirectoryService,
@@ -100,16 +146,35 @@ export class DgiiSubmissionService {
     let attempt = 0;
     let lastError: unknown = null;
     let forceRefresh = false;
+    let lastPhase: 'token' | 'submit' = 'submit';
 
     while (attempt <= config.maxRetries) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
 
       try {
-        const bearerToken = await this.authService.getCompanyBearerToken(companyId, environment, requestId, {
+        lastPhase = 'token';
+        const tokenResult = await this.authService.getCompanyBearerTokenWithMeta(companyId, environment, requestId, {
           forceRefresh,
           manualToken,
         });
+        const bearerToken = tokenResult.token;
+
+        console.info('[electronic-invoicing.dgii.submit] request', {
+          requestId,
+          companyId,
+          invoiceId: context?.invoiceId ?? null,
+          ecf: context?.ecf ?? null,
+          environment,
+          endpoint: config.submitUrl,
+          hasToken: !!bearerToken,
+          tokenSource: tokenResult.source,
+          xmlSize: signedXml.length,
+          signedXmlPresent: signedXml.length > 0,
+          attempt,
+        });
+
+        lastPhase = 'submit';
         const response = await fetch(config.submitUrl, {
           method: 'POST',
           headers: {
@@ -130,21 +195,21 @@ export class DgiiSubmissionService {
         const normalizedStatus = normalizeStatus(raw, response.status);
         const responseHeaders = sanitizeResponseHeaders(response);
 
-        console.info('[electronic-invoicing.dgii.submit] dgii_response_received', {
+        console.info('[electronic-invoicing.dgii.submit] response', {
           requestId,
           companyId,
           invoiceId: context?.invoiceId ?? null,
           ecf: context?.ecf ?? null,
           environment,
           endpoint: config.submitUrl,
-          httpStatus: response.status,
+          dgiiHttpStatus: response.status,
           contentType: parsed.contentType,
           headers: responseHeaders,
           trackId: trackId ?? null,
-          normalizedStatus,
-          code: common.code ?? null,
-          message: common.message ?? null,
-          rawText: parsed.rawText,
+          dgiiStatus: normalizedStatus,
+          rejectionCode: common.code ?? null,
+          rejectionMessage: common.message ?? null,
+          rawBodySummary: summarizeRawBody(parsed.rawText),
           rawParsed: raw,
         });
 
@@ -171,20 +236,45 @@ export class DgiiSubmissionService {
       } catch (error) {
         clearTimeout(timeout);
         lastError = error;
+        const normalized = normalizeUnknownError(error, lastPhase, !!manualToken?.trim());
+
+        console.error('[electronic-invoicing.dgii.submit] error', {
+          requestId,
+          companyId,
+          invoiceId: context?.invoiceId ?? null,
+          ecf: context?.ecf ?? null,
+          environment,
+          endpoint: config.submitUrl,
+          phase: lastPhase,
+          errorCode: normalized.code,
+          errorMessage: normalized.message,
+          stack: normalized.stack,
+          responseStatus: normalized.status ?? null,
+          responseBody: normalized.details ?? null,
+          attempt,
+        });
+
         if (attempt >= config.maxRetries) break;
       }
 
       attempt += 1;
     }
 
+    const normalized = normalizeUnknownError(lastError, lastPhase, !!manualToken?.trim());
     return {
       httpStatus: 0,
       ok: false,
       normalizedStatus: 'error',
-      code: 'SEND_ERROR',
-      message: lastError instanceof Error ? lastError.message : 'Error enviando documento a DGII',
+      code: normalized.code,
+      message: normalized.message,
       dgiiEndpoint: config.submitUrl,
-      raw: { error: lastError instanceof Error ? lastError.message : String(lastError) },
+      raw: {
+        phase: lastPhase,
+        error: normalized.message,
+        errorCode: normalized.code,
+        responseStatus: normalized.status ?? null,
+        responseBody: normalized.details ?? null,
+      },
     };
   }
 

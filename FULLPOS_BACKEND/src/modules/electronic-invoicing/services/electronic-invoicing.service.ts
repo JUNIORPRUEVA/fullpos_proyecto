@@ -69,6 +69,14 @@ function normalizeCertificateParseError(error: unknown) {
   };
 }
 
+function toClientSubmitStatus(internalStatus: string, dgiiStatus: string) {
+  if (internalStatus === 'ACCEPTED' || internalStatus === 'ACCEPTED_CONDITIONAL') return 'ACCEPTED';
+  if (internalStatus === 'REJECTED' || dgiiStatus === 'REJECTED') return 'REJECTED';
+  if (internalStatus === 'ERROR' || dgiiStatus === 'ERROR') return 'SEND_ERROR';
+  if (internalStatus === 'SUBMITTED' || dgiiStatus === 'IN_PROCESS' || dgiiStatus === 'RECEIVED') return 'PENDING_RESULT';
+  return internalStatus;
+}
+
 export class ElectronicInvoicingService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -713,6 +721,13 @@ export class ElectronicInvoicingService {
       {
         dgiiStatus: 'RECEIVED',
       },
+      {
+        phase: 'submit.request',
+        invoiceId: invoice.id,
+        ecf: invoice.ecf,
+        companyId,
+        environment: config.environment,
+      },
     );
 
     const result = await this.submissionService.submit(
@@ -735,7 +750,20 @@ export class ElectronicInvoicingService {
       requestId,
     });
 
-    return updated;
+    return {
+      ...updated,
+      invoiceId: updated.id,
+      ecf: updated.ecf,
+      status: toClientSubmitStatus(updated.internalStatus, updated.dgiiStatus),
+      trackId: updated.dgiiTrackId,
+      dgiiHttpStatus: result.httpStatus,
+      dgiiStatus: updated.dgiiStatus,
+      accepted: updated.internalStatus === 'ACCEPTED' || updated.internalStatus === 'ACCEPTED_CONDITIONAL',
+      errorCode: result.code ?? null,
+      errorMessage: result.message ?? null,
+      rejectionCode: updated.rejectionCode,
+      rejectionMessage: updated.rejectionMessage,
+    };
   }
 
   async queryOutboundResult(companyId: number, trackId: string, username: string, requestId?: string) {

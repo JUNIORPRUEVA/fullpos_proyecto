@@ -23,6 +23,8 @@ import {
 } from '../utils/credential-crypto.utils';
 import { DgiiEnvironment } from '../types/dgii.types';
 
+export type DgiiTokenSource = 'manual' | 'cache' | 'env' | 'auto';
+
 function getRequiredFeMasterKey() {
   const key = env.FE_MASTER_ENCRYPTION_KEY?.trim();
   if (!key) {
@@ -220,15 +222,25 @@ export class DgiiAuthService {
     requestId?: string,
     options?: { forceRefresh?: boolean; manualToken?: string },
   ) {
+    const tokenMeta = await this.getCompanyBearerTokenWithMeta(companyId, environment, requestId, options);
+    return tokenMeta.token;
+  }
+
+  async getCompanyBearerTokenWithMeta(
+    companyId: number,
+    environment: DgiiEnvironment,
+    requestId?: string,
+    options?: { forceRefresh?: boolean; manualToken?: string },
+  ): Promise<{ token: string; source: DgiiTokenSource }> {
     const manualToken = options?.manualToken?.trim();
     if (manualToken) {
-      return manualToken;
+      return { token: manualToken, source: 'manual' };
     }
 
     if (!options?.forceRefresh) {
       const cached = await this.readCachedToken(companyId, environment);
       if (cached?.token) {
-        return cached.token;
+        return { token: cached.token, source: 'cache' };
       }
     }
 
@@ -236,7 +248,7 @@ export class DgiiAuthService {
     if (!config.authSeedUrl || !config.authValidateUrl) {
       const legacyToken = this.getLegacyEnvironmentToken(environment);
       if (legacyToken) {
-        return legacyToken;
+        return { token: legacyToken, source: 'env' };
       }
 
       throw {
@@ -290,7 +302,7 @@ export class DgiiAuthService {
       requestId,
     });
 
-    return validated.token;
+    return { token: validated.token, source: 'auto' };
   }
 
   private async requestDgiiSeed(

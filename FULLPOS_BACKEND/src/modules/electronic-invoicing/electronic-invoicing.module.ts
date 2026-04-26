@@ -141,6 +141,32 @@ function documentLabel(documentTypeCode: string) {
   }
 }
 
+function invoiceClientStatus(item: { internalStatus: string; dgiiStatus: string }) {
+  if (item.internalStatus === 'ACCEPTED' || item.internalStatus === 'ACCEPTED_CONDITIONAL') return 'ACCEPTED';
+  if (item.internalStatus === 'REJECTED' || item.dgiiStatus === 'REJECTED') return 'REJECTED';
+  if (item.internalStatus === 'ERROR' || item.dgiiStatus === 'ERROR') return 'SEND_ERROR';
+  if (item.internalStatus === 'SUBMITTED' || item.internalStatus === 'SUBMISSION_PENDING' || item.dgiiStatus === 'IN_PROCESS' || item.dgiiStatus === 'RECEIVED') {
+    return 'PENDING_DGII';
+  }
+  return item.internalStatus;
+}
+
+function invoiceClientStatusLabel(item: { internalStatus: string; dgiiStatus: string }) {
+  const status = invoiceClientStatus(item);
+  switch (status) {
+    case 'ACCEPTED':
+      return 'Aceptada';
+    case 'REJECTED':
+      return 'Rechazada por DGII';
+    case 'SEND_ERROR':
+      return 'Error envio';
+    case 'PENDING_DGII':
+      return 'Pendiente DGII';
+    default:
+      return status;
+  }
+}
+
 const posSendByRncSchema = posLocatorsBaseSchema
   .extend({
     invoiceId: z.coerce.number().int().positive(),
@@ -412,10 +438,15 @@ posElectronicInvoicingRouter.get(
         documentTypeCode: item.documentTypeCode,
         documentLabel: documentLabel(item.documentTypeCode),
         dgiiTrackId: item.dgiiTrackId,
+        trackId: item.dgiiTrackId,
         internalStatus: item.internalStatus,
         dgiiStatus: item.dgiiStatus,
+        status: invoiceClientStatus(item),
+        statusLabel: invoiceClientStatusLabel(item),
         rejectionCode: item.rejectionCode,
         rejectionMessage: item.rejectionMessage,
+        lastError: item.internalStatus === 'ERROR' || item.dgiiStatus === 'ERROR' ? item.rejectionMessage : null,
+        submittedAt: item.submittedAt,
         totalAmount: item.totalAmount,
         customerName: item.buyerName,
         customerRnc: item.buyerRnc,
