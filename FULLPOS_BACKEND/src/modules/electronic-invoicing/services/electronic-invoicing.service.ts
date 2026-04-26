@@ -433,23 +433,6 @@ export class ElectronicInvoicingService {
       };
     }
 
-    const existing = await this.prisma.electronicInvoice.findFirst({
-      where: {
-        companyId,
-        saleId: dto.saleId,
-        direction: 'outbound',
-        documentTypeCode: dto.documentTypeCode,
-        internalStatus: { notIn: ['VOIDED'] },
-      },
-    });
-    if (existing) {
-      throw {
-        status: 409,
-        message: 'Ya existe un documento electrónico generado para esta venta y tipo',
-        errorCode: 'OUTBOUND_ALREADY_EXISTS',
-      };
-    }
-
     const normalizedSaleLocalCode = dto.saleLocalCode?.trim() || null;
     const normalizedCompanyCloudId = dto.companyCloudId?.trim() || null;
     const normalizedCompanyRnc = dto.companyRnc?.trim() || null;
@@ -518,11 +501,30 @@ export class ElectronicInvoicingService {
       }
       throw error;
     }
-    console.info('[electronic-invoicing.outbound] sale_found_and_mapped', { companyId, saleId: dto.saleId, documentTypeCode: dto.documentTypeCode, mapped: { issuerRnc: mapped.issuer.rnc, issuerName: mapped.issuer.name, buyerRnc: mapped.buyer.rnc, buyerName: mapped.buyer.name, totalAmount: mapped.totalAmount, lineCount: mapped.lines.length } });
+    const resolvedSaleId = mapped.saleIdResolved ?? dto.saleId;
+
+    const existing = await this.prisma.electronicInvoice.findFirst({
+      where: {
+        companyId,
+        saleId: resolvedSaleId,
+        direction: 'outbound',
+        documentTypeCode: dto.documentTypeCode,
+        internalStatus: { notIn: ['VOIDED'] },
+      },
+    });
+    if (existing) {
+      throw {
+        status: 409,
+        message: 'Ya existe un documento electrónico generado para esta venta y tipo',
+        errorCode: 'OUTBOUND_ALREADY_EXISTS',
+      };
+    }
+
+    console.info('[electronic-invoicing.outbound] sale_found_and_mapped', { companyId, saleIdRequested: dto.saleId, saleIdResolved: resolvedSaleId, documentTypeCode: dto.documentTypeCode, mapped: { issuerRnc: mapped.issuer.rnc, issuerName: mapped.issuer.name, buyerRnc: mapped.buyer.rnc, buyerName: mapped.buyer.name, totalAmount: mapped.totalAmount, lineCount: mapped.lines.length } });
     const draft = await this.createDraftInvoice(
       companyId,
       dto.branchId,
-      dto.saleId,
+      resolvedSaleId,
       dto.documentTypeCode,
       mapped.issuer.rnc ?? '',
       mapped.issuer.name,
@@ -546,7 +548,7 @@ export class ElectronicInvoicingService {
         sequenceNumber: allocation.sequenceNumber,
         xmlUnsigned,
       },
-      { saleId: dto.saleId, documentTypeCode: dto.documentTypeCode },
+      { saleId: resolvedSaleId, requestedSaleId: dto.saleId, documentTypeCode: dto.documentTypeCode },
     );
 
     await this.audit.log({
@@ -554,7 +556,7 @@ export class ElectronicInvoicingService {
       invoiceId: updated.id,
       eventType: 'outbound.generated',
       eventSource: 'ADMIN',
-      message: `Documento ${updated.ecf} generado desde venta ${dto.saleId}`,
+      message: `Documento ${updated.ecf} generado desde venta ${resolvedSaleId}`,
       payload: dto,
       requestId,
     });

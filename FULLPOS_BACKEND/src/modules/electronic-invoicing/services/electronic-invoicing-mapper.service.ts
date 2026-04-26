@@ -294,6 +294,7 @@ export class ElectronicInvoicingMapperService {
     }));
 
     return {
+      saleIdResolved: sale.id,
       ecf: '',
       documentTypeCode,
       issueDate: sale.createdAt,

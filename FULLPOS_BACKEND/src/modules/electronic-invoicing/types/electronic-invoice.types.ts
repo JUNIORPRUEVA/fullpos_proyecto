@@ -36,6 +36,7 @@ export interface ElectronicInvoiceReference {
 }
 
 export interface ElectronicInvoiceBuildInput {
+  saleIdResolved?: number;
   ecf: string;
   documentTypeCode: SupportedDocumentTypeCode;
   issueDate: Date;
