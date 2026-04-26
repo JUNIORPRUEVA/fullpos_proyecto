@@ -70,6 +70,12 @@ async function parseDgiiResponse(response: Response) {
   }
 }
 
+function summarizeRawText(rawText: string | null, maxLength = 400) {
+  const text = (rawText ?? '').trim();
+  if (!text) return null;
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
 function extractDgiiSeedXml(raw: unknown, rawText: string | null) {
   if (rawText?.trim().startsWith('<')) {
     return rawText.trim();
@@ -312,33 +318,76 @@ export class DgiiAuthService {
     userAgent: string,
     timeoutMs: number,
   ) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const callSeed = async (method: 'POST' | 'GET') => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const response = await fetch(url, {
+          method,
+          headers: {
+            accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
+            'user-agent': userAgent,
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        const { raw, rawText } = await parseDgiiResponse(response);
+        return { response, raw, rawText, method };
+      } catch (error) {
+        clearTimeout(timeout);
+        throw error;
+      }
+    };
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
-          'user-agent': userAgent,
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+      const primary = await callSeed('POST');
 
-      const { raw, rawText } = await parseDgiiResponse(response);
-      if (!response.ok) {
+      if (!primary.response.ok && (primary.response.status === 405 || primary.response.status === 404)) {
+        const fallback = await callSeed('GET');
+        if (!fallback.response.ok) {
+          throw {
+            status: 502,
+            message:
+              deepFindFirstString(fallback.raw, ['Mensaje', 'mensaje', 'Message', 'message']) ||
+              deepFindFirstString(primary.raw, ['Mensaje', 'mensaje', 'Message', 'message']) ||
+              `DGII rechazó la solicitud de semilla (POST=${primary.response.status}, GET=${fallback.response.status})`,
+            errorCode: 'DGII_AUTH_SEED_FAILED',
+            details: {
+              environment,
+              methodTried: ['POST', 'GET'],
+              httpStatus: fallback.response.status,
+              fallbackHttpStatus: primary.response.status,
+              raw: fallback.raw,
+              rawTextSummary: summarizeRawText(fallback.rawText),
+              primaryRawTextSummary: summarizeRawText(primary.rawText),
+            },
+          };
+        }
+
+        return { seedXml: extractDgiiSeedXml(fallback.raw, fallback.rawText), raw: fallback.raw };
+      }
+
+      if (!primary.response.ok) {
         throw {
           status: 502,
-          message: deepFindFirstString(raw, ['Mensaje', 'mensaje', 'Message', 'message']) || 'DGII rechazó la solicitud de semilla',
+          message:
+            deepFindFirstString(primary.raw, ['Mensaje', 'mensaje', 'Message', 'message']) ||
+            `DGII rechazó la solicitud de semilla (HTTP ${primary.response.status})`,
           errorCode: 'DGII_AUTH_SEED_FAILED',
-          details: { environment, httpStatus: response.status, raw },
+          details: {
+            environment,
+            methodTried: ['POST'],
+            httpStatus: primary.response.status,
+            raw: primary.raw,
+            rawTextSummary: summarizeRawText(primary.rawText),
+          },
         };
       }
 
-      return { seedXml: extractDgiiSeedXml(raw, rawText), raw };
+      return { seedXml: extractDgiiSeedXml(primary.raw, primary.rawText), raw: primary.raw };
     } catch (error) {
-      clearTimeout(timeout);
       await this.prisma.electronicDgiiTokenCache.upsert({
         where: { companyId_environment: { companyId, environment } },
         update: {
