@@ -3,6 +3,21 @@ import { z } from 'zod';
 
 config();
 
+function optionalTrimmedString(value: unknown) {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+const optionalUrl = z.preprocess(optionalTrimmedString, z.string().url().optional());
+
+const dgiiDefaultEnvironmentSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'precert') return 'precertification';
+  return normalized;
+}, z.enum(['precertification', 'production']));
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
@@ -21,7 +36,7 @@ const envSchema = z.object({
   VIRTUAL_TOKEN_MASTER_KEY: z.string().min(16).optional(),
   // Uploads
   UPLOADS_DIR: z.string().optional(),
-  PUBLIC_BASE_URL: z.string().url().optional(),
+  PUBLIC_BASE_URL: optionalUrl,
   MAX_PRODUCT_IMAGES_PER_COMPANY: z.coerce.number().int().min(1).optional(),
   MAX_UPLOAD_IMAGE_MB: z.coerce.number().int().min(1).optional(),
   MAX_IMAGE_WIDTH: z.coerce.number().int().min(200).optional(),
@@ -42,17 +57,17 @@ const envSchema = z.object({
   DGII_REQUEST_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(2),
   DGII_HTTP_USER_AGENT: z.string().optional(),
   DGII_ALLOW_PRODUCTION: z.coerce.boolean().default(false),
-  DGII_DEFAULT_ENVIRONMENT: z.enum(['precertification', 'production']).default('precertification'),
+  DGII_DEFAULT_ENVIRONMENT: dgiiDefaultEnvironmentSchema.default('precertification'),
   DGII_TOKEN_CACHE_SKEW_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
-  DGII_PRECERT_SUBMIT_URL: z.string().url().optional(),
+  DGII_PRECERT_SUBMIT_URL: optionalUrl,
   DGII_PRECERT_RESULT_URL_TEMPLATE: z.string().optional(),
-  DGII_PRECERT_AUTH_SEED_URL: z.string().url().optional(),
-  DGII_PRECERT_AUTH_VALIDATE_URL: z.string().url().optional(),
+  DGII_PRECERT_AUTH_SEED_URL: optionalUrl,
+  DGII_PRECERT_AUTH_VALIDATE_URL: optionalUrl,
   DGII_PRECERT_BEARER_TOKEN: z.string().optional(),
-  DGII_PRODUCTION_SUBMIT_URL: z.string().url().optional(),
+  DGII_PRODUCTION_SUBMIT_URL: z.preprocess(optionalTrimmedString, z.string().optional()),
   DGII_PRODUCTION_RESULT_URL_TEMPLATE: z.string().optional(),
-  DGII_PRODUCTION_AUTH_SEED_URL: z.string().url().optional(),
-  DGII_PRODUCTION_AUTH_VALIDATE_URL: z.string().url().optional(),
+  DGII_PRODUCTION_AUTH_SEED_URL: z.preprocess(optionalTrimmedString, z.string().optional()),
+  DGII_PRODUCTION_AUTH_VALIDATE_URL: z.preprocess(optionalTrimmedString, z.string().optional()),
   DGII_PRODUCTION_BEARER_TOKEN: z.string().optional()
 });
 
