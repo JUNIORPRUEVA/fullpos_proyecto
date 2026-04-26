@@ -64,6 +64,16 @@ export class SequenceService {
   }
 
   async allocate(companyId: number, branchId: number, documentTypeCode: string, requestId?: string) {
+    console.info('[electronic-invoicing.sequence] sequence.allocate_started', {
+      companyId,
+      branchId,
+      documentTypeCode,
+      currentNumber: null,
+      endNumber: null,
+      nextNumber: null,
+      requestId,
+    });
+
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const sequence = await this.prisma.electronicSequence.findUnique({
         where: {
@@ -83,6 +93,16 @@ export class SequenceService {
         };
       }
 
+      console.info('[electronic-invoicing.sequence] sequence.allocate_state', {
+        companyId,
+        branchId,
+        documentTypeCode,
+        currentNumber: sequence.currentNumber,
+        endNumber: sequence.maxNumber,
+        status: sequence.status,
+        attempt,
+      });
+
       if (sequence.status !== 'ACTIVE') {
         throw {
           status: 409,
@@ -92,11 +112,30 @@ export class SequenceService {
       }
 
       const nextNumber = sequence.currentNumber + 1;
+      console.info('[electronic-invoicing.sequence] sequence.allocate_next_number', {
+        companyId,
+        branchId,
+        documentTypeCode,
+        currentNumber: sequence.currentNumber,
+        endNumber: sequence.maxNumber,
+        nextNumber,
+      });
+
       if (nextNumber > sequence.maxNumber) {
         await this.prisma.electronicSequence.update({
           where: { id: sequence.id },
           data: { status: 'EXHAUSTED' },
         });
+
+        console.warn('[electronic-invoicing.sequence] sequence.allocate_exhausted', {
+          companyId,
+          branchId,
+          documentTypeCode,
+          currentNumber: sequence.currentNumber,
+          endNumber: sequence.maxNumber,
+          nextNumber,
+        });
+
         throw {
           status: 409,
           message: `La secuencia ${sequence.prefix} se agotó`,
@@ -122,6 +161,16 @@ export class SequenceService {
       }
 
       const ecf = buildEcf(sequence.prefix, nextNumber);
+      console.info('[electronic-invoicing.sequence] sequence.allocate_success', {
+        companyId,
+        branchId,
+        documentTypeCode,
+        currentNumber: sequence.currentNumber,
+        endNumber: sequence.maxNumber,
+        nextNumber,
+        ecf,
+      });
+
       await this.audit.log({
         companyId,
         eventType: 'sequence.allocated',
