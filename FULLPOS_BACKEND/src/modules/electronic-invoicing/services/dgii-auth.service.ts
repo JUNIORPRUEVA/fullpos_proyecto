@@ -76,6 +76,42 @@ function summarizeRawText(rawText: string | null, maxLength = 400) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
 }
 
+type SeedRequestMeta = {
+  authSeedUrl: string;
+  methodUsed: 'POST' | 'GET';
+  httpStatus: number;
+  contentType: string;
+  xmlSize: number;
+  rootElement: string | null;
+  containsSemillaModel: boolean;
+  containsValor: boolean;
+  containsFecha: boolean;
+  rawTextSummary: string | null;
+};
+
+type ValidateSeedMeta = {
+  validateUrl: string;
+  requestContentType: string;
+  fieldName: 'raw-xml' | 'xml' | 'archivo' | 'x-www-form-urlencoded';
+  httpStatus: number;
+  responseContentType: string;
+  rawTextSummary: string | null;
+};
+
+function extractXmlRootName(rawText: string | null) {
+  const text = (rawText ?? '').trim();
+  if (!text.startsWith('<')) return null;
+  const match = text.match(/^<\?xml[^>]*>\s*<([\w:-]+)/i) ?? text.match(/^<([\w:-]+)/i);
+  return match?.[1] ?? null;
+}
+
+function hasXmlNode(rawText: string | null, nodeName: string) {
+  const text = (rawText ?? '').toLowerCase();
+  if (!text) return false;
+  const normalized = nodeName.toLowerCase();
+  return text.includes(`<${normalized}`) || text.includes(`:${normalized}`);
+}
+
 function extractDgiiSeedXml(raw: unknown, rawText: string | null) {
   if (rawText?.trim().startsWith('<')) {
     return rawText.trim();
@@ -264,9 +300,61 @@ export class DgiiAuthService {
       };
     }
 
-    const { loaded } = await this.loadCompanyCertificate(companyId);
+    const companyIdentity = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { rnc: true },
+    });
+
+    const { certificate, loaded } = await this.loadCompanyCertificate(companyId);
     const seedResponse = await this.requestDgiiSeed(companyId, environment, config.authSeedUrl, config.userAgent, config.timeoutMs);
-    const signedSeedXml = this.signatureService.signXml(seedResponse.seedXml, loaded.privateKeyPem, loaded.certPem);
+
+    console.info('[electronic-invoicing.dgii.auth] seed.response', {
+      requestId,
+      companyId,
+      companyRnc: companyIdentity?.rnc ?? null,
+      environment,
+      authSeedUrl: seedResponse.meta.authSeedUrl,
+      methodUsed: seedResponse.meta.methodUsed,
+      httpStatus: seedResponse.meta.httpStatus,
+      contentType: seedResponse.meta.contentType,
+      xmlSize: seedResponse.meta.xmlSize,
+      rootElement: seedResponse.meta.rootElement,
+      containsSemillaModel: seedResponse.meta.containsSemillaModel,
+      containsValor: seedResponse.meta.containsValor,
+      containsFecha: seedResponse.meta.containsFecha,
+    });
+
+    const seedRootBefore = extractXmlRootName(seedResponse.seedXml);
+    let signedSeedXml = '';
+    try {
+      signedSeedXml = this.signatureService.signXml(seedResponse.seedXml, loaded.privateKeyPem, loaded.certPem);
+    } catch (error) {
+      throw {
+        status: 502,
+        message: error instanceof Error ? error.message : 'No se pudo firmar la semilla DGII',
+        errorCode: 'DGII_SEED_SIGN_FAILED',
+        details: {
+          environment,
+          companyId,
+          companyRnc: companyIdentity?.rnc ?? null,
+          certificateAlias: certificate.alias,
+          rootBefore: seedRootBefore,
+        },
+      };
+    }
+
+    const seedRootAfter = extractXmlRootName(signedSeedXml);
+    console.info('[electronic-invoicing.dgii.auth] seed.signed', {
+      requestId,
+      companyId,
+      companyRnc: companyIdentity?.rnc ?? null,
+      certificateAlias: certificate.alias,
+      rootBefore: seedRootBefore,
+      rootAfter: seedRootAfter,
+      signedXmlSize: signedSeedXml.length,
+      containsSignature: signedSeedXml.includes('<Signature') || signedSeedXml.includes(':Signature'),
+    });
+
     const validated = await this.validateDgiiSeed(
       companyId,
       environment,
@@ -275,6 +363,20 @@ export class DgiiAuthService {
       config.timeoutMs,
       signedSeedXml,
     );
+
+    console.info('[electronic-invoicing.dgii.auth] seed.validate.response', {
+      requestId,
+      companyId,
+      companyRnc: companyIdentity?.rnc ?? null,
+      environment,
+      validateUrl: validated.meta.validateUrl,
+      requestContentType: validated.meta.requestContentType,
+      fieldName: validated.meta.fieldName,
+      httpStatus: validated.meta.httpStatus,
+      responseContentType: validated.meta.responseContentType,
+      tokenFound: !!validated.token,
+      expiresAt: validated.expiresAt.toISOString(),
+    });
 
     await this.prisma.electronicDgiiTokenCache.upsert({
       where: { companyId_environment: { companyId, environment } },
@@ -317,7 +419,7 @@ export class DgiiAuthService {
     url: string,
     userAgent: string,
     timeoutMs: number,
-  ) {
+  ): Promise<{ seedXml: string; raw: unknown; meta: SeedRequestMeta }> {
     const callSeed = async (method: 'POST' | 'GET') => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -353,7 +455,7 @@ export class DgiiAuthService {
               deepFindFirstString(fallback.raw, ['Mensaje', 'mensaje', 'Message', 'message']) ||
               deepFindFirstString(primary.raw, ['Mensaje', 'mensaje', 'Message', 'message']) ||
               `DGII rechazó la solicitud de semilla (POST=${primary.response.status}, GET=${fallback.response.status})`,
-            errorCode: 'DGII_AUTH_SEED_FAILED',
+            errorCode: 'DGII_SEED_REQUEST_FAILED',
             details: {
               environment,
               methodTried: ['POST', 'GET'],
@@ -366,7 +468,36 @@ export class DgiiAuthService {
           };
         }
 
-        return { seedXml: extractDgiiSeedXml(fallback.raw, fallback.rawText), raw: fallback.raw };
+        const seedXml = extractDgiiSeedXml(fallback.raw, fallback.rawText);
+        if (!seedXml.trim().startsWith('<')) {
+          throw {
+            status: 502,
+            message: 'DGII devolvió semilla sin XML válido',
+            errorCode: 'DGII_SEED_INVALID_XML',
+            details: {
+              environment,
+              methodTried: ['POST', 'GET'],
+              rawTextSummary: summarizeRawText(fallback.rawText),
+            },
+          };
+        }
+
+        return {
+          seedXml,
+          raw: fallback.raw,
+          meta: {
+            authSeedUrl: url,
+            methodUsed: 'GET',
+            httpStatus: fallback.response.status,
+            contentType: fallback.response.headers.get('content-type') ?? '',
+            xmlSize: seedXml.length,
+            rootElement: extractXmlRootName(seedXml),
+            containsSemillaModel: hasXmlNode(seedXml, 'SemillaModel'),
+            containsValor: hasXmlNode(seedXml, 'valor'),
+            containsFecha: hasXmlNode(seedXml, 'fecha'),
+            rawTextSummary: summarizeRawText(fallback.rawText),
+          },
+        };
       }
 
       if (!primary.response.ok) {
@@ -375,7 +506,7 @@ export class DgiiAuthService {
           message:
             deepFindFirstString(primary.raw, ['Mensaje', 'mensaje', 'Message', 'message']) ||
             `DGII rechazó la solicitud de semilla (HTTP ${primary.response.status})`,
-          errorCode: 'DGII_AUTH_SEED_FAILED',
+          errorCode: 'DGII_SEED_REQUEST_FAILED',
           details: {
             environment,
             methodTried: ['POST'],
@@ -386,12 +517,41 @@ export class DgiiAuthService {
         };
       }
 
-      return { seedXml: extractDgiiSeedXml(primary.raw, primary.rawText), raw: primary.raw };
+      const seedXml = extractDgiiSeedXml(primary.raw, primary.rawText);
+      if (!seedXml.trim().startsWith('<')) {
+        throw {
+          status: 502,
+          message: 'DGII devolvió semilla sin XML válido',
+          errorCode: 'DGII_SEED_INVALID_XML',
+          details: {
+            environment,
+            methodTried: ['POST'],
+            rawTextSummary: summarizeRawText(primary.rawText),
+          },
+        };
+      }
+
+      return {
+        seedXml,
+        raw: primary.raw,
+        meta: {
+          authSeedUrl: url,
+          methodUsed: 'POST',
+          httpStatus: primary.response.status,
+          contentType: primary.response.headers.get('content-type') ?? '',
+          xmlSize: seedXml.length,
+          rootElement: extractXmlRootName(seedXml),
+          containsSemillaModel: hasXmlNode(seedXml, 'SemillaModel'),
+          containsValor: hasXmlNode(seedXml, 'valor'),
+          containsFecha: hasXmlNode(seedXml, 'fecha'),
+          rawTextSummary: summarizeRawText(primary.rawText),
+        },
+      };
     } catch (error) {
       await this.prisma.electronicDgiiTokenCache.upsert({
         where: { companyId_environment: { companyId, environment } },
         update: {
-          lastErrorCode: (error as any)?.errorCode ?? 'DGII_AUTH_SEED_FAILED',
+          lastErrorCode: (error as any)?.errorCode ?? 'DGII_SEED_REQUEST_FAILED',
           lastErrorMessage: error instanceof Error ? error.message : String((error as any)?.message ?? error),
         },
         create: {
@@ -400,7 +560,7 @@ export class DgiiAuthService {
           tokenEncrypted: encryptSecret('seed-error-placeholder'),
           issuedAt: new Date(),
           expiresAt: new Date(Date.now() - 1000),
-          lastErrorCode: (error as any)?.errorCode ?? 'DGII_AUTH_SEED_FAILED',
+          lastErrorCode: (error as any)?.errorCode ?? 'DGII_SEED_REQUEST_FAILED',
           lastErrorMessage: error instanceof Error ? error.message : String((error as any)?.message ?? error),
         },
       });
@@ -415,46 +575,154 @@ export class DgiiAuthService {
     userAgent: string,
     timeoutMs: number,
     signedSeedXml: string,
-  ) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  ): Promise<{ token: string; issuedAt: Date; expiresAt: Date; validatedAt: Date; meta: ValidateSeedMeta }> {
+    const callValidate = async (payload: {
+      requestContentType: string;
+      fieldName: ValidateSeedMeta['fieldName'];
+      body: BodyInit;
+      headers: Record<string, string>;
+    }) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
+            'user-agent': userAgent,
+            ...payload.headers,
+          },
+          body: payload.body,
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        const { raw, rawText } = await parseDgiiResponse(response);
+        const token = extractDgiiToken(raw, response);
+        return {
+          response,
+          raw,
+          rawText,
+          token,
+          meta: {
+            validateUrl: url,
+            requestContentType: payload.requestContentType,
+            fieldName: payload.fieldName,
+            httpStatus: response.status,
+            responseContentType: response.headers.get('content-type') ?? '',
+            rawTextSummary: summarizeRawText(rawText),
+          } satisfies ValidateSeedMeta,
+        };
+      } catch (error) {
+        clearTimeout(timeout);
+        throw error;
+      }
+    };
+
+    const formXml = new FormData();
+    formXml.append('xml', new Blob([signedSeedXml], { type: 'application/xml' }), 'semilla-firmada.xml');
+    const formArchivo = new FormData();
+    formArchivo.append('archivo', new Blob([signedSeedXml], { type: 'application/xml' }), 'semilla-firmada.xml');
+    const formUrlEncoded = new URLSearchParams({ xml: signedSeedXml }).toString();
+
+    const attempts: Array<{
+      requestContentType: string;
+      fieldName: ValidateSeedMeta['fieldName'];
+      body: BodyInit;
+      headers: Record<string, string>;
+    }> = [
+      {
+        requestContentType: 'application/xml; charset=utf-8',
+        fieldName: 'raw-xml' as const,
+        body: signedSeedXml,
+        headers: { 'content-type': 'application/xml; charset=utf-8' },
+      },
+      {
+        requestContentType: 'multipart/form-data',
+        fieldName: 'xml' as const,
+        body: formXml,
+        headers: {},
+      },
+      {
+        requestContentType: 'multipart/form-data',
+        fieldName: 'archivo' as const,
+        body: formArchivo,
+        headers: {},
+      },
+      {
+        requestContentType: 'application/x-www-form-urlencoded',
+        fieldName: 'x-www-form-urlencoded' as const,
+        body: formUrlEncoded,
+        headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },
+      },
+    ];
+
+    let lastFailure: unknown = null;
+    let lastFailureMeta: ValidateSeedMeta | null = null;
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
-          'content-type': 'application/xml; charset=utf-8',
-          'user-agent': userAgent,
-        },
-        body: signedSeedXml,
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+      for (const attempt of attempts) {
+        const result = await callValidate(attempt);
 
-      const { raw } = await parseDgiiResponse(response);
-      const token = extractDgiiToken(raw, response);
-      if (!response.ok || !token) {
-        throw {
-          status: 502,
-          message: deepFindFirstString(raw, ['Mensaje', 'mensaje', 'Message', 'message']) || 'DGII no devolvió token válido',
-          errorCode: token ? 'DGII_AUTH_VALIDATE_FAILED' : 'DGII_TOKEN_MISSING',
-          details: { environment, httpStatus: response.status, raw },
+        console.info('[electronic-invoicing.dgii.auth] validate.attempt', {
+          companyId,
+          environment,
+          validateUrl: url,
+          requestContentType: result.meta.requestContentType,
+          fieldName: result.meta.fieldName,
+          httpStatus: result.response.status,
+          responseContentType: result.meta.responseContentType,
+          tokenFound: !!result.token,
+          rawTextSummary: result.meta.rawTextSummary,
+        });
+
+        if (result.response.ok && result.token) {
+          return {
+            token: result.token,
+            issuedAt: new Date(),
+            expiresAt: extractDgiiExpiry(result.raw, result.token),
+            validatedAt: new Date(),
+            meta: result.meta,
+          };
+        }
+
+        lastFailureMeta = result.meta;
+        const responseMessage =
+          deepFindFirstString(result.raw, ['Mensaje', 'mensaje', 'Message', 'message', 'descripcion', 'Descripcion']) ||
+          'DGII no devolvió token válido';
+
+        lastFailure = {
+          status: result.response.status === 400 ? 400 : 502,
+          message: responseMessage,
+          errorCode: result.response.status === 400 ? 'DGII_SEED_VALIDATE_BAD_REQUEST' : 'DGII_TOKEN_MISSING',
+          details: {
+            environment,
+            httpStatus: result.response.status,
+            raw: result.raw,
+            requestContentType: result.meta.requestContentType,
+            fieldName: result.meta.fieldName,
+            rawTextSummary: result.meta.rawTextSummary,
+          },
         };
+
+        // 400 funcional solo rota formato; si no es 400 o ya no tiene sentido continuar, corta.
+        if (result.response.status !== 400) {
+          break;
+        }
       }
 
-      return {
-        token,
-        issuedAt: new Date(),
-        expiresAt: extractDgiiExpiry(raw, token),
-        validatedAt: new Date(),
+      throw lastFailure ?? {
+        status: 502,
+        message: 'DGII no devolvió token válido',
+        errorCode: 'DGII_TOKEN_MISSING',
+        details: { environment },
       };
     } catch (error) {
-      clearTimeout(timeout);
       await this.prisma.electronicDgiiTokenCache.upsert({
         where: { companyId_environment: { companyId, environment } },
         update: {
-          lastErrorCode: (error as any)?.errorCode ?? 'DGII_AUTH_VALIDATE_FAILED',
+          lastErrorCode: (error as any)?.errorCode ?? 'DGII_TOKEN_MISSING',
           lastErrorMessage: error instanceof Error ? error.message : String((error as any)?.message ?? error),
         },
         create: {
@@ -463,10 +731,24 @@ export class DgiiAuthService {
           tokenEncrypted: encryptSecret('validation-error-placeholder'),
           issuedAt: new Date(),
           expiresAt: new Date(Date.now() - 1000),
-          lastErrorCode: (error as any)?.errorCode ?? 'DGII_AUTH_VALIDATE_FAILED',
+          lastErrorCode: (error as any)?.errorCode ?? 'DGII_TOKEN_MISSING',
           lastErrorMessage: error instanceof Error ? error.message : String((error as any)?.message ?? error),
         },
       });
+
+      console.error('[electronic-invoicing.dgii.auth] validate.error', {
+        companyId,
+        environment,
+        validateUrl: url,
+        requestContentType: lastFailureMeta?.requestContentType ?? null,
+        fieldName: lastFailureMeta?.fieldName ?? null,
+        responseStatus: (error as any)?.details?.httpStatus ?? null,
+        rawResponse: (error as any)?.details?.raw ?? null,
+        rawTextSummary: (error as any)?.details?.rawTextSummary ?? null,
+        errorCode: (error as any)?.errorCode ?? 'DGII_TOKEN_MISSING',
+        errorMessage: (error as any)?.message ?? 'DGII no devolvió token válido',
+      });
+
       throw error;
     }
   }
