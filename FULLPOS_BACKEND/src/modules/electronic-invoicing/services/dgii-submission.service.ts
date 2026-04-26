@@ -10,6 +10,10 @@ function isTransientStatus(status: number) {
 function normalizeStatus(raw: unknown, httpStatus: number): DgiiSubmissionResponse['normalizedStatus'] {
   const statusText =
     deepFindFirstString(raw, ['Estado', 'estado', 'Status', 'status', 'Resultado', 'resultado'])?.toLowerCase() ?? '';
+  const messageText =
+    deepFindFirstString(raw, ['Mensaje', 'mensaje', 'Descripcion', 'descripcion', 'Message', 'message'])?.toLowerCase() ?? '';
+
+  if (statusText.includes('error') || messageText.includes('error')) return 'error';
 
   if (statusText.includes('condicional')) return 'accepted_conditional';
   if (statusText.includes('acept')) return 'accepted';
@@ -20,8 +24,9 @@ function normalizeStatus(raw: unknown, httpStatus: number): DgiiSubmissionRespon
 }
 
 function extractCommonFields(raw: unknown) {
+  const trackId = deepFindFirstString(raw, ['TrackId', 'trackId', 'TrackID', 'IdTrack', 'idTrack', 'NroTrackId']);
   return {
-    trackId: deepFindFirstString(raw, ['TrackId', 'trackId', 'IdTrack', 'idTrack']),
+    trackId,
     code: deepFindFirstString(raw, ['Codigo', 'codigo', 'Code', 'code']),
     message: deepFindFirstString(raw, ['Mensaje', 'mensaje', 'Descripcion', 'descripcion', 'Message', 'message']),
   };
@@ -36,17 +41,45 @@ function isAuthFailure(httpStatus: number, code?: string, message?: string) {
 async function parseResponse(response: Response) {
   const contentType = response.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {
-    return response.json();
+    const parsed = await response.json();
+    return {
+      raw: parsed,
+      rawText: typeof parsed === 'string' ? parsed : JSON.stringify(parsed),
+      contentType,
+    };
   }
 
   const text = await response.text();
-  if (!text.trim()) return {};
+  if (!text.trim()) return { raw: {}, rawText: '', contentType };
 
   try {
-    return parseXml(text);
+    return { raw: parseXml(text), rawText: text, contentType };
   } catch {
-    return { rawText: text };
+    return { raw: { rawText: text }, rawText: text, contentType };
   }
+}
+
+function extractTrackIdFromRawText(rawText?: string) {
+  const text = (rawText ?? '').trim();
+  if (!text) return undefined;
+
+  const xmlMatch = text.match(/<(?:\w+:)?(?:TrackId|TrackID|IdTrack|idTrack|NroTrackId)>([^<]+)</i);
+  if (xmlMatch?.[1]) return xmlMatch[1].trim();
+
+  const jsonMatch = text.match(/"(?:TrackId|trackId|TrackID|IdTrack|idTrack|NroTrackId)"\s*:\s*"([^"]+)"/i);
+  if (jsonMatch?.[1]) return jsonMatch[1].trim();
+
+  return undefined;
+}
+
+function sanitizeResponseHeaders(response: Response) {
+  const relevant = ['content-type', 'date', 'server', 'x-request-id', 'x-correlation-id'];
+  const out: Record<string, string> = {};
+  for (const name of relevant) {
+    const value = response.headers.get(name);
+    if (value) out[name] = value;
+  }
+  return out;
 }
 
 export class DgiiSubmissionService {
@@ -61,6 +94,7 @@ export class DgiiSubmissionService {
     signedXml: string,
     requestId?: string,
     manualToken?: string,
+    context?: { invoiceId?: number; ecf?: string },
   ): Promise<DgiiSubmissionResponse> {
     const config = this.directory.getEnvironmentConfig(environment);
     let attempt = 0;
@@ -89,9 +123,30 @@ export class DgiiSubmissionService {
         });
         clearTimeout(timeout);
 
-        const raw = await parseResponse(response);
+        const parsed = await parseResponse(response);
+        const raw = parsed.raw;
         const common = extractCommonFields(raw);
+        const trackId = common.trackId ?? extractTrackIdFromRawText(parsed.rawText);
         const normalizedStatus = normalizeStatus(raw, response.status);
+        const responseHeaders = sanitizeResponseHeaders(response);
+
+        console.info('[electronic-invoicing.dgii.submit] dgii_response_received', {
+          requestId,
+          companyId,
+          invoiceId: context?.invoiceId ?? null,
+          ecf: context?.ecf ?? null,
+          environment,
+          endpoint: config.submitUrl,
+          httpStatus: response.status,
+          contentType: parsed.contentType,
+          headers: responseHeaders,
+          trackId: trackId ?? null,
+          normalizedStatus,
+          code: common.code ?? null,
+          message: common.message ?? null,
+          rawText: parsed.rawText,
+          rawParsed: raw,
+        });
 
         if (!manualToken && !forceRefresh && isAuthFailure(response.status, common.code, common.message)) {
           await this.authService.invalidateCompanyBearerToken(companyId, environment, common.message ?? common.code);
@@ -103,10 +158,14 @@ export class DgiiSubmissionService {
         return {
           httpStatus: response.status,
           ok: response.ok,
-          trackId: common.trackId,
+          trackId,
           normalizedStatus,
           code: common.code,
           message: common.message,
+          dgiiEndpoint: config.submitUrl,
+          responseContentType: parsed.contentType,
+          responseHeaders,
+          rawText: parsed.rawText,
           raw,
         };
       } catch (error) {
@@ -122,7 +181,9 @@ export class DgiiSubmissionService {
       httpStatus: 0,
       ok: false,
       normalizedStatus: 'error',
+      code: 'SEND_ERROR',
       message: lastError instanceof Error ? lastError.message : 'Error enviando documento a DGII',
+      dgiiEndpoint: config.submitUrl,
       raw: { error: lastError instanceof Error ? lastError.message : String(lastError) },
     };
   }

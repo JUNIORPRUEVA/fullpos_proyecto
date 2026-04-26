@@ -668,7 +668,7 @@ export class ElectronicInvoicingService {
         return this.transitionInternalStatus(
           invoiceId,
           'ERROR',
-          'Error en la comunicación con DGII',
+          'Error tecnico de envio o consulta con DGII (no implica rechazo fiscal)',
           username,
           {
             dgiiStatus: 'ERROR',
@@ -721,6 +721,7 @@ export class ElectronicInvoicingService {
       invoice.xmlSigned,
       requestId,
       dto.dgiiManualToken,
+      { invoiceId: invoice.id, ecf: invoice.ecf },
     );
     const updated = await this.applyDgiiOutcome(invoice.id, username, result);
 

@@ -18,6 +18,10 @@ export interface DgiiSubmissionResponse {
   normalizedStatus: 'accepted' | 'accepted_conditional' | 'rejected' | 'pending' | 'error';
   code?: string;
   message?: string;
+  dgiiEndpoint?: string;
+  responseContentType?: string;
+  responseHeaders?: Record<string, string>;
+  rawText?: string;
   raw: unknown;
 }
 
@@ -28,5 +32,9 @@ export interface DgiiTrackResultResponse {
   normalizedStatus: 'accepted' | 'accepted_conditional' | 'rejected' | 'pending' | 'error';
   code?: string;
   message?: string;
+  dgiiEndpoint?: string;
+  responseContentType?: string;
+  responseHeaders?: Record<string, string>;
+  rawText?: string;
   raw: unknown;
 }
