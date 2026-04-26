@@ -130,6 +130,9 @@ posElectronicInvoicingRouter.post(
       company.id,
       {
         saleId: dto.saleId,
+        saleLocalCode: dto.saleLocalCode ?? null,
+        companyCloudId: dto.companyCloudId ?? null,
+        companyRnc: dto.companyRnc ?? null,
         documentTypeCode: dto.documentTypeCode as any,
         branchId: dto.branchId,
       },
