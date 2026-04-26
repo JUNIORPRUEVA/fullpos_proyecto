@@ -63,52 +63,112 @@ async function resolveCompany(params: {
   companyRnc?: string;
   companyCloudId?: string;
 }) {
-  if (params.companyId != null) {
-    const company = await prisma.company.findUnique({
-      where: { id: params.companyId },
-      select: { id: true, rnc: true, cloudCompanyId: true },
-    });
-    if (!company) throw { status: 404, message: 'Empresa no encontrada' };
-    return company;
-  }
-
   const cloudId = params.companyCloudId?.trim() ?? '';
-  if (cloudId) {
-    const company = await prisma.company.findFirst({
-      where: { cloudCompanyId: cloudId },
-      select: { id: true, rnc: true, cloudCompanyId: true },
-    });
-    if (company) return company;
+  const rnc = params.companyRnc?.trim() ?? '';
+
+  const companyById =
+    params.companyId != null
+      ? await prisma.company.findUnique({
+          where: { id: params.companyId },
+          select: { id: true, rnc: true, cloudCompanyId: true },
+        })
+      : null;
+
+  if (params.companyId != null && !companyById) {
+    throw { status: 404, message: 'Empresa no encontrada', errorCode: 'COMPANY_NOT_FOUND' };
   }
 
-  const rnc = params.companyRnc?.trim() ?? '';
-  if (!rnc) {
+  const companyByCloudId =
+    cloudId.length > 0
+      ? await prisma.company.findFirst({
+          where: { cloudCompanyId: cloudId },
+          select: { id: true, rnc: true, cloudCompanyId: true },
+        })
+      : null;
+
+  let companyByRnc: { id: number; rnc: string | null; cloudCompanyId: string | null } | null = null;
+  if (rnc.length > 0) {
+    const exact = await prisma.company.findFirst({
+      where: { rnc },
+      select: { id: true, rnc: true, cloudCompanyId: true },
+    });
+    if (exact) {
+      companyByRnc = exact;
+    } else {
+      const normalized = normalizeRnc(rnc);
+      const companies = await prisma.company.findMany({
+        where: { rnc: { not: null } },
+        select: { id: true, rnc: true, cloudCompanyId: true },
+      });
+      companyByRnc =
+        companies.find(
+          (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
+        ) ?? null;
+    }
+  }
+
+  if (companyById && cloudId.length > 0 && !companyByCloudId) {
     throw {
-      status: cloudId ? 404 : 400,
-      message: cloudId
-        ? 'Empresa no encontrada para el companyCloudId enviado'
-        : 'companyId, RNC o companyCloudId requerido',
+      status: 409,
+      message: 'companyCloudId no corresponde con la empresa indicada',
+      errorCode: 'COMPANY_LOCATOR_CONFLICT',
     };
   }
 
-  const exact = await prisma.company.findFirst({
-    where: { rnc },
-    select: { id: true, rnc: true, cloudCompanyId: true },
-  });
-  if (exact) return exact;
-
-  const normalized = normalizeRnc(rnc);
-  const companies = await prisma.company.findMany({
-    where: { rnc: { not: null } },
-    select: { id: true, rnc: true, cloudCompanyId: true },
-  });
-  const matched = companies.find(
-    (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-  );
-  if (!matched) {
-    throw { status: 404, message: 'Empresa no encontrada' };
+  if (companyById && rnc.length > 0 && !companyByRnc) {
+    throw {
+      status: 409,
+      message: 'companyRnc no corresponde con la empresa indicada',
+      errorCode: 'COMPANY_LOCATOR_CONFLICT',
+    };
   }
-  return matched;
+
+  if (companyById && companyByCloudId && companyById.id !== companyByCloudId.id) {
+    throw {
+      status: 409,
+      message: 'companyId y companyCloudId pertenecen a empresas distintas',
+      errorCode: 'COMPANY_LOCATOR_CONFLICT',
+    };
+  }
+
+  if (companyById && companyByRnc && companyById.id !== companyByRnc.id) {
+    throw {
+      status: 409,
+      message: 'companyId y companyRnc pertenecen a empresas distintas',
+      errorCode: 'COMPANY_LOCATOR_CONFLICT',
+    };
+  }
+
+  if (companyByCloudId && companyByRnc && companyByCloudId.id !== companyByRnc.id) {
+    throw {
+      status: 409,
+      message: 'companyCloudId y companyRnc pertenecen a empresas distintas',
+      errorCode: 'COMPANY_LOCATOR_CONFLICT',
+    };
+  }
+
+  const resolved = companyById ?? companyByCloudId ?? companyByRnc;
+  if (resolved) {
+    return resolved;
+  }
+
+  if (cloudId.length > 0) {
+    throw {
+      status: 404,
+      message: 'Empresa no encontrada para el companyCloudId enviado',
+      errorCode: 'COMPANY_NOT_FOUND',
+    };
+  }
+
+  if (rnc.length > 0) {
+    throw { status: 404, message: 'Empresa no encontrada', errorCode: 'COMPANY_NOT_FOUND' };
+  }
+
+  throw {
+    status: 400,
+    message: 'companyId, RNC o companyCloudId requerido',
+    errorCode: 'COMPANY_LOCATOR_REQUIRED',
+  };
 }
 
 export type CreateProductInput = Omit<
@@ -251,7 +311,7 @@ async function persistSyncOperation(companyId: number, operation: ProductSyncOpe
     if (!resolvedCode) {
       throw {
         status: 400,
-        message: 'No se pudo resolver product.code para la operación',
+        message: 'No se pudo resolver product.code para la operaci+�n',
         errorCode: 'PRODUCT_SYNC_CODE_REQUIRED',
       };
     }
@@ -259,7 +319,7 @@ async function persistSyncOperation(companyId: number, operation: ProductSyncOpe
     if (!resolvedName) {
       throw {
         status: 400,
-        message: 'No se pudo resolver product.name para la operación',
+        message: 'No se pudo resolver product.name para la operaci+�n',
         errorCode: 'PRODUCT_SYNC_NAME_REQUIRED',
       };
     }
