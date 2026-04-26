@@ -1,6 +1,14 @@
 import env from '../../../config/env';
 import { DgiiEnvironment, DgiiEnvironmentConfig } from '../types/dgii.types';
 
+function detectAuthEndpointFamily(url?: string) {
+  const value = (url ?? '').toLowerCase();
+  if (!value) return 'missing';
+  if (value.includes('/autenticacion/api/autenticacion/')) return 'autenticacion-api-autenticacion';
+  if (value.includes('/emisorreceptor/fe/autenticacion/api/')) return 'emisorreceptor-fe-autenticacion-api';
+  return 'other';
+}
+
 export class DgiiDirectoryService {
   getEnvironmentConfig(environment: DgiiEnvironment): DgiiEnvironmentConfig {
     const timeoutMs = env.DGII_REQUEST_TIMEOUT_MS;
@@ -44,7 +52,7 @@ export class DgiiDirectoryService {
       };
     };
 
-    return {
+    const config: DgiiEnvironmentConfig = {
       environment,
       submitUrl: env.DGII_PRECERT_SUBMIT_URL,
       resultUrlTemplate: env.DGII_PRECERT_RESULT_URL_TEMPLATE,
@@ -54,6 +62,16 @@ export class DgiiDirectoryService {
       maxRetries,
       userAgent,
     };
+
+    console.info('[electronic-invoicing.dgii.directory] auth.endpoints', {
+      environment,
+      authSeedUrl: config.authSeedUrl ?? null,
+      authValidateUrl: config.authValidateUrl ?? null,
+      authSeedFamily: detectAuthEndpointFamily(config.authSeedUrl),
+      authValidateFamily: detectAuthEndpointFamily(config.authValidateUrl),
+    });
+
+    return config;
   }
 
   buildTrackResultUrl(template: string, trackId: string) {

@@ -87,15 +87,21 @@ type SeedRequestMeta = {
   containsValor: boolean;
   containsFecha: boolean;
   rawTextSummary: string | null;
+  seedHead: string;
+  seedTail: string;
 };
 
 type ValidateSeedMeta = {
   validateUrl: string;
   requestContentType: string;
+  payloadMode: 'multipart' | 'form-urlencoded' | 'raw-xml';
   fieldName: 'raw-xml' | 'xml' | 'archivo' | 'x-www-form-urlencoded';
   httpStatus: number;
   responseContentType: string;
   rawTextSummary: string | null;
+  signedXmlRoot: string | null;
+  signedXmlHasSignature: boolean;
+  signedXmlSize: number;
 };
 
 function extractXmlRootName(rawText: string | null) {
@@ -110,6 +116,102 @@ function hasXmlNode(rawText: string | null, nodeName: string) {
   if (!text) return false;
   const normalized = nodeName.toLowerCase();
   return text.includes(`<${normalized}`) || text.includes(`:${normalized}`);
+}
+
+function xmlEdgePreview(rawText: string, size = 120) {
+  const normalized = rawText.replace(/\s+/g, ' ').trim();
+  return {
+    head: normalized.slice(0, size),
+    tail: normalized.slice(Math.max(0, normalized.length - size)),
+  };
+}
+
+function validateSignedSeedXmlForDgii(signedSeedXml: string) {
+  if (typeof signedSeedXml !== 'string' || signedSeedXml.trim().length === 0) {
+    throw {
+      status: 400,
+      message: 'Semilla firmada vacía',
+      errorCode: 'DGII_SEED_SIGNED_XML_INVALID',
+    };
+  }
+
+  const withoutBom = signedSeedXml.replace(/^\uFEFF/, '');
+  const firstNonWhitespace = withoutBom.search(/\S/);
+  const startsLikeXml =
+    firstNonWhitespace >= 0 &&
+    (withoutBom.slice(firstNonWhitespace).startsWith('<?xml') || withoutBom.slice(firstNonWhitespace).startsWith('<'));
+  if (!startsLikeXml) {
+    throw {
+      status: 400,
+      message: 'La semilla firmada no tiene formato XML crudo',
+      errorCode: 'DGII_SEED_SIGNED_XML_INVALID',
+      details: {
+        startsLikeXml,
+        firstChars: withoutBom.slice(0, 60),
+      },
+    };
+  }
+
+  if (withoutBom.includes('\\"') || withoutBom.includes('[object Object]')) {
+    throw {
+      status: 400,
+      message: 'La semilla firmada parece serializada/escapada incorrectamente',
+      errorCode: 'DGII_SEED_SIGNED_XML_INVALID',
+    };
+  }
+
+  if (withoutBom.includes('&lt;') && withoutBom.includes('&gt;')) {
+    throw {
+      status: 400,
+      message: 'La semilla firmada está escapada como texto en lugar de XML',
+      errorCode: 'DGII_SEED_SIGNED_XML_INVALID',
+    };
+  }
+
+  try {
+    parseXml(withoutBom);
+  } catch {
+    throw {
+      status: 400,
+      message: 'La semilla firmada no es parseable como XML',
+      errorCode: 'DGII_SEED_SIGNED_XML_INVALID',
+    };
+  }
+
+  const root = extractXmlRootName(withoutBom);
+  const rootNormalized = (root ?? '').toLowerCase();
+  if (rootNormalized !== 'semillamodel') {
+    throw {
+      status: 400,
+      message: 'La semilla firmada no conserva raíz SemillaModel',
+      errorCode: 'DGII_SEED_SIGNED_XML_INVALID',
+      details: { signedXmlRoot: root ?? null },
+    };
+  }
+
+  const hasSignature = hasXmlNode(withoutBom, 'Signature');
+  const hasValor = hasXmlNode(withoutBom, 'valor');
+  const hasFecha = hasXmlNode(withoutBom, 'fecha');
+  if (!hasSignature || !hasValor || !hasFecha) {
+    throw {
+      status: 400,
+      message: 'La semilla firmada perdió nodos obligatorios',
+      errorCode: 'DGII_SEED_SIGNED_XML_INVALID',
+      details: {
+        hasSignature,
+        hasValor,
+        hasFecha,
+        signedXmlRoot: root ?? null,
+      },
+    };
+  }
+
+  return {
+    signedXml: withoutBom,
+    signedXmlRoot: root,
+    signedXmlHasSignature: hasSignature,
+    signedXmlSize: withoutBom.length,
+  };
 }
 
 function extractDgiiSeedXml(raw: unknown, rawText: string | null) {
@@ -141,6 +243,7 @@ function extractDgiiToken(raw: unknown, response: Response) {
   return deepFindFirstString(raw, [
     'token',
     'Token',
+    'TOKEN',
     'accessToken',
     'AccessToken',
     'bearerToken',
@@ -153,7 +256,19 @@ function extractDgiiToken(raw: unknown, response: Response) {
 function extractDgiiExpiry(raw: unknown, token: string) {
   const now = Date.now();
   const expiresIn = parseSeconds(
-    deepFindFirstString(raw, ['expiresIn', 'ExpiresIn', 'expires_in', 'expiraEnSegundos', 'ExpiraEnSegundos']),
+    deepFindFirstString(raw, [
+      'expiresIn',
+      'ExpiresIn',
+      'expires_in',
+      'expiraEnSegundos',
+      'ExpiraEnSegundos',
+      'expira',
+      'Expira',
+      'expiracion',
+      'Expiracion',
+      'fechaExpiracion',
+      'FechaExpiracion',
+    ]),
   );
   if (expiresIn) {
     return new Date(now + expiresIn * 1000);
@@ -322,6 +437,8 @@ export class DgiiAuthService {
       containsSemillaModel: seedResponse.meta.containsSemillaModel,
       containsValor: seedResponse.meta.containsValor,
       containsFecha: seedResponse.meta.containsFecha,
+      seedHead: seedResponse.meta.seedHead,
+      seedTail: seedResponse.meta.seedTail,
     });
 
     const seedRootBefore = extractXmlRootName(seedResponse.seedXml);
@@ -344,15 +461,17 @@ export class DgiiAuthService {
     }
 
     const seedRootAfter = extractXmlRootName(signedSeedXml);
+    const signedXmlValidation = validateSignedSeedXmlForDgii(signedSeedXml);
     console.info('[electronic-invoicing.dgii.auth] seed.signed', {
       requestId,
       companyId,
       companyRnc: companyIdentity?.rnc ?? null,
       certificateAlias: certificate.alias,
+      certificateValidTo: loaded.validTo.toISOString(),
       rootBefore: seedRootBefore,
       rootAfter: seedRootAfter,
-      signedXmlSize: signedSeedXml.length,
-      containsSignature: signedSeedXml.includes('<Signature') || signedSeedXml.includes(':Signature'),
+      signedXmlSize: signedXmlValidation.signedXmlSize,
+      containsSignature: signedXmlValidation.signedXmlHasSignature,
     });
 
     const validated = await this.validateDgiiSeed(
@@ -361,7 +480,7 @@ export class DgiiAuthService {
       config.authValidateUrl,
       config.userAgent,
       config.timeoutMs,
-      signedSeedXml,
+      signedXmlValidation.signedXml,
     );
 
     console.info('[electronic-invoicing.dgii.auth] seed.validate.response', {
@@ -371,10 +490,14 @@ export class DgiiAuthService {
       environment,
       validateUrl: validated.meta.validateUrl,
       requestContentType: validated.meta.requestContentType,
+      payloadMode: validated.meta.payloadMode,
       fieldName: validated.meta.fieldName,
       httpStatus: validated.meta.httpStatus,
       responseContentType: validated.meta.responseContentType,
       tokenFound: !!validated.token,
+      signedXmlRoot: validated.meta.signedXmlRoot,
+      signedXmlHasSignature: validated.meta.signedXmlHasSignature,
+      signedXmlSize: validated.meta.signedXmlSize,
       expiresAt: validated.expiresAt.toISOString(),
     });
 
@@ -482,6 +605,7 @@ export class DgiiAuthService {
           };
         }
 
+        const seedPreview = xmlEdgePreview(seedXml);
         return {
           seedXml,
           raw: fallback.raw,
@@ -496,6 +620,8 @@ export class DgiiAuthService {
             containsValor: hasXmlNode(seedXml, 'valor'),
             containsFecha: hasXmlNode(seedXml, 'fecha'),
             rawTextSummary: summarizeRawText(fallback.rawText),
+            seedHead: seedPreview.head,
+            seedTail: seedPreview.tail,
           },
         };
       }
@@ -531,6 +657,7 @@ export class DgiiAuthService {
         };
       }
 
+      const seedPreview = xmlEdgePreview(seedXml);
       return {
         seedXml,
         raw: primary.raw,
@@ -545,6 +672,8 @@ export class DgiiAuthService {
           containsValor: hasXmlNode(seedXml, 'valor'),
           containsFecha: hasXmlNode(seedXml, 'fecha'),
           rawTextSummary: summarizeRawText(primary.rawText),
+          seedHead: seedPreview.head,
+          seedTail: seedPreview.tail,
         },
       };
     } catch (error) {
@@ -576,8 +705,11 @@ export class DgiiAuthService {
     timeoutMs: number,
     signedSeedXml: string,
   ): Promise<{ token: string; issuedAt: Date; expiresAt: Date; validatedAt: Date; meta: ValidateSeedMeta }> {
+    const validatedXml = validateSignedSeedXmlForDgii(signedSeedXml);
+
     const callValidate = async (payload: {
       requestContentType: string;
+      payloadMode: ValidateSeedMeta['payloadMode'];
       fieldName: ValidateSeedMeta['fieldName'];
       body: BodyInit;
       headers: Record<string, string>;
@@ -608,10 +740,14 @@ export class DgiiAuthService {
           meta: {
             validateUrl: url,
             requestContentType: payload.requestContentType,
+            payloadMode: payload.payloadMode,
             fieldName: payload.fieldName,
             httpStatus: response.status,
             responseContentType: response.headers.get('content-type') ?? '',
             rawTextSummary: summarizeRawText(rawText),
+            signedXmlRoot: validatedXml.signedXmlRoot,
+            signedXmlHasSignature: validatedXml.signedXmlHasSignature,
+            signedXmlSize: validatedXml.signedXmlSize,
           } satisfies ValidateSeedMeta,
         };
       } catch (error) {
@@ -621,37 +757,42 @@ export class DgiiAuthService {
     };
 
     const formXml = new FormData();
-    formXml.append('xml', new Blob([signedSeedXml], { type: 'application/xml' }), 'semilla-firmada.xml');
+    formXml.append('xml', new Blob([validatedXml.signedXml], { type: 'application/xml' }), 'semilla-firmada.xml');
     const formArchivo = new FormData();
-    formArchivo.append('archivo', new Blob([signedSeedXml], { type: 'application/xml' }), 'semilla-firmada.xml');
-    const formUrlEncoded = new URLSearchParams({ xml: signedSeedXml }).toString();
+    formArchivo.append('archivo', new Blob([validatedXml.signedXml], { type: 'application/xml' }), 'semilla-firmada.xml');
+    const formUrlEncoded = new URLSearchParams({ xml: validatedXml.signedXml }).toString();
 
     const attempts: Array<{
       requestContentType: string;
+      payloadMode: ValidateSeedMeta['payloadMode'];
       fieldName: ValidateSeedMeta['fieldName'];
       body: BodyInit;
       headers: Record<string, string>;
     }> = [
       {
         requestContentType: 'application/xml; charset=utf-8',
+        payloadMode: 'raw-xml' as const,
         fieldName: 'raw-xml' as const,
-        body: signedSeedXml,
+        body: validatedXml.signedXml,
         headers: { 'content-type': 'application/xml; charset=utf-8' },
       },
       {
         requestContentType: 'multipart/form-data',
+        payloadMode: 'multipart' as const,
         fieldName: 'xml' as const,
         body: formXml,
         headers: {},
       },
       {
         requestContentType: 'multipart/form-data',
+        payloadMode: 'multipart' as const,
         fieldName: 'archivo' as const,
         body: formArchivo,
         headers: {},
       },
       {
         requestContentType: 'application/x-www-form-urlencoded',
+        payloadMode: 'form-urlencoded' as const,
         fieldName: 'x-www-form-urlencoded' as const,
         body: formUrlEncoded,
         headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },
@@ -670,10 +811,14 @@ export class DgiiAuthService {
           environment,
           validateUrl: url,
           requestContentType: result.meta.requestContentType,
+          payloadMode: result.meta.payloadMode,
           fieldName: result.meta.fieldName,
           httpStatus: result.response.status,
           responseContentType: result.meta.responseContentType,
           tokenFound: !!result.token,
+          signedXmlRoot: result.meta.signedXmlRoot,
+          signedXmlHasSignature: result.meta.signedXmlHasSignature,
+          signedXmlSize: result.meta.signedXmlSize,
           rawTextSummary: result.meta.rawTextSummary,
         });
 
@@ -707,8 +852,12 @@ export class DgiiAuthService {
             httpStatus: result.response.status,
             raw: result.raw,
             requestContentType: result.meta.requestContentType,
+            payloadMode: result.meta.payloadMode,
             fieldName: result.meta.fieldName,
             rawTextSummary: result.meta.rawTextSummary,
+            signedXmlRoot: result.meta.signedXmlRoot,
+            signedXmlHasSignature: result.meta.signedXmlHasSignature,
+            signedXmlSize: result.meta.signedXmlSize,
           },
         };
 
@@ -747,15 +896,101 @@ export class DgiiAuthService {
         environment,
         validateUrl: url,
         requestContentType: lastFailureMeta?.requestContentType ?? null,
+        payloadMode: lastFailureMeta?.payloadMode ?? null,
         fieldName: lastFailureMeta?.fieldName ?? null,
         responseStatus: (error as any)?.details?.httpStatus ?? null,
         rawResponse: (error as any)?.details?.raw ?? null,
         rawTextSummary: (error as any)?.details?.rawTextSummary ?? null,
+        signedXmlRoot: (error as any)?.details?.signedXmlRoot ?? null,
+        signedXmlHasSignature: (error as any)?.details?.signedXmlHasSignature ?? null,
+        signedXmlSize: (error as any)?.details?.signedXmlSize ?? null,
         errorCode: (error as any)?.errorCode ?? 'DGII_TOKEN_MISSING',
         errorMessage: (error as any)?.message ?? 'DGII no devolvió token válido',
       });
 
       throw error;
+    }
+  }
+
+  async debugAuthenticateByLocators(
+    input: {
+      companyRnc?: string;
+      companyCloudId?: string;
+      environment?: DgiiEnvironment;
+      forceRefresh?: boolean;
+      manualToken?: string;
+    },
+    requestId?: string,
+  ) {
+    const company = await this.mapper.resolveCompanyOrThrow(input.companyRnc, input.companyCloudId);
+    const environment = input.environment ?? env.DGII_DEFAULT_ENVIRONMENT;
+    const config = this.directory.getEnvironmentConfig(environment);
+
+    const out: {
+      companyId: number;
+      companyRnc: string | null;
+      environment: DgiiEnvironment;
+      authSeedUrl: string | null;
+      authValidateUrl: string | null;
+      seedOk: boolean;
+      signOk: boolean;
+      validateOk: boolean;
+      tokenFound: boolean;
+      tokenSource?: DgiiTokenSource;
+      httpStatus?: number;
+      errorCode?: string;
+      errorMessage?: string;
+      payloadMode?: ValidateSeedMeta['payloadMode'];
+      rootElement?: string | null;
+      hasSignature?: boolean;
+      signedXmlSize?: number;
+      validateFieldName?: ValidateSeedMeta['fieldName'];
+      validateContentType?: string;
+      validateRawResponse?: unknown;
+    } = {
+      companyId: company.id,
+      companyRnc: company.rnc ?? null,
+      environment,
+      authSeedUrl: config.authSeedUrl ?? null,
+      authValidateUrl: config.authValidateUrl ?? null,
+      seedOk: false,
+      signOk: false,
+      validateOk: false,
+      tokenFound: false,
+    };
+
+    try {
+      const tokenResult = await this.getCompanyBearerTokenWithMeta(company.id, environment, requestId, {
+        forceRefresh: input.forceRefresh ?? true,
+        manualToken: input.manualToken,
+      });
+
+      out.seedOk = true;
+      out.signOk = true;
+      out.validateOk = true;
+      out.tokenFound = !!tokenResult.token;
+      out.tokenSource = tokenResult.source;
+      out.httpStatus = 200;
+      return out;
+    } catch (error) {
+      const details = ((error as any)?.details ?? null) as Record<string, unknown> | null;
+      out.errorCode = (error as any)?.errorCode ?? 'DGII_AUTH_DEBUG_FAILED';
+      out.errorMessage = (error as any)?.message ?? 'Error desconocido en autenticación DGII';
+      out.httpStatus = (error as any)?.status ?? (typeof details?.httpStatus === 'number' ? (details.httpStatus as number) : undefined);
+      out.payloadMode = (details?.payloadMode as ValidateSeedMeta['payloadMode'] | undefined) ?? undefined;
+      out.rootElement = (details?.signedXmlRoot as string | null | undefined) ?? undefined;
+      out.hasSignature = (details?.signedXmlHasSignature as boolean | undefined) ?? undefined;
+      out.signedXmlSize = (details?.signedXmlSize as number | undefined) ?? undefined;
+      out.validateFieldName = (details?.fieldName as ValidateSeedMeta['fieldName'] | undefined) ?? undefined;
+      out.validateContentType = (details?.requestContentType as string | undefined) ?? undefined;
+      out.validateRawResponse = details?.raw ?? details?.rawTextSummary ?? null;
+
+      const errorCode = out.errorCode ?? '';
+      out.seedOk = !errorCode.includes('SEED_REQUEST');
+      out.signOk = !(errorCode.includes('SEED_SIGN') || errorCode.includes('SIGNED_XML_INVALID'));
+      out.validateOk = !(errorCode.includes('SEED_VALIDATE') || errorCode.includes('TOKEN_MISSING'));
+      out.tokenFound = false;
+      return out;
     }
   }
 

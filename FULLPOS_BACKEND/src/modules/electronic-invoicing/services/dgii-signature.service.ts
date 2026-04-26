@@ -5,8 +5,16 @@ import { extractEmbeddedCertificate } from '../utils/xml.utils';
 
 export class DgiiSignatureService {
   signXml(xml: string, privateKeyPem: string, certPem: string) {
-    const document = new DOMParser().parseFromString(xml, 'text/xml');
-    const rootName = document.documentElement?.localName || document.documentElement?.nodeName || 'eCF';
+    const normalizedXml = xml.replace(/^\uFEFF/, '');
+    const document = new DOMParser().parseFromString(normalizedXml, 'text/xml');
+    const rootName = document.documentElement?.localName || document.documentElement?.nodeName;
+    if (!rootName) {
+      throw new Error('No se pudo determinar el nodo raíz del XML a firmar');
+    }
+    if (rootName.toLowerCase().includes('parsererror')) {
+      throw new Error('XML inválido: parsererror al intentar firmar');
+    }
+
     const rootXpath = `/*[local-name()='${rootName.replace(/^.*:/, '')}']`;
     const signature = new SignedXml();
     (signature as any).signatureAlgorithm = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
@@ -27,7 +35,7 @@ export class DgiiSignatureService {
       digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
     });
 
-    signature.computeSignature(xml, {
+    signature.computeSignature(normalizedXml, {
       location: {
         reference: rootXpath,
         action: 'append',
