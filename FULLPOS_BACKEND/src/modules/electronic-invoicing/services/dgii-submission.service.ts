@@ -15,6 +15,21 @@ function isTransientStatus(status: number) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+function shouldRetryNormalizedError(error: { status?: number; code: string }, phase: 'token' | 'submit') {
+  if (typeof error.status === 'number') {
+    return isTransientStatus(error.status);
+  }
+
+  // When token bootstrap fails without explicit status, avoid futile retries on known functional/auth errors.
+  if (phase === 'token') {
+    if (error.code === 'DGII_SEED_VALIDATE_BAD_REQUEST') return false;
+    if (error.code === 'DGII_SEED_REQUEST_FAILED') return false;
+    if (error.code === 'DGII_TOKEN_MISSING') return false;
+  }
+
+  return true;
+}
+
 function normalizeStatus(raw: unknown, httpStatus: number): DgiiSubmissionResponse['normalizedStatus'] {
   const statusText =
     deepFindFirstString(raw, ['Estado', 'estado', 'Status', 'status', 'Resultado', 'resultado'])?.toLowerCase() ?? '';
@@ -253,6 +268,11 @@ export class DgiiSubmissionService {
           responseBody: normalized.details ?? null,
           attempt,
         });
+
+        const retryable = shouldRetryNormalizedError({ status: normalized.status, code: normalized.code }, lastPhase);
+        if (!retryable) {
+          break;
+        }
 
         if (attempt >= config.maxRetries) break;
       }
