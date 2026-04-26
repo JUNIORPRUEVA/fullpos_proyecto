@@ -154,7 +154,23 @@ export function createElectronicInvoicingAdminController(service: ElectronicInvo
     },
 
     generateOutbound: async (req: Request, res: Response) => {
-      const dto = req.body as typeof createEcfDtoSchema['_output'];
+      const dto = req.body as typeof createEcfDtoSchema['_output'] & {
+        saleLocalCode?: string | null;
+        companyCloudId?: string | null;
+        companyRnc?: string | null;
+      };
+      console.info('[electronic-invoicing.admin] outbound.generate.request_normalized', {
+        companyId: req.user!.companyId,
+        requestId: req.requestId,
+        payload: {
+          saleId: dto.saleId,
+          saleLocalCode: dto.saleLocalCode?.trim() || null,
+          documentTypeCode: dto.documentTypeCode,
+          branchId: dto.branchId,
+          companyCloudId: dto.companyCloudId?.trim() || null,
+          companyRnc: dto.companyRnc?.trim() || null,
+        },
+      });
       const invoice = await service.generateOutbound(req.user!.companyId, dto, req.user!.username, req.requestId);
       res.status(201).json(invoice);
     },

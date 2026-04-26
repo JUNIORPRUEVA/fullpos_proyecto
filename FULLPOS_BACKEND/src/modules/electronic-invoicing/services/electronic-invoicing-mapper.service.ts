@@ -102,7 +102,7 @@ export class ElectronicInvoicingMapperService {
     const requestedCompanyCloudId = options?.companyCloudId?.trim() ?? '';
     const requestedCompanyRnc = normalizeRnc(options?.companyRnc);
 
-    console.info('[electronic-invoicing.mapper] sale_lookup_start', {
+    console.info('[electronic-invoicing.mapper] mapper.sale_lookup_started', {
       saleId,
       localCode: requestedLocalCode || null,
       companyId,
@@ -111,24 +111,18 @@ export class ElectronicInvoicingMapperService {
       documentTypeCode,
     });
 
-    let sale = await this.prisma.sale.findFirst({
-      where: { id: saleId, companyId },
-      include: {
-        items: true,
-        company: { include: { config: true } },
-      },
-    });
+    let sale = null as Awaited<ReturnType<PrismaClient['sale']['findFirst']>>;
+    const triedCriteria: string[] = [];
 
-    console.info('[electronic-invoicing.mapper] sale_lookup_by_id_result', {
-      saleId,
-      companyId,
-      found: !!sale,
-    });
-
-    const triedCriteria: string[] = ['id+companyId'];
-
-    if (!sale && requestedLocalCode) {
+    if (requestedLocalCode) {
       triedCriteria.push('companyId+localCode');
+      console.info('[electronic-invoicing.mapper] mapper.sale_lookup_query_local_code', {
+        where: {
+          companyId,
+          localCode: requestedLocalCode,
+        },
+      });
+
       sale = await this.prisma.sale.findFirst({
         where: {
           companyId,
@@ -143,6 +137,30 @@ export class ElectronicInvoicingMapperService {
       console.info('[electronic-invoicing.mapper] sale_lookup_by_local_code_company_id_result', {
         saleId,
         localCode: requestedLocalCode,
+        companyId,
+        found: !!sale,
+      });
+    }
+
+    if (!sale) {
+      triedCriteria.push('companyId+id');
+      console.info('[electronic-invoicing.mapper] mapper.sale_lookup_query_id', {
+        where: {
+          id: saleId,
+          companyId,
+        },
+      });
+
+      sale = await this.prisma.sale.findFirst({
+        where: { id: saleId, companyId },
+        include: {
+          items: true,
+          company: { include: { config: true } },
+        },
+      });
+
+      console.info('[electronic-invoicing.mapper] sale_lookup_by_id_result', {
+        saleId,
         companyId,
         found: !!sale,
       });

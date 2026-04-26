@@ -414,7 +414,16 @@ export class ElectronicInvoicingService {
     return draft;
   }
 
-  async generateOutbound(companyId: number, dto: CreateEcfDto, username: string, requestId?: string) {
+  async generateOutbound(
+    companyId: number,
+    dto: CreateEcfDto & {
+      saleLocalCode?: string | null;
+      companyCloudId?: string | null;
+      companyRnc?: string | null;
+    },
+    username: string,
+    requestId?: string,
+  ) {
     const config = await this.getEndpointConfig(companyId, dto.branchId);
     if (!config.outboundEnabled || !config.active) {
       throw {
@@ -441,16 +450,71 @@ export class ElectronicInvoicingService {
       };
     }
 
-    console.info('[electronic-invoicing.outbound] generate_request_received', { companyId, saleId: dto.saleId, saleLocalCode: dto.saleLocalCode ?? 'UNDEFINED', documentTypeCode: dto.documentTypeCode, branchId: dto.branchId, requestId });
+    const normalizedSaleLocalCode = dto.saleLocalCode?.trim() || null;
+    const normalizedCompanyCloudId = dto.companyCloudId?.trim() || null;
+    const normalizedCompanyRnc = dto.companyRnc?.trim() || null;
+
+    console.info('[electronic-invoicing.outbound] generate_request_received', {
+      companyId,
+      saleId: dto.saleId,
+      saleLocalCode: normalizedSaleLocalCode,
+      documentTypeCode: dto.documentTypeCode,
+      branchId: dto.branchId,
+      requestId,
+      payloadNormalized: {
+        companyId,
+        saleId: dto.saleId,
+        saleLocalCode: normalizedSaleLocalCode,
+        documentTypeCode: dto.documentTypeCode,
+        branchId: dto.branchId,
+        companyCloudId: normalizedCompanyCloudId,
+        companyRnc: normalizedCompanyRnc,
+      },
+    });
+
     let mapped;
     try {
-      mapped = await this.mapper.mapSaleToOutbound(companyId, dto.saleId, dto.documentTypeCode);
+      mapped = await this.mapper.mapSaleToOutbound(
+        companyId,
+        dto.saleId,
+        dto.documentTypeCode,
+        {
+          localCode: normalizedSaleLocalCode,
+          companyCloudId: normalizedCompanyCloudId,
+          companyRnc: normalizedCompanyRnc,
+        },
+      );
     } catch (error: any) {
       const errorCode = error?.errorCode ?? 'UNKNOWN_ERROR';
       const errorMessage = error?.message ?? 'Error desconocido';
       if (errorCode === 'SALE_NOT_FOUND') {
-        console.error('[electronic-invoicing.outbound] sale_not_found_on_generate', { companyId, saleId: dto.saleId, saleLocalCode: dto.saleLocalCode ?? 'UNDEFINED', documentTypeCode: dto.documentTypeCode, branchId: dto.branchId, requestId, searchCriteria: { searchedById: dto.saleId, searchedByCompanyId: companyId }, errorMessage, errorCode });
-        throw { status: 404, message: `Venta no encontrada. Se busco por: saleId=${dto.saleId}, companyId=${companyId}. ${dto.saleLocalCode ? `localCode=${dto.saleLocalCode}` : 'Sin localCode'}`, errorCode: 'SALE_NOT_FOUND', context: { searchedById: dto.saleId, searchedByCompanyId: companyId, saleLocalCode: dto.saleLocalCode ?? null } };
+        console.error('[electronic-invoicing.outbound] sale_not_found_on_generate', {
+          companyId,
+          saleId: dto.saleId,
+          saleLocalCode: normalizedSaleLocalCode,
+          companyCloudId: normalizedCompanyCloudId,
+          companyRnc: normalizedCompanyRnc,
+          documentTypeCode: dto.documentTypeCode,
+          branchId: dto.branchId,
+          requestId,
+          searchCriteria: {
+            preferredByLocalCode: normalizedSaleLocalCode,
+            fallbackById: dto.saleId,
+            searchedByCompanyId: companyId,
+          },
+          errorMessage,
+          errorCode,
+        });
+        throw {
+          status: 404,
+          message: `Venta no encontrada. saleId=${dto.saleId}, localCode=${normalizedSaleLocalCode || 'N/A'}, companyId=${companyId}, criterios=companyId+localCode -> companyId+id`,
+          errorCode: 'SALE_NOT_FOUND',
+          context: {
+            saleId: dto.saleId,
+            saleLocalCode: normalizedSaleLocalCode,
+            companyId,
+          },
+        };
       }
       throw error;
     }
