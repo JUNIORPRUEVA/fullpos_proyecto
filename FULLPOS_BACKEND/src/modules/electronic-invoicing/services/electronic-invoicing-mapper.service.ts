@@ -111,7 +111,14 @@ export class ElectronicInvoicingMapperService {
       documentTypeCode,
     });
 
-    let sale = null as Awaited<ReturnType<PrismaClient['sale']['findFirst']>>;
+    type SaleWithRelations = Prisma.SaleGetPayload<{
+      include: {
+        items: true;
+        company: { include: { config: true } };
+      };
+    }>;
+
+    let sale: SaleWithRelations | null = null;
     const triedCriteria: string[] = [];
 
     if (requestedLocalCode) {
