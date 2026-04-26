@@ -688,10 +688,13 @@ export class DgiiAuthService {
         }
 
         lastFailureMeta = result.meta;
+        const rawValueMessage =
+          typeof result.raw === 'string' && result.raw.trim().length > 0 ? result.raw.trim() : undefined;
         const rawTextMessage =
           typeof result.rawText === 'string' && result.rawText.trim().length > 0 ? result.rawText.trim() : undefined;
         const responseMessage =
           deepFindFirstString(result.raw, ['Mensaje', 'mensaje', 'Message', 'message', 'descripcion', 'Descripcion']) ||
+          rawValueMessage ||
           rawTextMessage ||
           'DGII no devolvió token válido';
 

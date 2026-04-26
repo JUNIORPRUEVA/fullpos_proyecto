@@ -117,6 +117,16 @@ function summarizeRawBody(rawText?: string) {
   return trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}...` : trimmed;
 }
 
+function extractMessageFromDetails(details: unknown): string | undefined {
+  if (!details || typeof details !== 'object') return undefined;
+  const obj = details as Record<string, unknown>;
+  const raw = obj.raw;
+  if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
+  const rawTextSummary = obj.rawTextSummary;
+  if (typeof rawTextSummary === 'string' && rawTextSummary.trim().length > 0) return rawTextSummary.trim();
+  return undefined;
+}
+
 function normalizeUnknownError(
   error: unknown,
   phase: 'token' | 'submit',
@@ -133,10 +143,16 @@ function normalizeUnknownError(
   const shaped = (error ?? {}) as UnknownErrorShape;
   const candidateCode = typeof shaped.errorCode === 'string' ? shaped.errorCode : undefined;
   const candidateMessage = typeof shaped.message === 'string' ? shaped.message : undefined;
+  const detailsMessage = extractMessageFromDetails(shaped.details);
+  const shouldPreferDetailsMessage =
+    !!detailsMessage &&
+    (!candidateMessage ||
+      candidateMessage.toLowerCase() === 'dgii no devolvió token válido' ||
+      candidateMessage.toLowerCase() === 'error enviando documento a dgii');
 
   return {
     code: candidateCode ?? (phase === 'token' && !hasManualToken ? 'DGII_TOKEN_GENERATION_FAILED' : 'SEND_ERROR'),
-    message: candidateMessage ?? 'Error enviando documento a DGII',
+    message: shouldPreferDetailsMessage ? detailsMessage! : candidateMessage ?? 'Error enviando documento a DGII',
     status: typeof shaped.status === 'number' ? shaped.status : undefined,
     details: shaped.details,
     stack: summarizeStack(shaped.stack),
