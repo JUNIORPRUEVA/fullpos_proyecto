@@ -55,7 +55,36 @@ export class ElectronicInvoicingMapperService {
 
     let company = null as Awaited<ReturnType<PrismaClient['company']['findFirst']>>;
 
-    if (cloudId) {
+    if (cloudId && normalizedRnc) {
+      const [byCloud, byRnc] = await Promise.all([
+        this.prisma.company.findFirst({
+          where: { cloudCompanyId: cloudId, isActive: true },
+          include: { config: true },
+        }),
+        this.prisma.company.findFirst({
+          where: { rnc: normalizedRnc, isActive: true },
+          include: { config: true },
+        }),
+      ]);
+
+      if (byCloud && byRnc && byCloud.id !== byRnc.id) {
+        throw {
+          status: 409,
+          message: 'El RNC y el ID cloud pertenecen a compañías diferentes',
+          errorCode: 'COMPANY_LOCATOR_CONFLICT',
+          details: {
+            companyRnc: normalizedRnc,
+            companyCloudId: cloudId,
+            cloudCompanyId: byCloud.id,
+            rncCompanyId: byRnc.id,
+          },
+        };
+      }
+
+      company = byCloud ?? byRnc;
+    }
+
+    if (!company && cloudId) {
       company = await this.prisma.company.findFirst({
         where: { cloudCompanyId: cloudId, isActive: true },
         include: { config: true },

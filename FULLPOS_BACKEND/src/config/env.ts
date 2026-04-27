@@ -11,12 +11,28 @@ function optionalTrimmedString(value: unknown) {
 
 const optionalUrl = z.preprocess(optionalTrimmedString, z.string().url().optional());
 
-const dgiiDefaultEnvironmentSchema = z.preprocess((value) => {
+export function normalizeDgiiEnvironmentAlias(value: unknown) {
   if (typeof value !== 'string') return value;
   const normalized = value.trim().toLowerCase();
-  if (normalized === 'precert') return 'precertification';
+  if (
+    normalized === 'precertification' ||
+    normalized === 'certification' ||
+    normalized === 'certificacion' ||
+    normalized === 'test' ||
+    normalized === 'prueba' ||
+    normalized === 'pruebas' ||
+    normalized === 'testecf' ||
+    normalized === 'precert'
+  ) {
+    return 'precertification';
+  }
+  if (normalized === 'production' || normalized === 'produccion') {
+    return 'production';
+  }
   return normalized;
-}, z.enum(['precertification', 'production']));
+}
+
+const dgiiDefaultEnvironmentSchema = z.preprocess(normalizeDgiiEnvironmentAlias, z.enum(['precertification', 'production']));
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),

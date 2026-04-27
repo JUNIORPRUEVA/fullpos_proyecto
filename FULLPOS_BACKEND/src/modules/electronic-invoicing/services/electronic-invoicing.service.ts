@@ -58,14 +58,14 @@ function normalizeCertificateParseError(error: unknown) {
     return {
       status: 400,
       message: 'La contraseña del certificado es incorrecta',
-      errorCode: 'ELECTRONIC_CERTIFICATE_PASSWORD_INVALID',
+      errorCode: 'CERTIFICATE_INVALID_PASSWORD',
     };
   }
 
   return {
     status: 400,
     message: 'Archivo de certificado inválido o no legible',
-    errorCode: 'ELECTRONIC_CERTIFICATE_INVALID_FILE',
+    errorCode: 'CERTIFICATE_INVALID',
   };
 }
 
@@ -167,6 +167,14 @@ export class ElectronicInvoicingService {
   }
 
   async upsertConfig(companyId: number, dto: UpsertElectronicConfigDto, username: string, requestId?: string) {
+    if (dto.environment === 'production' && !env.DGII_ALLOW_PRODUCTION) {
+      throw {
+        status: 409,
+        message: 'Producción DGII está deshabilitada en este backend',
+        errorCode: 'PRODUCTION_DISABLED',
+      };
+    }
+
     const config = await this.prisma.electronicInboundEndpointConfig.upsert({
       where: { companyId_branchId: { companyId, branchId: dto.branchId } },
       update: { ...dto },
@@ -730,14 +738,30 @@ export class ElectronicInvoicingService {
       },
     );
 
-    const result = await this.submissionService.submit(
-      companyId,
-      config.environment as any,
-      invoice.xmlSigned,
-      requestId,
-      dto.dgiiManualToken,
-      { invoiceId: invoice.id, ecf: invoice.ecf },
-    );
+    let result: any;
+    try {
+      result = await this.submissionService.submit(
+        companyId,
+        config.environment as any,
+        invoice.xmlSigned,
+        requestId,
+        dto.dgiiManualToken,
+        { invoiceId: invoice.id, ecf: invoice.ecf },
+      );
+    } catch (error: any) {
+      result = {
+        httpStatus: typeof error?.status === 'number' ? error.status : 0,
+        ok: false,
+        normalizedStatus: 'error' as const,
+        code: error?.errorCode ?? 'SEND_ERROR',
+        message: error?.message ?? 'Error enviando documento a DGII',
+        raw: {
+          errorCode: error?.errorCode ?? 'SEND_ERROR',
+          errorMessage: error?.message ?? 'Error enviando documento a DGII',
+          details: error?.details ?? null,
+        },
+      };
+    }
     const updated = await this.applyDgiiOutcome(invoice.id, username, result);
 
     await this.audit.log({

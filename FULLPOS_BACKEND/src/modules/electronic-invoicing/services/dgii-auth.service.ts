@@ -762,10 +762,7 @@ export class DgiiAuthService {
     };
 
     const formXml = new FormData();
-    formXml.append('xml', new Blob([validatedXml.signedXml], { type: 'application/xml' }), 'semilla-firmada.xml');
-    const formArchivo = new FormData();
-    formArchivo.append('archivo', new Blob([validatedXml.signedXml], { type: 'application/xml' }), 'semilla-firmada.xml');
-    const formUrlEncoded = new URLSearchParams({ xml: validatedXml.signedXml }).toString();
+    formXml.append('xml', new Blob([validatedXml.signedXml], { type: 'application/xml' }), 'semilla.xml');
 
     const attempts: Array<{
       requestContentType: string;
@@ -775,32 +772,11 @@ export class DgiiAuthService {
       headers: Record<string, string>;
     }> = [
       {
-        requestContentType: 'application/xml; charset=utf-8',
-        payloadMode: 'raw-xml' as const,
-        fieldName: 'raw-xml' as const,
-        body: validatedXml.signedXml,
-        headers: { 'content-type': 'application/xml; charset=utf-8' },
-      },
-      {
         requestContentType: 'multipart/form-data',
         payloadMode: 'multipart' as const,
         fieldName: 'xml' as const,
         body: formXml,
         headers: {},
-      },
-      {
-        requestContentType: 'multipart/form-data',
-        payloadMode: 'multipart' as const,
-        fieldName: 'archivo' as const,
-        body: formArchivo,
-        headers: {},
-      },
-      {
-        requestContentType: 'application/x-www-form-urlencoded',
-        payloadMode: 'form-urlencoded' as const,
-        fieldName: 'x-www-form-urlencoded' as const,
-        body: formUrlEncoded,
-        headers: { 'content-type': 'application/x-www-form-urlencoded; charset=utf-8' },
       },
     ];
 
@@ -880,9 +856,9 @@ export class DgiiAuthService {
             break;
           }
 
-          // 400 funcional rota formato dentro del endpoint actual.
+          // 400 funcional: DGII entendió el endpoint pero rechazó el archivo. No reintentar con otros formatos.
           if (result.response.status === 400) {
-            continue;
+            throw lastFailure;
           }
 
           // Otros estados: no seguir probando variantes de payload/endpoint.
@@ -948,13 +924,23 @@ export class DgiiAuthService {
     const company = await this.mapper.resolveCompanyOrThrow(input.companyRnc, input.companyCloudId);
     const environment = input.environment ?? env.DGII_DEFAULT_ENVIRONMENT;
     const config = this.directory.getEnvironmentConfig(environment);
+    const activeCertificate = await this.prisma.electronicCertificate.findFirst({
+      where: { companyId: company.id, status: 'ACTIVE' },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const now = Date.now();
 
     const out: {
+      companyResolved: boolean;
       companyId: number;
       companyRnc: string | null;
+      companyCloudId: string | null;
       environment: DgiiEnvironment;
+      certificateFound: boolean;
+      certificateValid: boolean;
       authSeedUrl: string | null;
       authValidateUrl: string | null;
+      endpointUsed: string | null;
       seedOk: boolean;
       signOk: boolean;
       validateOk: boolean;
@@ -971,11 +957,16 @@ export class DgiiAuthService {
       validateContentType?: string;
       validateRawResponse?: unknown;
     } = {
+      companyResolved: true,
       companyId: company.id,
       companyRnc: company.rnc ?? null,
+      companyCloudId: company.cloudCompanyId ?? null,
       environment,
+      certificateFound: !!activeCertificate,
+      certificateValid: !!activeCertificate && activeCertificate.validFrom.getTime() <= now && activeCertificate.validTo.getTime() >= now,
       authSeedUrl: config.authSeedUrl ?? null,
       authValidateUrl: config.authValidateUrl ?? null,
+      endpointUsed: config.authValidateUrl ?? config.authSeedUrl ?? null,
       seedOk: false,
       signOk: false,
       validateOk: false,

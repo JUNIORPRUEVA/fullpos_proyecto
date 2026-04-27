@@ -95,9 +95,10 @@ export const validateCreateCertificateRequest: RequestHandler = (
       });
     }
 
-    if (path.extname(requestWithFile.file.originalname || '').toLowerCase() !== '.p12') {
+    const extension = path.extname(requestWithFile.file.originalname || '').toLowerCase();
+    if (extension !== '.p12' && extension !== '.pfx') {
       return res.status(400).json({
-        message: 'Archivo de certificado inválido. Se requiere .p12',
+        message: 'Archivo de certificado inválido. Se requiere .p12 o .pfx',
         errorCode: 'ELECTRONIC_CERTIFICATE_INVALID_FILE',
       });
     }

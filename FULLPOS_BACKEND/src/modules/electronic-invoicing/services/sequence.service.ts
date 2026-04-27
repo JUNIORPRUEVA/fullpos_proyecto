@@ -11,8 +11,33 @@ export class SequenceService {
 
   async upsertSequence(companyId: number, dto: CreateSequenceDto, username: string, requestId?: string) {
     const prefix = `E${dto.documentTypeCode}`;
+    const endNumber = dto.endNumber ?? dto.maxNumber;
 
-    if (dto.maxNumber > 9999999999) {
+    if (!endNumber) {
+      throw {
+        status: 400,
+        message: 'El límite autorizado de la secuencia es requerido',
+        errorCode: 'SEQUENCE_LIMIT_INVALID',
+      };
+    }
+
+    if (dto.prefix && dto.prefix.trim().toUpperCase() !== prefix) {
+      throw {
+        status: 400,
+        message: `El prefijo debe ser ${prefix} para el tipo ${dto.documentTypeCode}`,
+        errorCode: 'SEQUENCE_PREFIX_INVALID',
+      };
+    }
+
+    if (dto.startNumber < 1 || dto.currentNumber < 0 || endNumber <= dto.currentNumber || endNumber < dto.startNumber) {
+      throw {
+        status: 400,
+        message: 'Revise el rango autorizado de la secuencia',
+        errorCode: 'SEQUENCE_RANGE_INVALID',
+      };
+    }
+
+    if (endNumber > 9999999999) {
       throw {
         status: 400,
         message: 'maxNumber no puede exceder 10 dígitos',
@@ -31,8 +56,8 @@ export class SequenceService {
       update: {
         prefix,
         currentNumber: dto.currentNumber,
-        maxNumber: dto.maxNumber,
-        status: dto.status,
+        maxNumber: endNumber,
+        status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
       },
       create: {
         companyId,
@@ -40,8 +65,8 @@ export class SequenceService {
         documentTypeCode: dto.documentTypeCode,
         prefix,
         currentNumber: dto.currentNumber,
-        maxNumber: dto.maxNumber,
-        status: dto.status,
+        maxNumber: endNumber,
+        status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
       },
     });
 
@@ -53,14 +78,21 @@ export class SequenceService {
       payload: {
         branchId: dto.branchId,
         documentTypeCode: dto.documentTypeCode,
+        startNumber: dto.startNumber,
         currentNumber: dto.currentNumber,
-        maxNumber: dto.maxNumber,
-        status: dto.status,
+        endNumber,
+        maxNumber: endNumber,
+        status: sequence.status,
       },
       requestId,
     });
 
-    return sequence;
+    return {
+      ...sequence,
+      startNumber: dto.startNumber,
+      endNumber: sequence.maxNumber,
+      maxNumber: sequence.maxNumber,
+    };
   }
 
   async allocate(companyId: number, branchId: number, documentTypeCode: string, requestId?: string) {
