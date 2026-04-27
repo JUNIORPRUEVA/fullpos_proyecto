@@ -1,10 +1,22 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { ElectronicInvoicingAuditService } from './electronic-invoicing-audit.service';
 import { buildEcf } from '../utils/validation.utils';
 import { CreateSequenceDto } from '../dto/sequence.dto';
 
 function sequenceNumberToClient(value: number | bigint) {
   return typeof value === 'bigint' ? Number(value) : value;
+}
+
+function isSequenceRangeStorageError(error: unknown) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === 'P2020' || error.code === 'P2033';
+  }
+
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes('out of range') ||
+    message.includes('integer') && message.includes('range') ||
+    message.includes('cannot fit') ||
+    message.includes('too large');
 }
 
 export class SequenceService {
@@ -49,30 +61,43 @@ export class SequenceService {
       };
     }
 
-    const sequence = await this.prisma.electronicSequence.upsert({
-      where: {
-        companyId_branchId_documentTypeCode: {
+    let sequence: Awaited<ReturnType<PrismaClient['electronicSequence']['upsert']>>;
+    try {
+      sequence = await this.prisma.electronicSequence.upsert({
+        where: {
+          companyId_branchId_documentTypeCode: {
+            companyId,
+            branchId: dto.branchId,
+            documentTypeCode: dto.documentTypeCode,
+          },
+        },
+        update: {
+          prefix,
+          currentNumber: BigInt(dto.currentNumber),
+          maxNumber: BigInt(endNumber),
+          status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
+        },
+        create: {
           companyId,
           branchId: dto.branchId,
           documentTypeCode: dto.documentTypeCode,
+          prefix,
+          currentNumber: BigInt(dto.currentNumber),
+          maxNumber: BigInt(endNumber),
+          status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
         },
-      },
-      update: {
-        prefix,
-        currentNumber: BigInt(dto.currentNumber),
-        maxNumber: BigInt(endNumber),
-        status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
-      },
-      create: {
-        companyId,
-        branchId: dto.branchId,
-        documentTypeCode: dto.documentTypeCode,
-        prefix,
-        currentNumber: BigInt(dto.currentNumber),
-        maxNumber: BigInt(endNumber),
-        status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
-      },
-    });
+      });
+    } catch (error) {
+      if (isSequenceRangeStorageError(error)) {
+        throw {
+          status: 503,
+          message: 'La base de datos del backend debe actualizarse para aceptar rangos DGII de 10 dígitos. Ejecute las migraciones y reinicie el backend.',
+          errorCode: 'ELECTRONIC_SEQUENCE_STORAGE_MIGRATION_REQUIRED',
+        };
+      }
+
+      throw error;
+    }
 
     await this.audit.log({
       companyId,

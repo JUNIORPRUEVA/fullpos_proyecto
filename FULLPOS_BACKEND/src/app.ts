@@ -13,6 +13,9 @@ import { prisma } from './config/prisma';
 const app = express();
 
 app.set('trust proxy', true);
+app.set('json replacer', (_key: string, value: unknown) => (
+  typeof value === 'bigint' ? Number(value) : value
+));
 
 app.use(requestContext);
 app.use(express.json());

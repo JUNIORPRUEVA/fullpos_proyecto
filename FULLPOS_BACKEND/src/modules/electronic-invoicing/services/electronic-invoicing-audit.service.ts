@@ -39,11 +39,17 @@ function redactPayload(value: unknown): unknown {
   return clone;
 }
 
+function stringifyJsonValue(value: unknown) {
+  return JSON.stringify(redactPayload(value), (_key, entry) => (
+    typeof entry === 'bigint' ? Number(entry) : entry
+  ));
+}
+
 export class ElectronicInvoicingAuditService {
   constructor(private readonly prisma: PrismaClient) {}
 
   private toJsonValue(value: unknown) {
-    return value == null ? null : JSON.parse(JSON.stringify(redactPayload(value)));
+    return value == null ? null : JSON.parse(stringifyJsonValue(value));
   }
 
   async log(input: AuditInput) {
