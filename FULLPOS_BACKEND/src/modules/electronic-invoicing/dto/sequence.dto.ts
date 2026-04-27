@@ -1,14 +1,24 @@
 import { z } from 'zod';
 
+const documentTypeCodeSchema = z.preprocess(
+  (value) => String(value ?? '').trim(),
+  z.enum(['31', '32', '34']),
+);
+
+const sequenceStatusSchema = z.preprocess(
+  (value) => String(value ?? 'ACTIVE').trim().toUpperCase(),
+  z.enum(['ACTIVE', 'PAUSED', 'EXHAUSTED', 'INACTIVE']),
+);
+
 export const createSequenceDtoSchema = z.object({
   branchId: z.coerce.number().int().min(0).optional().default(0),
-  documentTypeCode: z.enum(['31', '32', '34']),
+  documentTypeCode: documentTypeCodeSchema,
   prefix: z.string().trim().optional(),
   startNumber: z.coerce.number().int().min(1).optional().default(1),
   currentNumber: z.coerce.number().int().min(0).optional().default(0),
   maxNumber: z.coerce.number().int().positive().optional(),
   endNumber: z.coerce.number().int().positive().optional(),
-  status: z.enum(['ACTIVE', 'PAUSED', 'EXHAUSTED', 'INACTIVE']).optional().default('ACTIVE'),
+  status: sequenceStatusSchema.optional().default('ACTIVE'),
 }).superRefine((data, ctx) => {
   const expectedPrefix = `E${data.documentTypeCode}`;
   if (data.prefix != null && data.prefix.trim().toUpperCase() !== expectedPrefix) {

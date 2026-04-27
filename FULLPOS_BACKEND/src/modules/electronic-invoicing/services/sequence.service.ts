@@ -19,6 +19,63 @@ function isSequenceRangeStorageError(error: unknown) {
     message.includes('too large');
 }
 
+function isSequenceSchemaMismatchError(error: unknown) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === 'P2021' || error.code === 'P2022';
+  }
+
+  if (error instanceof Prisma.PrismaClientValidationError) {
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes('column') && message.includes('does not exist') ||
+    message.includes('unknown argument') ||
+    message.includes('invalid field') ||
+    message.includes('maxnumber') && message.includes('does not exist') ||
+    message.includes('endnumber') && message.includes('does not exist');
+}
+
+function sequenceSchemaMismatchDetails(error: unknown) {
+  const known = error instanceof Prisma.PrismaClientKnownRequestError ? error : null;
+  return {
+    prismaCode: known?.code ?? null,
+    prismaMeta: known?.meta ?? null,
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function sequenceToClient(sequence: {
+  id: number;
+  companyId: number;
+  branchId: number;
+  documentTypeCode: string;
+  prefix: string;
+  currentNumber: number | bigint;
+  maxNumber: number | bigint;
+  status: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}, startNumber = 1) {
+  const currentNumber = sequenceNumberToClient(sequence.currentNumber);
+  const maxNumber = sequenceNumberToClient(sequence.maxNumber);
+  return {
+    id: sequence.id,
+    companyId: sequence.companyId,
+    branchId: sequence.branchId,
+    documentTypeCode: sequence.documentTypeCode,
+    prefix: sequence.prefix,
+    startNumber,
+    currentNumber,
+    endNumber: maxNumber,
+    maxNumber,
+    status: sequence.status,
+    remaining: Math.max(0, maxNumber - currentNumber),
+    createdAt: sequence.createdAt,
+    updatedAt: sequence.updatedAt,
+  };
+}
+
 export class SequenceService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -63,6 +120,19 @@ export class SequenceService {
 
     let sequence: Awaited<ReturnType<PrismaClient['electronicSequence']['upsert']>>;
     try {
+      const existing = await this.prisma.electronicSequence.findUnique({
+        where: {
+          companyId_branchId_documentTypeCode: {
+            companyId,
+            branchId: dto.branchId,
+            documentTypeCode: dto.documentTypeCode,
+          },
+        },
+      });
+      const existingCurrent = existing ? sequenceNumberToClient(existing.currentNumber) : 0;
+      const safeCurrentNumber = Math.max(existingCurrent, dto.currentNumber);
+      const status = safeCurrentNumber >= endNumber ? 'EXHAUSTED' : dto.status;
+
       sequence = await this.prisma.electronicSequence.upsert({
         where: {
           companyId_branchId_documentTypeCode: {
@@ -73,26 +143,36 @@ export class SequenceService {
         },
         update: {
           prefix,
-          currentNumber: BigInt(dto.currentNumber),
+          currentNumber: BigInt(safeCurrentNumber),
           maxNumber: BigInt(endNumber),
-          status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
+          status,
         },
         create: {
           companyId,
           branchId: dto.branchId,
           documentTypeCode: dto.documentTypeCode,
           prefix,
-          currentNumber: BigInt(dto.currentNumber),
+          currentNumber: BigInt(safeCurrentNumber),
           maxNumber: BigInt(endNumber),
-          status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
+          status,
         },
       });
     } catch (error) {
+      if (isSequenceSchemaMismatchError(error)) {
+        throw {
+          status: 503,
+          message: 'El backend no pudo guardar la secuencia porque la estructura de base de datos no coincide con Prisma. Aplique las migraciones del backend y reinicie el servicio.',
+          errorCode: 'ELECTRONIC_SEQUENCE_SCHEMA_MISMATCH',
+          details: sequenceSchemaMismatchDetails(error),
+        };
+      }
+
       if (isSequenceRangeStorageError(error)) {
         throw {
           status: 503,
           message: 'La base de datos del backend debe actualizarse para aceptar rangos DGII de 10 dígitos. Ejecute las migraciones y reinicie el backend.',
           errorCode: 'ELECTRONIC_SEQUENCE_STORAGE_MIGRATION_REQUIRED',
+          details: sequenceSchemaMismatchDetails(error),
         };
       }
 
@@ -108,7 +188,7 @@ export class SequenceService {
         branchId: dto.branchId,
         documentTypeCode: dto.documentTypeCode,
         startNumber: dto.startNumber,
-        currentNumber: dto.currentNumber,
+        currentNumber: sequenceNumberToClient(sequence.currentNumber),
         endNumber,
         maxNumber: endNumber,
         status: sequence.status,
@@ -116,13 +196,7 @@ export class SequenceService {
       requestId,
     });
 
-    return {
-      ...sequence,
-      currentNumber: sequenceNumberToClient(sequence.currentNumber),
-      startNumber: dto.startNumber,
-      endNumber: sequenceNumberToClient(sequence.maxNumber),
-      maxNumber: sequenceNumberToClient(sequence.maxNumber),
-    };
+    return sequenceToClient(sequence, dto.startNumber);
   }
 
   async allocate(companyId: number, branchId: number, documentTypeCode: string, requestId?: string) {

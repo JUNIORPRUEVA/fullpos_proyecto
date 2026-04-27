@@ -79,6 +79,16 @@ const posLocatorsBaseSchema = z.object({
   companyCloudId: z.string().trim().min(6).optional(),
 });
 
+const sequenceDocumentTypeCodeSchema = z.preprocess(
+  (value) => String(value ?? '').trim(),
+  z.enum(['31', '32', '34']),
+);
+
+const sequenceStatusSchema = z.preprocess(
+  (value) => String(value ?? 'ACTIVE').trim().toUpperCase(),
+  z.enum(['ACTIVE', 'PAUSED', 'EXHAUSTED', 'INACTIVE']),
+);
+
 const requirePosLocators = (data: {
   companyRnc?: string | undefined;
   companyCloudId?: string | undefined;
@@ -136,13 +146,13 @@ const posSequenceByRncSchema = z.object({
     companyCloudId: z.string().trim().min(6).optional(),
     companyId: z.coerce.number().int().positive().optional(),
     branchId: z.coerce.number().int().min(0).optional().default(0),
-    documentTypeCode: z.enum(['31', '32', '34']),
+  documentTypeCode: sequenceDocumentTypeCodeSchema,
     prefix: z.string().trim().optional(),
     startNumber: z.coerce.number().int().min(1).optional().default(1),
     currentNumber: z.coerce.number().int().min(0).optional().default(0),
     maxNumber: z.coerce.number().int().positive().optional(),
     endNumber: z.coerce.number().int().positive().optional(),
-    status: z.enum(['ACTIVE', 'PAUSED', 'EXHAUSTED', 'INACTIVE']).optional().default('ACTIVE'),
+  status: sequenceStatusSchema.optional().default('ACTIVE'),
   })
   .strict()
   .refine(requirePosLocators, {
@@ -222,6 +232,7 @@ function sequenceToClient(item: { id: number; companyId: number; branchId: numbe
     endNumber: maxNumber,
     maxNumber,
     status: item.status,
+    remaining: Math.max(0, maxNumber - currentNumber),
     updatedAt: item.updatedAt,
   };
 }
@@ -667,18 +678,28 @@ posElectronicInvoicingRouter.post(
   validate(posSequenceByRncSchema),
   asyncHandler(async (req, res) => {
     const dto = req.body as typeof posSequenceByRncSchema._output;
-    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
-    console.info('[electronic-invoicing.pos] sequence.save.resolve', {
-      requestId: req.requestId,
-      requestedCompanyId: dto.companyId ?? null,
-      companyRnc: dto.companyRnc ?? null,
-      companyCloudId: dto.companyCloudId ?? null,
-      resolvedCompanyId: company.id,
-      branchId: dto.branchId,
-      documentTypeCode: dto.documentTypeCode,
-    });
-    const sequence = await electronicInvoicingService.upsertSequence(company.id, dto, 'fullpos_pos', req.requestId);
-    res.status(201).json(sequence);
+    try {
+      const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+      console.info('[electronic-invoicing.pos] sequence.save.resolve', {
+        requestId: req.requestId,
+        requestedCompanyId: dto.companyId ?? null,
+        companyRnc: dto.companyRnc ?? null,
+        companyCloudId: dto.companyCloudId ?? null,
+        resolvedCompanyId: company.id,
+        branchId: dto.branchId,
+        documentTypeCode: dto.documentTypeCode,
+      });
+      const sequence = await electronicInvoicingService.upsertSequence(company.id, dto, 'fullpos_pos', req.requestId);
+      res.status(201).json({ ok: true, sequence });
+    } catch (error) {
+      const status = typeof (error as any)?.status === 'number' ? (error as any).status : 500;
+      res.status(status).json({
+        ok: false,
+        errorCode: (error as any)?.errorCode ?? 'SEQUENCE_SAVE_FAILED',
+        message: (error as any)?.message ?? 'No se pudo guardar la secuencia electrónica',
+        details: (error as any)?.details ?? {},
+      });
+    }
   }),
 );
 
