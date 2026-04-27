@@ -17,7 +17,10 @@ export function overrideKeyGuard(req: Request, res: Response, next: NextFunction
     bearerTokenFromHeader(req.headers.authorization);
 
   if (!provided || provided.trim() != apiKey) {
-    return res.status(401).json({ message: 'API key requerida' });
+    return res.status(401).json({
+      message: 'API key requerida',
+      errorCode: provided ? 'POS_OVERRIDE_KEY_INVALID' : 'POS_OVERRIDE_KEY_REQUIRED',
+    });
   }
 
   return next();

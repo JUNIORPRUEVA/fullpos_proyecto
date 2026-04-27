@@ -370,6 +370,7 @@ const posSendByRncSchema = posLocatorsBaseSchema
 
 const posDebugDgiiAuthByRncSchema = posLocatorsBaseSchema
   .extend({
+    companyId: z.coerce.number().int().positive().optional(),
     environment: z.preprocess(normalizeDgiiEnvironmentAlias, z.enum(['precertification', 'production'])).optional(),
     forceRefresh: z.coerce.boolean().optional().default(true),
   })
@@ -381,6 +382,205 @@ const posDebugDgiiAuthByRncSchema = posLocatorsBaseSchema
 
 export const posElectronicInvoicingRouter = Router();
 
+type SafeDiagnosticError = { code: string; message: string; action: string };
+
+function electronicEnvDiagnostics(environment: 'precertification' | 'production') {
+  const variableNames = environment === 'production'
+    ? [
+        'DGII_ALLOW_PRODUCTION',
+        'DGII_PRODUCTION_AUTH_SEED_URL',
+        'DGII_PRODUCTION_AUTH_VALIDATE_URL',
+        'DGII_PRODUCTION_SUBMIT_URL',
+        'DGII_PRODUCTION_RESULT_URL_TEMPLATE',
+      ]
+    : [
+        'FE_MASTER_ENCRYPTION_KEY',
+        'DGII_PRECERT_AUTH_SEED_URL',
+        'DGII_PRECERT_AUTH_VALIDATE_URL',
+        'DGII_PRECERT_SUBMIT_URL',
+        'DGII_PRECERT_RESULT_URL_TEMPLATE',
+      ];
+
+  const configured: Record<string, boolean> = {
+    FE_MASTER_ENCRYPTION_KEY: !!env.FE_MASTER_ENCRYPTION_KEY?.trim(),
+    DGII_ALLOW_PRODUCTION: env.DGII_ALLOW_PRODUCTION === true,
+    DGII_PRECERT_AUTH_SEED_URL: !!env.DGII_PRECERT_AUTH_SEED_URL?.trim(),
+    DGII_PRECERT_AUTH_VALIDATE_URL: !!env.DGII_PRECERT_AUTH_VALIDATE_URL?.trim(),
+    DGII_PRECERT_SUBMIT_URL: !!env.DGII_PRECERT_SUBMIT_URL?.trim(),
+    DGII_PRECERT_RESULT_URL_TEMPLATE: !!env.DGII_PRECERT_RESULT_URL_TEMPLATE?.trim(),
+    DGII_PRODUCTION_AUTH_SEED_URL: !!env.DGII_PRODUCTION_AUTH_SEED_URL?.trim(),
+    DGII_PRODUCTION_AUTH_VALIDATE_URL: !!env.DGII_PRODUCTION_AUTH_VALIDATE_URL?.trim(),
+    DGII_PRODUCTION_SUBMIT_URL: !!env.DGII_PRODUCTION_SUBMIT_URL?.trim(),
+    DGII_PRODUCTION_RESULT_URL_TEMPLATE: !!env.DGII_PRODUCTION_RESULT_URL_TEMPLATE?.trim(),
+  };
+
+  const missing = variableNames.filter((name) => !configured[name]);
+  return {
+    environment,
+    configured: Object.fromEntries(variableNames.map((name) => [name, configured[name] === true])),
+    missing,
+    seedUrlConfigured: environment === 'production' ? configured.DGII_PRODUCTION_AUTH_SEED_URL : configured.DGII_PRECERT_AUTH_SEED_URL,
+    validateUrlConfigured: environment === 'production' ? configured.DGII_PRODUCTION_AUTH_VALIDATE_URL : configured.DGII_PRECERT_AUTH_VALIDATE_URL,
+    submitUrlConfigured: environment === 'production' ? configured.DGII_PRODUCTION_SUBMIT_URL : configured.DGII_PRECERT_SUBMIT_URL,
+    resultUrlConfigured: environment === 'production' ? configured.DGII_PRODUCTION_RESULT_URL_TEMPLATE : configured.DGII_PRECERT_RESULT_URL_TEMPLATE,
+    encryptionKeyConfigured: configured.FE_MASTER_ENCRYPTION_KEY,
+    productionBlocked: environment === 'production' && !env.DGII_ALLOW_PRODUCTION,
+  };
+}
+
+function diagnosticAction(code: string) {
+  if (code.includes('OVERRIDE_KEY')) return 'Revise la llave cloud/API key configurada en Ajustes y el OVERRIDE_API_KEY del backend.';
+  if (code.includes('COMPANY')) return 'Revise RNC, cloudCompanyId y la empresa activa sincronizada.';
+  if (code.includes('CERTIFICATE')) return 'Suba un certificado .p12/.pfx válido y confirme FE_MASTER_ENCRYPTION_KEY estable.';
+  if (code.includes('AUTH') || code.includes('SEED') || code.includes('TOKEN')) return 'Revise URLs DGII de autenticación, certificado y respuesta DGII segura.';
+  if (code.includes('PRODUCTION')) return 'Use certificación/precertificación o habilite producción solo cuando esté certificado.';
+  if (code.includes('SUBMIT') || code.includes('RESULT')) return 'Configure URLs DGII de recepción y consulta de estado.';
+  return 'Revise el detalle técnico y vuelva a probar.';
+}
+
+async function buildSafeDgiiAuthDiagnostic(input: {
+  companyRnc?: string;
+  companyCloudId?: string;
+  requestedCompanyId?: number;
+  environment?: 'precertification' | 'production';
+  forceRefresh?: boolean;
+  requestId?: string;
+}) {
+  const errors: SafeDiagnosticError[] = [];
+  let stage: 'resolve_company' | 'config' | 'certificate' | 'seed' | 'sign' | 'validate' | 'token' = 'resolve_company';
+  let company: Awaited<ReturnType<ElectronicInvoicingMapperService['resolveCompanyOrThrow']>> | null = null;
+
+  try {
+    company = await mapper.resolveCompanyOrThrow(input.companyRnc ?? null, input.companyCloudId ?? null);
+  } catch (error) {
+    const code = (error as any)?.errorCode ?? 'COMPANY_RESOLVE_FAILED';
+    errors.push({ code, message: (error as any)?.message ?? 'No se pudo resolver la empresa', action: diagnosticAction(code) });
+    return {
+      ok: false,
+      stage,
+      requestId: input.requestId,
+      companyRequested: {
+        companyId: input.requestedCompanyId ?? null,
+        rnc: input.companyRnc ?? null,
+        cloudCompanyId: input.companyCloudId ?? null,
+      },
+      companyResolved: null,
+      config: null,
+      certificate: { found: false, status: null, alias: null, validFrom: null, validTo: null, expired: false, ready: false },
+      dgiiAuth: { seedUrlConfigured: false, validateUrlConfigured: false, submitUrlConfigured: false, resultUrlConfigured: false, seedOk: false, signOk: false, validateOk: false, tokenFound: false },
+      env: null,
+      errors,
+    };
+  }
+
+  stage = 'config';
+  const config = await electronicInvoicingService.getConfig(company.id, 0);
+  const environment = (input.environment ??
+    normalizeDgiiEnvironmentAlias(config?.environment ?? env.DGII_DEFAULT_ENVIRONMENT)) as 'precertification' | 'production';
+  const envCheck = electronicEnvDiagnostics(environment);
+  if (envCheck.missing.length > 0) {
+    errors.push({
+      code: envCheck.productionBlocked ? 'DGII_PRODUCTION_DISABLED' : 'DGII_ENV_MISSING',
+      message: `Variables faltantes: ${envCheck.missing.join(', ')}`,
+      action: envCheck.productionBlocked ? diagnosticAction('PRODUCTION_DISABLED') : 'Configure las variables DGII/FE indicadas en el backend y reinicie el servicio.',
+    });
+  }
+
+  stage = 'certificate';
+  const certificate = await prisma.electronicCertificate.findFirst({
+    where: { companyId: company.id },
+    orderBy: { updatedAt: 'desc' },
+  });
+  const now = Date.now();
+  const certificateExpired = !!certificate && certificate.validTo.getTime() < now;
+  const certificateReady = !!certificate && certificate.status === 'ACTIVE' && certificate.validFrom.getTime() <= now && certificate.validTo.getTime() >= now;
+  if (!certificate) {
+    errors.push({ code: 'CERTIFICATE_NOT_FOUND', message: 'No hay certificado digital activo para esta empresa.', action: diagnosticAction('CERTIFICATE_NOT_FOUND') });
+  } else if (!certificateReady) {
+    errors.push({ code: certificateExpired ? 'CERTIFICATE_EXPIRED' : 'CERTIFICATE_NOT_READY', message: certificateExpired ? 'El certificado digital está vencido.' : 'El certificado digital no está activo o válido por fecha.', action: diagnosticAction('CERTIFICATE_NOT_READY') });
+  }
+
+  let authDebug: any = null;
+  if (envCheck.seedUrlConfigured && envCheck.validateUrlConfigured && envCheck.encryptionKeyConfigured && !envCheck.productionBlocked && certificateReady) {
+    stage = 'seed';
+    authDebug = await authService.debugAuthenticateByLocators(
+      {
+        companyRnc: input.companyRnc,
+        companyCloudId: input.companyCloudId,
+        environment,
+        forceRefresh: input.forceRefresh ?? true,
+      },
+      input.requestId,
+    );
+    if (authDebug?.signOk) stage = 'validate';
+    if (authDebug?.validateOk) stage = 'token';
+    if (authDebug?.errorCode) {
+      errors.push({ code: authDebug.errorCode, message: authDebug.errorMessage ?? 'DGII no pudo generar o validar el token.', action: diagnosticAction(authDebug.errorCode) });
+    }
+  } else if (!certificateReady) {
+    stage = 'certificate';
+  }
+
+  const seedOk = authDebug?.seedOk === true;
+  const signOk = authDebug?.signOk === true;
+  const validateOk = authDebug?.validateOk === true;
+  const tokenFound = authDebug?.tokenFound === true;
+  const ok = errors.length === 0 && seedOk && signOk && validateOk && tokenFound;
+
+  return {
+    ok,
+    stage,
+    requestId: input.requestId,
+    companyRequested: {
+      companyId: input.requestedCompanyId ?? null,
+      rnc: input.companyRnc ?? null,
+      cloudCompanyId: input.companyCloudId ?? null,
+    },
+    companyResolved: {
+      id: company.id,
+      name: company.name,
+      rnc: company.rnc,
+      cloudCompanyId: company.cloudCompanyId,
+    },
+    config: {
+      active: config?.active ?? false,
+      outboundEnabled: config?.outboundEnabled ?? false,
+      environment,
+      productionBlocked: envCheck.productionBlocked,
+    },
+    certificate: {
+      found: !!certificate,
+      status: certificate?.status ?? null,
+      alias: certificate?.alias ?? null,
+      validFrom: certificate?.validFrom ?? null,
+      validTo: certificate?.validTo ?? null,
+      expired: certificateExpired,
+      ready: certificateReady,
+    },
+    dgiiAuth: {
+      seedUrlConfigured: envCheck.seedUrlConfigured,
+      validateUrlConfigured: envCheck.validateUrlConfigured,
+      submitUrlConfigured: envCheck.submitUrlConfigured,
+      resultUrlConfigured: envCheck.resultUrlConfigured,
+      seedOk,
+      signOk,
+      validateOk,
+      tokenFound,
+      httpStatus: authDebug?.httpStatus ?? null,
+      payloadMode: authDebug?.payloadMode ?? null,
+      rootElement: authDebug?.rootElement ?? null,
+      hasSignature: authDebug?.hasSignature ?? null,
+      safeErrorCode: authDebug?.errorCode ?? null,
+      safeErrorMessage: authDebug?.errorMessage ?? null,
+    },
+    env: {
+      configured: envCheck.configured,
+      missing: envCheck.missing,
+    },
+    errors,
+  };
+}
+
 // Rutas para FULLPOS (POS) — no tiene JWT. Se protege con overrideKeyGuard.
 posElectronicInvoicingRouter.get(
   '/config/by-rnc',
@@ -391,6 +591,7 @@ posElectronicInvoicingRouter.get(
     const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
     const branchId = query.branchId;
     console.info('[electronic-invoicing.pos] config.by-rnc.resolve', {
+      requestId: req.requestId,
       requestedCompanyId: null,
       companyRnc: query.companyRnc ?? null,
       companyCloudId: query.companyCloudId ?? null,
@@ -432,6 +633,7 @@ posElectronicInvoicingRouter.put(
 
     const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
     console.info('[electronic-invoicing.pos] config.by-rnc.save.resolve', {
+      requestId: req.requestId,
       requestedCompanyId: dto.companyId ?? null,
       companyRnc: dto.companyRnc ?? null,
       companyCloudId: dto.companyCloudId ?? null,
@@ -467,6 +669,7 @@ posElectronicInvoicingRouter.post(
     const dto = req.body as typeof posSequenceByRncSchema._output;
     const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
     console.info('[electronic-invoicing.pos] sequence.save.resolve', {
+      requestId: req.requestId,
       requestedCompanyId: dto.companyId ?? null,
       companyRnc: dto.companyRnc ?? null,
       companyCloudId: dto.companyCloudId ?? null,
@@ -521,6 +724,7 @@ posElectronicInvoicingRouter.post(
     const saleLocalCode = body.saleLocalCode ?? body.localCode ?? body.sale?.localCode ?? null;
     const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
     console.info('[electronic-invoicing.pos] outbound.generate.by-rnc', {
+      requestId: req.requestId,
       companyId: company.id,
       companyRnc: dto.companyRnc ?? null,
       companyCloudId: dto.companyCloudId ?? null,
@@ -531,6 +735,7 @@ posElectronicInvoicingRouter.post(
     });
 
     console.info('[electronic-invoicing.pos] generate.by-rnc.service_payload', {
+      requestId: req.requestId,
       companyId: company.id,
       companyRnc: dto.companyRnc ?? null,
       companyCloudId: dto.companyCloudId ?? null,
@@ -564,15 +769,21 @@ posElectronicInvoicingRouter.post(
   validate(posDebugDgiiAuthByRncSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as unknown as typeof posDebugDgiiAuthByRncSchema._output;
-    const result = await authService.debugAuthenticateByLocators(
-      {
-        companyRnc: body.companyRnc,
-        companyCloudId: body.companyCloudId,
-        environment: body.environment,
-        forceRefresh: body.forceRefresh,
-      },
-      req.requestId,
-    );
+    console.info('[electronic-invoicing.pos] debug.dgii-auth.by-rnc', {
+      requestId: req.requestId,
+      requestedCompanyId: body.companyId ?? null,
+      companyRnc: body.companyRnc ?? null,
+      companyCloudId: body.companyCloudId ?? null,
+      environment: body.environment ?? null,
+    });
+    const result = await buildSafeDgiiAuthDiagnostic({
+      companyRnc: body.companyRnc,
+      companyCloudId: body.companyCloudId,
+      requestedCompanyId: body.companyId,
+      environment: body.environment,
+      forceRefresh: body.forceRefresh,
+      requestId: req.requestId,
+    });
     res.status(200).json(result);
   }),
 );
@@ -583,15 +794,21 @@ posElectronicInvoicingRouter.post(
   validate(posDebugDgiiAuthByRncSchema),
   asyncHandler(async (req, res) => {
     const body = req.body as unknown as typeof posDebugDgiiAuthByRncSchema._output;
-    const result = await authService.debugAuthenticateByLocators(
-      {
-        companyRnc: body.companyRnc,
-        companyCloudId: body.companyCloudId,
-        environment: body.environment,
-        forceRefresh: body.forceRefresh,
-      },
-      req.requestId,
-    );
+    console.info('[electronic-invoicing.pos] debug.auth.by-rnc', {
+      requestId: req.requestId,
+      requestedCompanyId: body.companyId ?? null,
+      companyRnc: body.companyRnc ?? null,
+      companyCloudId: body.companyCloudId ?? null,
+      environment: body.environment ?? null,
+    });
+    const result = await buildSafeDgiiAuthDiagnostic({
+      companyRnc: body.companyRnc,
+      companyCloudId: body.companyCloudId,
+      requestedCompanyId: body.companyId,
+      environment: body.environment,
+      forceRefresh: body.forceRefresh,
+      requestId: req.requestId,
+    });
     res.status(200).json(result);
   }),
 );
@@ -605,6 +822,7 @@ posElectronicInvoicingRouter.post(
     const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
 
     console.info('[electronic-invoicing.pos] outbound.sign.by-rnc', {
+      requestId: req.requestId,
       companyId: company.id,
       companyRnc: dto.companyRnc ?? null,
       companyCloudId: dto.companyCloudId ?? null,
@@ -635,6 +853,7 @@ posElectronicInvoicingRouter.post(
     const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
 
     console.info('[electronic-invoicing.pos] outbound.submit.by-rnc', {
+      requestId: req.requestId,
       companyId: company.id,
       companyRnc: dto.companyRnc ?? null,
       companyCloudId: dto.companyCloudId ?? null,
@@ -722,6 +941,7 @@ posElectronicInvoicingRouter.get(
     const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
 
     console.info('[electronic-invoicing.pos] outbound.result.by-rnc', {
+      requestId: req.requestId,
       companyId: company.id,
       companyRnc: query.companyRnc ?? null,
       companyCloudId: query.companyCloudId ?? null,

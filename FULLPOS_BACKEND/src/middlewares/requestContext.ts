@@ -8,6 +8,7 @@ export function requestContext(req: Request, res: Response, next: NextFunction) 
 
   req.requestId = requestId;
   res.setHeader('x-correlation-id', requestId);
+  res.setHeader('x-request-id', requestId);
 
   next();
 }
