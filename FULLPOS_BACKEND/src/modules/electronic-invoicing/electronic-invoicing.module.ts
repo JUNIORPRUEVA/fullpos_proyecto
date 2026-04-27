@@ -568,6 +568,19 @@ function diagnosticAction(code: string) {
   return 'Revise el detalle técnico y vuelva a probar.';
 }
 
+function resolvePosCompany(
+  companyRnc?: string | null,
+  companyCloudId?: string | null,
+  requestId?: string,
+  source?: string,
+) {
+  return mapper.resolveCompanyOrThrow(companyRnc ?? null, companyCloudId ?? null, {
+    preferCloudOnConflict: true,
+    requestId,
+    source,
+  });
+}
+
 async function buildSafeDgiiAuthDiagnostic(input: {
   companyRnc?: string;
   companyCloudId?: string;
@@ -581,7 +594,7 @@ async function buildSafeDgiiAuthDiagnostic(input: {
   let company: Awaited<ReturnType<ElectronicInvoicingMapperService['resolveCompanyOrThrow']>> | null = null;
 
   try {
-    company = await mapper.resolveCompanyOrThrow(input.companyRnc ?? null, input.companyCloudId ?? null);
+    company = await resolvePosCompany(input.companyRnc ?? null, input.companyCloudId ?? null, input.requestId, 'debug_dgii_auth');
   } catch (error) {
     const code = (error as any)?.errorCode ?? 'COMPANY_RESOLVE_FAILED';
     errors.push({ code, message: (error as any)?.message ?? 'No se pudo resolver la empresa', action: diagnosticAction(code) });
@@ -718,7 +731,7 @@ posElectronicInvoicingRouter.get(
   validate(posConfigByRncSchema, 'query'),
   asyncHandler(async (req, res) => {
     const query = req.query as unknown as typeof posConfigByRncSchema._output;
-    const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
+    const company = await resolvePosCompany(query.companyRnc ?? null, query.companyCloudId ?? null, req.requestId, 'config_get_by_rnc');
     const branchId = query.branchId;
     console.info('[electronic-invoicing.pos] config.by-rnc.resolve', {
       requestId: req.requestId,
@@ -761,7 +774,7 @@ posElectronicInvoicingRouter.put(
       });
     }
 
-    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+    const company = await resolvePosCompany(dto.companyRnc ?? null, dto.companyCloudId ?? null, req.requestId, 'config_put_by_rnc');
     console.info('[electronic-invoicing.pos] config.by-rnc.save.resolve', {
       requestId: req.requestId,
       requestedCompanyId: dto.companyId ?? null,
@@ -798,7 +811,7 @@ posElectronicInvoicingRouter.post(
   asyncHandler(async (req, res) => {
     const dto = req.body as typeof posSequenceByRncSchema._output;
     try {
-      const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+      const company = await resolvePosCompany(dto.companyRnc ?? null, dto.companyCloudId ?? null, req.requestId, 'sequence_save_by_rnc');
       console.info('[electronic-invoicing.pos] sequence.save.resolve', {
         requestId: req.requestId,
         requestedCompanyId: dto.companyId ?? null,
@@ -835,7 +848,7 @@ posElectronicInvoicingRouter.post(
   validate(posConfigByRncSchema),
   asyncHandler(async (req, res) => {
     const dto = req.body as unknown as typeof posConfigByRncSchema._output;
-    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+    const company = await resolvePosCompany(dto.companyRnc ?? null, dto.companyCloudId ?? null, req.requestId, 'sequence_auto_configure_by_rnc');
     const branchId = dto.branchId;
     const created = [];
     for (const documentTypeCode of ['31', '32', '34'] as const) {
@@ -881,7 +894,7 @@ posElectronicInvoicingRouter.post(
         branchId: dto.branchId,
         autoSubmitToDgii: null,
       });
-      const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+      const company = await resolvePosCompany(dto.companyRnc ?? null, dto.companyCloudId ?? null, req.requestId, 'outbound_generate_by_rnc');
       companyId = company.id;
       console.info('[electronic-invoicing.pos] outbound.generate.by-rnc.company_resolved', {
         requestId: req.requestId,
@@ -978,7 +991,7 @@ posElectronicInvoicingRouter.post(
     const dto = req.body as typeof posSendByRncSchema._output;
     let companyId: number | null = null;
     try {
-      const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+      const company = await resolvePosCompany(dto.companyRnc ?? null, dto.companyCloudId ?? null, req.requestId, 'outbound_sign_by_rnc');
       companyId = company.id;
 
       console.info('[electronic-invoicing.pos] outbound.sign.by-rnc', {
@@ -1022,7 +1035,7 @@ posElectronicInvoicingRouter.post(
     const dto = req.body as typeof posSendByRncSchema._output;
     let companyId: number | null = null;
     try {
-      const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+      const company = await resolvePosCompany(dto.companyRnc ?? null, dto.companyCloudId ?? null, req.requestId, 'outbound_submit_by_rnc');
       companyId = company.id;
 
       console.info('[electronic-invoicing.pos] outbound.submit.by-rnc', {
@@ -1067,7 +1080,7 @@ posElectronicInvoicingRouter.get(
   validate(posOutboundListByRncSchema, 'query'),
   asyncHandler(async (req, res) => {
     const query = req.query as unknown as typeof posOutboundListByRncSchema._output;
-    const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
+    const company = await resolvePosCompany(query.companyRnc ?? null, query.companyCloudId ?? null, req.requestId, 'outbound_list_by_rnc');
 
     const invoices = await prisma.electronicInvoice.findMany({
       where: {
@@ -1124,7 +1137,7 @@ posElectronicInvoicingRouter.get(
     const query = req.query as unknown as typeof posQueryByRncSchema._output;
     let companyId: number | null = null;
     try {
-      const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
+      const company = await resolvePosCompany(query.companyRnc ?? null, query.companyCloudId ?? null, req.requestId, 'outbound_result_by_rnc');
       companyId = company.id;
 
       console.info('[electronic-invoicing.pos] outbound.result.by-rnc', {

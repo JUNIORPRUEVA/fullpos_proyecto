@@ -49,7 +49,15 @@ function splitTaxAcrossLines(lines: Array<{ baseAmount: number }>, totalTax: num
 export class ElectronicInvoicingMapperService {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async resolveCompanyOrThrow(companyRnc?: string | null, companyCloudId?: string | null) {
+  async resolveCompanyOrThrow(
+    companyRnc?: string | null,
+    companyCloudId?: string | null,
+    options?: {
+      preferCloudOnConflict?: boolean;
+      requestId?: string;
+      source?: string;
+    },
+  ) {
     const normalizedRnc = normalizeRnc(companyRnc);
     const cloudId = companyCloudId?.trim() ?? '';
 
@@ -68,6 +76,17 @@ export class ElectronicInvoicingMapperService {
       ]);
 
       if (byCloud && byRnc && byCloud.id !== byRnc.id) {
+        if (options?.preferCloudOnConflict) {
+          console.warn('[electronic-invoicing.mapper] company_locator_conflict_prefer_cloud', {
+            requestId: options.requestId ?? null,
+            source: options.source ?? null,
+            companyRnc: normalizedRnc,
+            companyCloudId: cloudId,
+            resolvedCompanyId: byCloud.id,
+            conflictingRncCompanyId: byRnc.id,
+          });
+          company = byCloud;
+        } else {
         throw {
           status: 409,
           message: 'El RNC y el ID cloud pertenecen a compañías diferentes',
@@ -79,9 +98,10 @@ export class ElectronicInvoicingMapperService {
             rncCompanyId: byRnc.id,
           },
         };
+        }
       }
 
-      company = byCloud ?? byRnc;
+      company = company ?? byCloud ?? byRnc;
     }
 
     if (!company && cloudId) {

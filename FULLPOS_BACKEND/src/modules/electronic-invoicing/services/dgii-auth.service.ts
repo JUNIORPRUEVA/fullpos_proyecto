@@ -985,7 +985,11 @@ export class DgiiAuthService {
     },
     requestId?: string,
   ) {
-    const company = await this.mapper.resolveCompanyOrThrow(input.companyRnc, input.companyCloudId);
+    const company = await this.mapper.resolveCompanyOrThrow(input.companyRnc, input.companyCloudId, {
+      preferCloudOnConflict: true,
+      requestId,
+      source: 'debug_dgii_auth',
+    });
     const environment = input.environment ?? env.DGII_DEFAULT_ENVIRONMENT;
     const config = this.directory.getEnvironmentConfig(environment);
     const activeCertificate = await this.prisma.electronicCertificate.findFirst({
