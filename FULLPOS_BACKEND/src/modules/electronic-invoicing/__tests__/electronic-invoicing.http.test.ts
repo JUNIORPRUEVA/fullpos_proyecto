@@ -12,6 +12,7 @@ import {
   auditTimelineParamsSchema,
   configQuerySchema,
   createElectronicInvoicingAdminController,
+  electronicCertificateAccessGuard,
   invoiceIdParamsSchema,
   invoiceIdVariantParamsSchema,
   listQuerySchema,
@@ -35,6 +36,7 @@ import { createTempPkcs12, ensureFeTestEnv } from './test-helpers';
 const { ElectronicInvoicingService } = require('../services/electronic-invoicing.service');
 const { DgiiXmlBuilderService } = require('../services/dgii-xml-builder.service');
 const { DgiiSignatureService } = require('../services/dgii-signature.service');
+const env = require('../../../config/env').default;
 
 ensureFeTestEnv();
 
@@ -399,5 +401,40 @@ test('multipart electronic certificate upload rejects invalid file extension', a
     assert.equal(Object.prototype.hasOwnProperty.call(response.body.details, 'password'), false);
   } finally {
     fs.rmSync(invalidPath, { force: true });
+  }
+});
+
+test('multipart electronic certificate upload without POS key returns POS override error, not auth token error', async () => {
+  const previousOverrideKey = env.OVERRIDE_API_KEY;
+  env.OVERRIDE_API_KEY = 'expected-pos-key';
+  const cert = createTempPkcs12({ password: 'secret123' });
+  const app = express();
+  app.use(express.json());
+
+  const router = express.Router();
+  router.post(
+    '/certificates',
+    electronicCertificateAccessGuard,
+    uploadElectronicCertificate,
+    validateCreateCertificateRequest,
+    (_req, res) => res.status(201).json({ ok: true }),
+  );
+  app.use('/api/electronic-invoicing', router);
+  app.use(notFound);
+  app.use(errorHandler);
+
+  try {
+    const response = await request(app)
+      .post('/api/electronic-invoicing/certificates')
+      .field('alias', 'main-cert')
+      .field('password', 'secret123')
+      .attach('file', cert.filePath);
+
+    assert.equal(response.status, 401);
+    assert.equal(response.body.errorCode, 'POS_OVERRIDE_KEY_REQUIRED');
+    assert.notEqual(response.body.message, 'Token requerido');
+  } finally {
+    env.OVERRIDE_API_KEY = previousOverrideKey;
+    cert.cleanup();
   }
 });

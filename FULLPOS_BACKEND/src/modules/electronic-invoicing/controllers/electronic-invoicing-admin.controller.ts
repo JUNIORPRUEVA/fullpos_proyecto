@@ -52,8 +52,27 @@ function isMultipartRequest(req: Request) {
   return typeof contentType === 'string' && contentType.toLowerCase().includes('multipart/form-data');
 }
 
+function bearerTokenFromHeader(authorization: string | undefined) {
+  if (!authorization) return undefined;
+  const [scheme, token] = authorization.trim().split(/\s+/, 2);
+  if (!scheme || !token) return undefined;
+  if (scheme.toLowerCase() !== 'bearer') return undefined;
+  return token.trim() || undefined;
+}
+
+function looksLikeJwt(token: string | undefined) {
+  if (!token) return false;
+  return token.split('.').length === 3;
+}
+
 function hasOverrideCredential(req: Request) {
-  return typeof req.headers['x-cloud-key'] === 'string' || typeof req.headers['x-override-key'] === 'string';
+  const bearerToken = bearerTokenFromHeader(req.headers.authorization);
+  return (
+    typeof req.headers['x-cloud-key'] === 'string' ||
+    typeof req.headers['x-override-key'] === 'string' ||
+    (typeof bearerToken === 'string' && !looksLikeJwt(bearerToken)) ||
+    (isMultipartRequest(req) && !looksLikeJwt(bearerToken))
+  );
 }
 
 function safeCertificateUploadDetails(req: Request, stage: string) {
