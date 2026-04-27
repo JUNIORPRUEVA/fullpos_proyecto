@@ -279,7 +279,7 @@ export class ElectronicInvoicingMapperService {
     }
 
     if (!sale.company.rnc) {
-      throw { status: 409, message: 'La compañía no tiene RNC configurado', errorCode: 'COMPANY_RNC_MISSING' };
+      throw { status: 409, message: 'La compañía no tiene RNC configurado', errorCode: 'COMPANY_RNC_REQUIRED' };
     }
     assertValidRnc(sale.company.rnc, 'RNC del emisor');
 
@@ -289,14 +289,22 @@ export class ElectronicInvoicingMapperService {
     }
 
     if (documentTypeCode === '31') {
-      assertValidRnc(sale.customerRncSnapshot, 'RNC del comprador');
+      try {
+        assertValidRnc(sale.customerRncSnapshot, 'RNC del comprador');
+      } catch (error) {
+        throw {
+          status: 409,
+          message: error instanceof Error ? error.message : 'La venta E31 requiere RNC válido del comprador',
+          errorCode: 'CUSTOMER_RNC_REQUIRED_FOR_E31',
+        };
+      }
       if (!(sale.customerNameSnapshot ?? '').trim()) {
         throw { status: 409, message: 'La venta 31 requiere nombre del comprador', errorCode: 'BUYER_NAME_MISSING' };
       }
     }
 
     if (sale.items.length === 0) {
-      throw { status: 409, message: 'La venta no tiene items', errorCode: 'SALE_ITEMS_MISSING' };
+      throw { status: 409, message: 'La venta no tiene items', errorCode: 'SALE_ITEMS_REQUIRED' };
     }
 
     const subtotalAmount = toPositiveMoney(toNumber(sale.subtotal));

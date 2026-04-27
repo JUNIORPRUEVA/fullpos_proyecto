@@ -258,7 +258,7 @@ export class SequenceService {
     });
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const sequence = await this.prisma.electronicSequence.findUnique({
+      let sequence = await this.prisma.electronicSequence.findUnique({
         where: {
           companyId_branchId_documentTypeCode: {
             companyId,
@@ -268,11 +268,34 @@ export class SequenceService {
         },
       });
 
+      if (!sequence && branchId !== 0) {
+        sequence = await this.prisma.electronicSequence.findUnique({
+          where: {
+            companyId_branchId_documentTypeCode: {
+              companyId,
+              branchId: 0,
+              documentTypeCode,
+            },
+          },
+        });
+        if (sequence) {
+          console.warn('[electronic-invoicing.sequence] sequence.allocate_branch_fallback', {
+            companyId,
+            requestedBranchId: branchId,
+            selectedBranchId: 0,
+            documentTypeCode,
+            sequenceId: sequence.id,
+            requestId,
+          });
+        }
+      }
+
       if (!sequence) {
         throw {
           status: 404,
-          message: `No existe secuencia para el tipo ${documentTypeCode}`,
-          errorCode: 'SEQUENCE_NOT_FOUND',
+          message: `No existe secuencia activa/configurada para el tipo ${documentTypeCode}`,
+          errorCode: 'SEQUENCE_NOT_CONFIGURED',
+          details: { companyId, branchId, documentTypeCode },
         };
       }
 
@@ -282,9 +305,13 @@ export class SequenceService {
       console.info('[electronic-invoicing.sequence] sequence.allocate_state', {
         companyId,
         branchId,
+        selectedBranchId: sequence.branchId,
+        sequenceId: sequence.id,
         documentTypeCode,
+        prefix: sequence.prefix,
         currentNumber,
         endNumber: maxNumber,
+        remaining: Math.max(0, maxNumber - currentNumber),
         status: sequence.status,
         attempt,
       });

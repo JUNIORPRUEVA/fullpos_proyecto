@@ -77,6 +77,28 @@ function toClientSubmitStatus(internalStatus: string, dgiiStatus: string) {
   return internalStatus;
 }
 
+function outboundRuntimeError(input: {
+  stage: 'generate' | 'map_sale' | 'sequence' | 'xml' | 'sign' | 'token' | 'submit' | 'save';
+  errorCode: string;
+  message: string;
+  status?: number;
+  details?: Record<string, unknown>;
+  cause?: unknown;
+}) {
+  const cause = input.cause as any;
+  return {
+    status: input.status ?? cause?.status ?? 500,
+    message: input.message,
+    errorCode: input.errorCode,
+    stage: input.stage,
+    details: {
+      ...(input.details ?? {}),
+      originalErrorCode: cause?.errorCode ?? cause?.code ?? null,
+      originalMessage: cause?.message ?? (cause instanceof Error ? cause.message : null),
+    },
+  };
+}
+
 export class ElectronicInvoicingService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -493,36 +515,112 @@ export class ElectronicInvoicingService {
       };
     }
 
-    console.info('[electronic-invoicing.outbound] sale_found_and_mapped', { companyId, saleIdRequested: dto.saleId, saleIdResolved: resolvedSaleId, documentTypeCode: dto.documentTypeCode, mapped: { issuerRnc: mapped.issuer.rnc, issuerName: mapped.issuer.name, buyerRnc: mapped.buyer.rnc, buyerName: mapped.buyer.name, totalAmount: mapped.totalAmount, lineCount: mapped.lines.length } });
-    const draft = await this.createDraftInvoice(
+    console.info('[electronic-invoicing.outbound] sale_found_and_mapped', {
+      requestId,
       companyId,
-      dto.branchId,
-      resolvedSaleId,
-      dto.documentTypeCode,
-      mapped.issuer.rnc ?? '',
-      mapped.issuer.name,
-      mapped.buyer.rnc,
-      mapped.buyer.name,
-      mapped.issueDate,
-      mapped.totalAmount,
-      mapped.taxAmount,
-      mapped.currencyCode,
-    );
-    const allocation = await this.sequenceService.allocate(companyId, dto.branchId, dto.documentTypeCode, requestId);
-    const xmlUnsigned = this.xmlBuilder.build({ ...mapped, ecf: allocation.ecf });
-
-    const updated = await this.transitionInternalStatus(
-      draft.id,
-      'GENERATED',
-      `XML generado para ${allocation.ecf}`,
-      username,
-      {
-        ecf: allocation.ecf,
-        sequenceNumber: allocation.sequenceNumber,
-        xmlUnsigned,
+      saleIdRequested: dto.saleId,
+      saleIdResolved: resolvedSaleId,
+      saleLocalCode: normalizedSaleLocalCode,
+      documentTypeCode: dto.documentTypeCode,
+      mapped: {
+        issuerRncPresent: !!mapped.issuer.rnc,
+        issuerNamePresent: !!mapped.issuer.name,
+        issuerAddressPresent: !!mapped.issuer.address,
+        buyerRncPresent: !!mapped.buyer.rnc,
+        buyerNamePresent: !!mapped.buyer.name,
+        customerFiscalReady: dto.documentTypeCode === '31' ? !!mapped.buyer.rnc && !!mapped.buyer.name : true,
+        totalAmount: mapped.totalAmount,
+        taxAmount: mapped.taxAmount,
+        itemCount: mapped.lines.length,
       },
-      { saleId: resolvedSaleId, requestedSaleId: dto.saleId, documentTypeCode: dto.documentTypeCode },
-    );
+    });
+
+    let draft;
+    try {
+      draft = await this.createDraftInvoice(
+        companyId,
+        dto.branchId,
+        resolvedSaleId,
+        dto.documentTypeCode,
+        mapped.issuer.rnc ?? '',
+        mapped.issuer.name,
+        mapped.buyer.rnc,
+        mapped.buyer.name,
+        mapped.issueDate,
+        mapped.totalAmount,
+        mapped.taxAmount,
+        mapped.currencyCode,
+      );
+    } catch (error) {
+      throw outboundRuntimeError({
+        stage: 'save',
+        errorCode: 'OUTBOUND_DRAFT_SAVE_FAILED',
+        message: 'No se pudo guardar el borrador del e-CF.',
+        cause: error,
+        details: { companyId, saleId: resolvedSaleId, saleLocalCode: normalizedSaleLocalCode, documentTypeCode: dto.documentTypeCode, requestId },
+      });
+    }
+
+    let allocation;
+    try {
+      allocation = await this.sequenceService.allocate(companyId, dto.branchId, dto.documentTypeCode, requestId);
+    } catch (error: any) {
+      throw outboundRuntimeError({
+        stage: 'sequence',
+        errorCode: error?.errorCode ?? 'SEQUENCE_NOT_CONFIGURED',
+        message: error?.message ?? 'No se pudo seleccionar una secuencia disponible.',
+        status: error?.status ?? 409,
+        cause: error,
+        details: { companyId, saleId: resolvedSaleId, saleLocalCode: normalizedSaleLocalCode, documentTypeCode: dto.documentTypeCode, branchId: dto.branchId, requestId },
+      });
+    }
+
+    let xmlUnsigned: string;
+    try {
+      console.info('[electronic-invoicing.outbound] xml.build_started', {
+        requestId,
+        companyId,
+        saleId: resolvedSaleId,
+        saleLocalCode: normalizedSaleLocalCode,
+        documentTypeCode: dto.documentTypeCode,
+        ecf: allocation.ecf,
+        itemCount: mapped.lines.length,
+        totalAmount: mapped.totalAmount,
+      });
+      xmlUnsigned = this.xmlBuilder.build({ ...mapped, ecf: allocation.ecf });
+    } catch (error) {
+      throw outboundRuntimeError({
+        stage: 'xml',
+        errorCode: 'XML_GENERATION_FAILED',
+        message: 'El XML no pudo generarse por datos incompletos o inválidos.',
+        cause: error,
+        details: { companyId, saleId: resolvedSaleId, saleLocalCode: normalizedSaleLocalCode, documentTypeCode: dto.documentTypeCode, ecf: allocation.ecf, requestId },
+      });
+    }
+
+    let updated;
+    try {
+      updated = await this.transitionInternalStatus(
+        draft.id,
+        'GENERATED',
+        `XML generado para ${allocation.ecf}`,
+        username,
+        {
+          ecf: allocation.ecf,
+          sequenceNumber: allocation.sequenceNumber,
+          xmlUnsigned,
+        },
+        { saleId: resolvedSaleId, requestedSaleId: dto.saleId, documentTypeCode: dto.documentTypeCode },
+      );
+    } catch (error) {
+      throw outboundRuntimeError({
+        stage: 'save',
+        errorCode: 'OUTBOUND_GENERATED_SAVE_FAILED',
+        message: 'No se pudo guardar el XML generado del e-CF.',
+        cause: error,
+        details: { companyId, saleId: resolvedSaleId, saleLocalCode: normalizedSaleLocalCode, documentTypeCode: dto.documentTypeCode, ecf: allocation.ecf, requestId },
+      });
+    }
 
     await this.audit.log({
       companyId,
@@ -549,6 +647,14 @@ export class ElectronicInvoicingService {
         errorCode: 'CERTIFICATE_NOT_FOUND',
       };
     }
+    if (certificate.validTo.getTime() < Date.now()) {
+      throw {
+        status: 409,
+        message: 'El certificado electrónico activo está vencido',
+        errorCode: 'CERTIFICATE_EXPIRED',
+        details: { companyId, certificateId: certificate.id, validTo: certificate.validTo },
+      };
+    }
     return certificate;
   }
 
@@ -563,18 +669,44 @@ export class ElectronicInvoicingService {
       throw { status: 409, message: 'El documento no tiene XML sin firmar', errorCode: 'XML_UNSIGNED_MISSING' };
     }
 
-    const certificate = await this.getActiveCertificate(companyId);
-    const password = decryptSecret(certificate.passwordEncrypted);
-    const loaded = isInlineCertificateReference(certificate.secretReference)
-      ? loadPkcs12CertificateFromBuffer(
-          decryptBinarySecret(certificate.secretReference!.slice(INLINE_CERTIFICATE_PREFIX.length)),
-          password,
-        )
-      : loadPkcs12Certificate(resolveCertificateFilePath(certificate.filePath, certificate.secretReference), password);
-    assertCertificateIsCurrentlyValid(loaded.validFrom, loaded.validTo);
+    let certificate;
+    let xmlSigned: string;
+    let xmlHash: string;
+    try {
+      certificate = await this.getActiveCertificate(companyId);
+      const password = decryptSecret(certificate.passwordEncrypted);
+      const loaded = isInlineCertificateReference(certificate.secretReference)
+        ? loadPkcs12CertificateFromBuffer(
+            decryptBinarySecret(certificate.secretReference!.slice(INLINE_CERTIFICATE_PREFIX.length)),
+            password,
+          )
+        : loadPkcs12Certificate(resolveCertificateFilePath(certificate.filePath, certificate.secretReference), password);
+      assertCertificateIsCurrentlyValid(loaded.validFrom, loaded.validTo);
 
-    const xmlSigned = this.signatureService.signXml(invoice.xmlUnsigned, loaded.privateKeyPem, loaded.certPem);
-    const xmlHash = sha256Hex(xmlSigned);
+      console.info('[electronic-invoicing.outbound] sign.certificate_ready', {
+        requestId,
+        companyId,
+        invoiceId: invoice.id,
+        ecf: invoice.ecf,
+        certificateId: certificate.id,
+        certificateAlias: certificate.alias,
+        certificateValidTo: loaded.validTo.toISOString(),
+      });
+
+      xmlSigned = this.signatureService.signXml(invoice.xmlUnsigned, loaded.privateKeyPem, loaded.certPem);
+      xmlHash = sha256Hex(xmlSigned);
+    } catch (error: any) {
+      const message = error?.message ?? 'No se pudo firmar el XML con el certificado activo';
+      const expired = String(message).toLowerCase().includes('fuera de vigencia') || String(message).toLowerCase().includes('vencido');
+      throw outboundRuntimeError({
+        stage: 'sign',
+        errorCode: error?.errorCode ?? (expired ? 'CERTIFICATE_EXPIRED' : 'XML_SIGN_FAILED'),
+        message: error?.message ?? (expired ? 'El certificado digital está vencido.' : 'El XML no pudo firmarse con el certificado activo.'),
+        status: error?.status ?? 409,
+        cause: error,
+        details: { companyId, invoiceId: invoice.id, ecf: invoice.ecf, requestId, certificateFound: !!certificate },
+      });
+    }
 
     const updated = await this.transitionInternalStatus(
       invoice.id,

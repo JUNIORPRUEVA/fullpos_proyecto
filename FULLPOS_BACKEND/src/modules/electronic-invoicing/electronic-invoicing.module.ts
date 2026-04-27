@@ -398,6 +398,120 @@ const posDebugDgiiAuthByRncSchema = posLocatorsBaseSchema
 
 export const posElectronicInvoicingRouter = Router();
 
+type OutboundStage = 'generate' | 'resolve_company' | 'sale_lookup' | 'map_sale' | 'sequence' | 'xml' | 'sign' | 'token' | 'submit' | 'result' | 'save';
+
+function outboundStageFromError(error: any, fallback: OutboundStage): OutboundStage {
+  const code = String(error?.errorCode ?? error?.code ?? '').toUpperCase();
+  const message = String(error?.message ?? '').toLowerCase();
+  if (code.includes('COMPANY')) return 'resolve_company';
+  if (code === 'SALE_NOT_FOUND' || code === 'SALE_NOT_SYNCED_TO_BACKEND' || code.includes('SALE_SYNC')) return 'sale_lookup';
+  if (code.includes('SALE_') || code.includes('BUYER') || code.includes('CUSTOMER') || code.includes('DOCUMENT_TYPE')) return 'map_sale';
+  if (code.includes('SEQUENCE')) return 'sequence';
+  if (code.includes('XML') || message.includes('xml')) return fallback === 'sign' ? 'sign' : 'xml';
+  if (code.includes('CERTIFICATE') || code.includes('SIGN')) return 'sign';
+  if (code.includes('TOKEN') || code.includes('AUTH') || code.includes('SEED')) return 'token';
+  if (code.includes('SUBMIT') || code.includes('SEND') || code.includes('DGII')) return 'submit';
+  return fallback;
+}
+
+function outboundErrorCode(error: any, stage: OutboundStage) {
+  const existing = String(error?.errorCode ?? error?.code ?? '').trim();
+  if (existing) return existing;
+  switch (stage) {
+    case 'resolve_company': return 'COMPANY_NOT_FOUND';
+    case 'sale_lookup': return 'SALE_NOT_SYNCED_TO_BACKEND';
+    case 'sequence': return 'SEQUENCE_NOT_CONFIGURED';
+    case 'xml': return 'XML_GENERATION_FAILED';
+    case 'sign': return 'XML_SIGN_FAILED';
+    case 'token': return 'DGII_AUTH_NOT_READY';
+    case 'submit': return 'DGII_SUBMIT_FAILED';
+    default: return 'ELECTRONIC_OUTBOUND_RUNTIME_ERROR';
+  }
+}
+
+function outboundErrorMessage(error: any, code: string, stage: OutboundStage) {
+  const message = String(error?.message ?? '').trim();
+  if (message && message !== 'Unexpected error') return message;
+  switch (code) {
+    case 'SALE_NOT_FOUND':
+    case 'SALE_NOT_SYNCED_TO_BACKEND':
+      return 'La venta todavía no se ha sincronizado con la nube antes de generar el e-CF.';
+    case 'SEQUENCE_NOT_FOUND':
+    case 'SEQUENCE_NOT_CONFIGURED':
+      return 'La secuencia electrónica no está configurada para este tipo de comprobante.';
+    case 'SEQUENCE_EXHAUSTED':
+      return 'La secuencia electrónica está agotada.';
+    case 'CERTIFICATE_NOT_FOUND':
+      return 'Falta certificado digital válido.';
+    case 'CERTIFICATE_EXPIRED':
+      return 'El certificado digital está vencido.';
+    case 'DGII_AUTH_NOT_READY':
+    case 'DGII_TOKEN_GENERATION_FAILED':
+      return 'DGII no pudo generar el token.';
+    case 'XML_GENERATION_FAILED':
+      return 'El XML no pudo generarse por datos incompletos.';
+    case 'XML_SIGN_FAILED':
+      return 'El XML no pudo firmarse con el certificado activo.';
+    case 'DGII_SUBMIT_FAILED':
+      return 'DGII no pudo recibir el e-CF.';
+    default:
+      return `No se pudo completar la etapa ${stage} del e-CF.`;
+  }
+}
+
+function safeOutboundErrorDetails(input: {
+  requestId?: string;
+  companyId?: number | null;
+  companyRnc?: string | null;
+  companyCloudId?: string | null;
+  saleId?: number | null;
+  saleLocalCode?: string | null;
+  invoiceId?: number | null;
+  documentTypeCode?: string | null;
+  branchId?: number | null;
+  extra?: Record<string, unknown> | null;
+}) {
+  return {
+    requestId: input.requestId ?? null,
+    companyId: input.companyId ?? null,
+    companyRnc: input.companyRnc ?? null,
+    companyCloudId: input.companyCloudId ?? null,
+    saleId: input.saleId ?? null,
+    saleLocalCode: input.saleLocalCode ?? null,
+    invoiceId: input.invoiceId ?? null,
+    documentTypeCode: input.documentTypeCode ?? null,
+    branchId: input.branchId ?? null,
+    ...(input.extra ?? {}),
+  };
+}
+
+function sendOutboundError(res: express.Response, error: any, fallbackStage: OutboundStage, details: ReturnType<typeof safeOutboundErrorDetails>) {
+  const stage = outboundStageFromError(error, fallbackStage);
+  const errorCode = outboundErrorCode(error, stage);
+  const status = typeof error?.status === 'number' ? error.status : 500;
+  const message = outboundErrorMessage(error, errorCode, stage);
+  console.error('[electronic-invoicing.pos] outbound.structured_error', {
+    ...details,
+    stage,
+    status,
+    errorCode,
+    message,
+    originalMessage: error?.message ?? null,
+    prismaCode: error?.code ?? null,
+    stack: error?.stack ? String(error.stack).split('\n').slice(0, 5).join('\n') : null,
+  });
+  return res.status(status).json({
+    ok: false,
+    errorCode,
+    message,
+    stage,
+    details: {
+      ...details,
+      originalErrorCode: error?.errorCode ?? error?.code ?? null,
+    },
+  });
+}
+
 type SafeDiagnosticError = { code: string; message: string; action: string };
 
 function electronicEnvDiagnostics(environment: 'precertification' | 'production') {
@@ -755,44 +869,54 @@ posElectronicInvoicingRouter.post(
       sale?: { localCode?: string };
     };
     const saleLocalCode = body.saleLocalCode ?? body.localCode ?? body.sale?.localCode ?? null;
-    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
-    console.info('[electronic-invoicing.pos] outbound.generate.by-rnc', {
-      requestId: req.requestId,
-      companyId: company.id,
-      companyRnc: dto.companyRnc ?? null,
-      companyCloudId: dto.companyCloudId ?? null,
-      saleId: dto.saleId,
-      saleLocalCode,
-      documentTypeCode: dto.documentTypeCode,
-      branchId: dto.branchId,
-    });
-
-    console.info('[electronic-invoicing.pos] generate.by-rnc.service_payload', {
-      requestId: req.requestId,
-      companyId: company.id,
-      companyRnc: dto.companyRnc ?? null,
-      companyCloudId: dto.companyCloudId ?? null,
-      saleId: dto.saleId,
-      saleLocalCode,
-      documentTypeCode: dto.documentTypeCode,
-      branchId: dto.branchId,
-    });
-
-    const invoice = await electronicInvoicingService.generateOutbound(
-      company.id,
-      {
+    let companyId: number | null = null;
+    try {
+      console.info('[electronic-invoicing.pos] outbound.generate.by-rnc.start', {
+        requestId: req.requestId,
+        companyRnc: dto.companyRnc ?? null,
+        companyCloudId: dto.companyCloudId ?? null,
         saleId: dto.saleId,
         saleLocalCode,
-        companyCloudId: dto.companyCloudId ?? null,
-        companyRnc: dto.companyRnc ?? null,
-        documentTypeCode: dto.documentTypeCode as any,
+        documentTypeCode: dto.documentTypeCode,
         branchId: dto.branchId,
-      },
-      'fullpos_pos',
-      req.requestId,
-    );
+        autoSubmitToDgii: null,
+      });
+      const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+      companyId = company.id;
+      console.info('[electronic-invoicing.pos] outbound.generate.by-rnc.company_resolved', {
+        requestId: req.requestId,
+        resolvedCompanyId: company.id,
+        resolvedRnc: company.rnc ?? null,
+        resolvedCloudCompanyId: company.cloudCompanyId ?? null,
+      });
 
-    res.status(201).json(invoice);
+      const invoice = await electronicInvoicingService.generateOutbound(
+        company.id,
+        {
+          saleId: dto.saleId,
+          saleLocalCode,
+          companyCloudId: dto.companyCloudId ?? null,
+          companyRnc: dto.companyRnc ?? null,
+          documentTypeCode: dto.documentTypeCode as any,
+          branchId: dto.branchId,
+        },
+        'fullpos_pos',
+        req.requestId,
+      );
+
+      res.status(201).json(invoice);
+    } catch (error) {
+      return sendOutboundError(res, error, 'generate', safeOutboundErrorDetails({
+        requestId: req.requestId,
+        companyId,
+        companyRnc: dto.companyRnc ?? null,
+        companyCloudId: dto.companyCloudId ?? null,
+        saleId: dto.saleId,
+        saleLocalCode,
+        documentTypeCode: dto.documentTypeCode,
+        branchId: dto.branchId,
+      }));
+    }
   }),
 );
 
@@ -852,28 +976,41 @@ posElectronicInvoicingRouter.post(
   validate(posSendByRncSchema),
   asyncHandler(async (req, res) => {
     const dto = req.body as typeof posSendByRncSchema._output;
-    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+    let companyId: number | null = null;
+    try {
+      const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+      companyId = company.id;
 
-    console.info('[electronic-invoicing.pos] outbound.sign.by-rnc', {
-      requestId: req.requestId,
-      companyId: company.id,
-      companyRnc: dto.companyRnc ?? null,
-      companyCloudId: dto.companyCloudId ?? null,
-      invoiceId: dto.invoiceId,
-      force: dto.force,
-    });
-
-    const invoice = await electronicInvoicingService.signOutbound(
-      company.id,
-      {
+      console.info('[electronic-invoicing.pos] outbound.sign.by-rnc', {
+        requestId: req.requestId,
+        companyId: company.id,
+        companyRnc: dto.companyRnc ?? null,
+        companyCloudId: dto.companyCloudId ?? null,
         invoiceId: dto.invoiceId,
         force: dto.force,
-      },
-      'fullpos_pos',
-      req.requestId,
-    );
+      });
 
-    res.json(invoice);
+      const invoice = await electronicInvoicingService.signOutbound(
+        company.id,
+        {
+          invoiceId: dto.invoiceId,
+          force: dto.force,
+        },
+        'fullpos_pos',
+        req.requestId,
+      );
+
+      res.json(invoice);
+    } catch (error) {
+      return sendOutboundError(res, error, 'sign', safeOutboundErrorDetails({
+        requestId: req.requestId,
+        companyId,
+        companyRnc: dto.companyRnc ?? null,
+        companyCloudId: dto.companyCloudId ?? null,
+        invoiceId: dto.invoiceId,
+        branchId: 0,
+      }));
+    }
   }),
 );
 
@@ -883,30 +1020,44 @@ posElectronicInvoicingRouter.post(
   validate(posSendByRncSchema),
   asyncHandler(async (req, res) => {
     const dto = req.body as typeof posSendByRncSchema._output;
-    const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+    let companyId: number | null = null;
+    try {
+      const company = await mapper.resolveCompanyOrThrow(dto.companyRnc ?? null, dto.companyCloudId ?? null);
+      companyId = company.id;
 
-    console.info('[electronic-invoicing.pos] outbound.submit.by-rnc', {
-      requestId: req.requestId,
-      companyId: company.id,
-      companyRnc: dto.companyRnc ?? null,
-      companyCloudId: dto.companyCloudId ?? null,
-      invoiceId: dto.invoiceId,
-      force: dto.force,
-      hasManualToken: !!dto.dgiiManualToken,
-    });
-
-    const invoice = await electronicInvoicingService.submitOutbound(
-      company.id,
-      {
+      console.info('[electronic-invoicing.pos] outbound.submit.by-rnc', {
+        requestId: req.requestId,
+        companyId: company.id,
+        companyRnc: dto.companyRnc ?? null,
+        companyCloudId: dto.companyCloudId ?? null,
         invoiceId: dto.invoiceId,
         force: dto.force,
-        dgiiManualToken: dto.dgiiManualToken,
-      },
-      'fullpos_pos',
-      req.requestId,
-    );
+        hasManualToken: !!dto.dgiiManualToken,
+      });
 
-    res.json(invoice);
+      const invoice = await electronicInvoicingService.submitOutbound(
+        company.id,
+        {
+          invoiceId: dto.invoiceId,
+          force: dto.force,
+          dgiiManualToken: dto.dgiiManualToken,
+        },
+        'fullpos_pos',
+        req.requestId,
+      );
+
+      res.json(invoice);
+    } catch (error) {
+      return sendOutboundError(res, error, 'submit', safeOutboundErrorDetails({
+        requestId: req.requestId,
+        companyId,
+        companyRnc: dto.companyRnc ?? null,
+        companyCloudId: dto.companyCloudId ?? null,
+        invoiceId: dto.invoiceId,
+        branchId: 0,
+        extra: { submitAttempted: true, hasManualToken: !!dto.dgiiManualToken },
+      }));
+    }
   }),
 );
 
@@ -971,24 +1122,37 @@ posElectronicInvoicingRouter.get(
   asyncHandler(async (req, res) => {
     const params = req.params as unknown as typeof queryTrackDtoSchema._output;
     const query = req.query as unknown as typeof posQueryByRncSchema._output;
-    const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
+    let companyId: number | null = null;
+    try {
+      const company = await mapper.resolveCompanyOrThrow(query.companyRnc ?? null, query.companyCloudId ?? null);
+      companyId = company.id;
 
-    console.info('[electronic-invoicing.pos] outbound.result.by-rnc', {
-      requestId: req.requestId,
-      companyId: company.id,
-      companyRnc: query.companyRnc ?? null,
-      companyCloudId: query.companyCloudId ?? null,
-      trackId: params.trackId,
-      branchId: query.branchId,
-    });
+      console.info('[electronic-invoicing.pos] outbound.result.by-rnc', {
+        requestId: req.requestId,
+        companyId: company.id,
+        companyRnc: query.companyRnc ?? null,
+        companyCloudId: query.companyCloudId ?? null,
+        trackId: params.trackId,
+        branchId: query.branchId,
+      });
 
-    const result = await electronicInvoicingService.queryOutboundResult(
-      company.id,
-      params.trackId,
-      'fullpos_pos',
-      req.requestId,
-    );
-    res.json(result);
+      const result = await electronicInvoicingService.queryOutboundResult(
+        company.id,
+        params.trackId,
+        'fullpos_pos',
+        req.requestId,
+      );
+      res.json(result);
+    } catch (error) {
+      return sendOutboundError(res, error, 'result', safeOutboundErrorDetails({
+        requestId: req.requestId,
+        companyId,
+        companyRnc: query.companyRnc ?? null,
+        companyCloudId: query.companyCloudId ?? null,
+        branchId: query.branchId,
+        extra: { trackId: params.trackId },
+      }));
+    }
   }),
 );
 
