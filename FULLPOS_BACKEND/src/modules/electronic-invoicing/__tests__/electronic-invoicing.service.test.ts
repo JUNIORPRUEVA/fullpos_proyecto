@@ -156,7 +156,7 @@ test('ElectronicInvoicingService registers certificate on happy path and rejects
         'owner',
         'req-cert-bad',
       ),
-      (error: any) => error?.status === 400 && error?.errorCode === 'ELECTRONIC_CERTIFICATE_PASSWORD_INVALID',
+      (error: any) => error?.status === 400 && error?.errorCode === 'CERTIFICATE_INVALID_PASSWORD',
     );
   } finally {
     validCert.cleanup();

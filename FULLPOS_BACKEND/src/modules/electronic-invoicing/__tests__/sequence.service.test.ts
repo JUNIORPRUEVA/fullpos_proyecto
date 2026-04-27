@@ -13,8 +13,8 @@ test('SequenceService allocates unique e-CF values on consecutive calls', async 
     branchId: 0,
     documentTypeCode: '31',
     prefix: 'E31',
-    currentNumber: 0,
-    maxNumber: 9999999999,
+    currentNumber: 0n,
+    maxNumber: 9999999999n,
     status: 'ACTIVE',
   };
   const auditEvents: Array<{ eventType: string; payload?: unknown }> = [];
@@ -24,7 +24,7 @@ test('SequenceService allocates unique e-CF values on consecutive calls', async 
       async findUnique() {
         return { ...sequenceState };
       },
-      async updateMany(input: { where: { currentNumber: number }; data: { currentNumber: number; status: string } }) {
+      async updateMany(input: { where: { currentNumber: bigint }; data: { currentNumber: bigint; status: string } }) {
         if (input.where.currentNumber !== sequenceState.currentNumber || sequenceState.status !== 'ACTIVE') {
           return { count: 0 };
         }

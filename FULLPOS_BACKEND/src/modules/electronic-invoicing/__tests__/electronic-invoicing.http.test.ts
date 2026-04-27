@@ -340,7 +340,7 @@ test('multipart electronic certificate upload returns 400 for wrong password', a
       .attach('file', cert.filePath);
 
     assert.equal(response.status, 400);
-    assert.equal(response.body.errorCode, 'ELECTRONIC_CERTIFICATE_PASSWORD_INVALID');
+    assert.equal(response.body.errorCode, 'CERTIFICATE_INVALID_PASSWORD');
   } finally {
     cert.cleanup();
   }

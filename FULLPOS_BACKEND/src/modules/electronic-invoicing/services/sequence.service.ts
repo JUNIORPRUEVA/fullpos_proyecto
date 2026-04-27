@@ -3,6 +3,10 @@ import { ElectronicInvoicingAuditService } from './electronic-invoicing-audit.se
 import { buildEcf } from '../utils/validation.utils';
 import { CreateSequenceDto } from '../dto/sequence.dto';
 
+function sequenceNumberToClient(value: number | bigint) {
+  return typeof value === 'bigint' ? Number(value) : value;
+}
+
 export class SequenceService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -55,8 +59,8 @@ export class SequenceService {
       },
       update: {
         prefix,
-        currentNumber: dto.currentNumber,
-        maxNumber: endNumber,
+        currentNumber: BigInt(dto.currentNumber),
+        maxNumber: BigInt(endNumber),
         status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
       },
       create: {
@@ -64,8 +68,8 @@ export class SequenceService {
         branchId: dto.branchId,
         documentTypeCode: dto.documentTypeCode,
         prefix,
-        currentNumber: dto.currentNumber,
-        maxNumber: endNumber,
+        currentNumber: BigInt(dto.currentNumber),
+        maxNumber: BigInt(endNumber),
         status: dto.currentNumber >= endNumber ? 'EXHAUSTED' : dto.status,
       },
     });
@@ -89,9 +93,10 @@ export class SequenceService {
 
     return {
       ...sequence,
+      currentNumber: sequenceNumberToClient(sequence.currentNumber),
       startNumber: dto.startNumber,
-      endNumber: sequence.maxNumber,
-      maxNumber: sequence.maxNumber,
+      endNumber: sequenceNumberToClient(sequence.maxNumber),
+      maxNumber: sequenceNumberToClient(sequence.maxNumber),
     };
   }
 
@@ -125,12 +130,15 @@ export class SequenceService {
         };
       }
 
+      const currentNumber = sequenceNumberToClient(sequence.currentNumber);
+      const maxNumber = sequenceNumberToClient(sequence.maxNumber);
+
       console.info('[electronic-invoicing.sequence] sequence.allocate_state', {
         companyId,
         branchId,
         documentTypeCode,
-        currentNumber: sequence.currentNumber,
-        endNumber: sequence.maxNumber,
+        currentNumber,
+        endNumber: maxNumber,
         status: sequence.status,
         attempt,
       });
@@ -143,17 +151,17 @@ export class SequenceService {
         };
       }
 
-      const nextNumber = sequence.currentNumber + 1;
+      const nextNumber = currentNumber + 1;
       console.info('[electronic-invoicing.sequence] sequence.allocate_next_number', {
         companyId,
         branchId,
         documentTypeCode,
-        currentNumber: sequence.currentNumber,
-        endNumber: sequence.maxNumber,
+        currentNumber,
+        endNumber: maxNumber,
         nextNumber,
       });
 
-      if (nextNumber > sequence.maxNumber) {
+      if (nextNumber > maxNumber) {
         await this.prisma.electronicSequence.update({
           where: { id: sequence.id },
           data: { status: 'EXHAUSTED' },
@@ -163,8 +171,8 @@ export class SequenceService {
           companyId,
           branchId,
           documentTypeCode,
-          currentNumber: sequence.currentNumber,
-          endNumber: sequence.maxNumber,
+          currentNumber,
+          endNumber: maxNumber,
           nextNumber,
         });
 
@@ -175,7 +183,7 @@ export class SequenceService {
         };
       }
 
-      const status = nextNumber >= sequence.maxNumber ? 'EXHAUSTED' : 'ACTIVE';
+      const status = nextNumber >= maxNumber ? 'EXHAUSTED' : 'ACTIVE';
       const updated = await this.prisma.electronicSequence.updateMany({
         where: {
           id: sequence.id,
@@ -183,7 +191,7 @@ export class SequenceService {
           status: 'ACTIVE',
         },
         data: {
-          currentNumber: nextNumber,
+          currentNumber: BigInt(nextNumber),
           status,
         },
       });
@@ -197,8 +205,8 @@ export class SequenceService {
         companyId,
         branchId,
         documentTypeCode,
-        currentNumber: sequence.currentNumber,
-        endNumber: sequence.maxNumber,
+        currentNumber,
+        endNumber: maxNumber,
         nextNumber,
         ecf,
       });

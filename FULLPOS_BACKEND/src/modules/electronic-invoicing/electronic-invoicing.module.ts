@@ -204,7 +204,13 @@ function publicBaseUrlFromRequest(req: express.Request) {
   return env.PUBLIC_BASE_URL?.trim() || `${req.protocol}://${req.get('host')}`;
 }
 
-function sequenceToClient(item: { id: number; companyId: number; branchId: number; documentTypeCode: string; prefix: string; currentNumber: number; maxNumber: number; status: string; updatedAt: Date; createdAt?: Date }) {
+function sequenceNumberToClient(value: number | bigint) {
+  return typeof value === 'bigint' ? Number(value) : value;
+}
+
+function sequenceToClient(item: { id: number; companyId: number; branchId: number; documentTypeCode: string; prefix: string; currentNumber: number | bigint; maxNumber: number | bigint; status: string; updatedAt: Date; createdAt?: Date }) {
+  const currentNumber = sequenceNumberToClient(item.currentNumber);
+  const maxNumber = sequenceNumberToClient(item.maxNumber);
   return {
     id: item.id,
     companyId: item.companyId,
@@ -212,20 +218,22 @@ function sequenceToClient(item: { id: number; companyId: number; branchId: numbe
     documentTypeCode: item.documentTypeCode,
     prefix: item.prefix,
     startNumber: 1,
-    currentNumber: item.currentNumber,
-    endNumber: item.maxNumber,
-    maxNumber: item.maxNumber,
+    currentNumber,
+    endNumber: maxNumber,
+    maxNumber,
     status: item.status,
     updatedAt: item.updatedAt,
   };
 }
 
-function sequenceIsReady(sequence: { prefix: string; documentTypeCode: string; currentNumber: number; maxNumber: number; status: string } | undefined) {
+function sequenceIsReady(sequence: { prefix: string; documentTypeCode: string; currentNumber: number | bigint; maxNumber: number | bigint; status: string } | undefined) {
   if (!sequence) return false;
+  const currentNumber = sequenceNumberToClient(sequence.currentNumber);
+  const maxNumber = sequenceNumberToClient(sequence.maxNumber);
   return sequence.status === 'ACTIVE' &&
     sequence.prefix === `E${sequence.documentTypeCode}` &&
-    sequence.currentNumber >= 0 &&
-    sequence.maxNumber > sequence.currentNumber;
+    currentNumber >= 0 &&
+    maxNumber > currentNumber;
 }
 
 async function buildResolvedConfigPayload(company: Awaited<ReturnType<ElectronicInvoicingMapperService['resolveCompanyOrThrow']>>, branchId: number) {
