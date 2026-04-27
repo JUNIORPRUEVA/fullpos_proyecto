@@ -89,6 +89,11 @@ const sequenceStatusSchema = z.preprocess(
   z.enum(['ACTIVE', 'PAUSED', 'EXHAUSTED', 'INACTIVE']),
 );
 
+const optionalSequenceLimitSchema = z.preprocess(
+  (value) => value == null || String(value).trim() === '' ? undefined : value,
+  z.coerce.number().int().positive().optional(),
+);
+
 const requirePosLocators = (data: {
   companyRnc?: string | undefined;
   companyCloudId?: string | undefined;
@@ -150,8 +155,8 @@ const posSequenceByRncSchema = z.object({
     prefix: z.string().trim().optional(),
     startNumber: z.coerce.number().int().min(1).optional().default(1),
     currentNumber: z.coerce.number().int().min(0).optional().default(0),
-    maxNumber: z.coerce.number().int().positive().optional(),
-    endNumber: z.coerce.number().int().positive().optional(),
+    maxNumber: optionalSequenceLimitSchema,
+    endNumber: optionalSequenceLimitSchema,
   status: sequenceStatusSchema.optional().default('ACTIVE'),
   })
   .strict()
@@ -218,9 +223,9 @@ function sequenceNumberToClient(value: number | bigint) {
   return typeof value === 'bigint' ? Number(value) : value;
 }
 
-function sequenceToClient(item: { id: number; companyId: number; branchId: number; documentTypeCode: string; prefix: string; currentNumber: number | bigint; maxNumber: number | bigint; status: string; updatedAt: Date; createdAt?: Date }) {
+function sequenceToClient(item: { id: number; companyId: number; branchId: number; documentTypeCode: string; prefix: string; currentNumber: number | bigint; maxNumber?: number | bigint; endNumber?: number | bigint; status: string; updatedAt: Date; createdAt?: Date }) {
   const currentNumber = sequenceNumberToClient(item.currentNumber);
-  const maxNumber = sequenceNumberToClient(item.maxNumber);
+  const maxNumber = sequenceNumberToClient((item.maxNumber ?? item.endNumber) as number | bigint);
   return {
     id: item.id,
     companyId: item.companyId,
@@ -237,10 +242,10 @@ function sequenceToClient(item: { id: number; companyId: number; branchId: numbe
   };
 }
 
-function sequenceIsReady(sequence: { prefix: string; documentTypeCode: string; currentNumber: number | bigint; maxNumber: number | bigint; status: string } | undefined) {
+function sequenceIsReady(sequence: { prefix: string; documentTypeCode: string; currentNumber: number | bigint; maxNumber?: number | bigint; endNumber?: number | bigint; status: string } | undefined) {
   if (!sequence) return false;
   const currentNumber = sequenceNumberToClient(sequence.currentNumber);
-  const maxNumber = sequenceNumberToClient(sequence.maxNumber);
+  const maxNumber = sequenceNumberToClient((sequence.maxNumber ?? sequence.endNumber) as number | bigint);
   return sequence.status === 'ACTIVE' &&
     sequence.prefix === `E${sequence.documentTypeCode}` &&
     currentNumber >= 0 &&
@@ -688,6 +693,13 @@ posElectronicInvoicingRouter.post(
         resolvedCompanyId: company.id,
         branchId: dto.branchId,
         documentTypeCode: dto.documentTypeCode,
+        prefix: dto.prefix ?? null,
+        startNumber: dto.startNumber,
+        currentNumber: dto.currentNumber,
+        endNumber: dto.endNumber ?? null,
+        maxNumber: dto.maxNumber ?? null,
+        resolvedEndNumber: dto.endNumber ?? dto.maxNumber ?? null,
+        status: dto.status,
       });
       const sequence = await electronicInvoicingService.upsertSequence(company.id, dto, 'fullpos_pos', req.requestId);
       res.status(201).json({ ok: true, sequence });

@@ -10,14 +10,19 @@ const sequenceStatusSchema = z.preprocess(
   z.enum(['ACTIVE', 'PAUSED', 'EXHAUSTED', 'INACTIVE']),
 );
 
+const optionalSequenceLimitSchema = z.preprocess(
+  (value) => value == null || String(value).trim() === '' ? undefined : value,
+  z.coerce.number().int().positive().optional(),
+);
+
 export const createSequenceDtoSchema = z.object({
   branchId: z.coerce.number().int().min(0).optional().default(0),
   documentTypeCode: documentTypeCodeSchema,
   prefix: z.string().trim().optional(),
   startNumber: z.coerce.number().int().min(1).optional().default(1),
   currentNumber: z.coerce.number().int().min(0).optional().default(0),
-  maxNumber: z.coerce.number().int().positive().optional(),
-  endNumber: z.coerce.number().int().positive().optional(),
+  maxNumber: optionalSequenceLimitSchema,
+  endNumber: optionalSequenceLimitSchema,
   status: sequenceStatusSchema.optional().default('ACTIVE'),
 }).superRefine((data, ctx) => {
   const expectedPrefix = `E${data.documentTypeCode}`;
@@ -30,14 +35,7 @@ export const createSequenceDtoSchema = z.object({
   }
 
   const endNumber = data.endNumber ?? data.maxNumber;
-  if (endNumber == null) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['endNumber'],
-      message: 'El límite autorizado es requerido',
-    });
-    return;
-  }
+  if (endNumber == null) return;
   if (endNumber <= data.currentNumber) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

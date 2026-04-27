@@ -7,6 +7,35 @@ function sequenceNumberToClient(value: number | bigint) {
   return typeof value === 'bigint' ? Number(value) : value;
 }
 
+function resolveSequenceRangeEndNumber(dto: Pick<CreateSequenceDto, 'endNumber' | 'maxNumber'>) {
+  const raw = dto.endNumber ?? dto.maxNumber;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw {
+      status: 400,
+      message: 'Debe indicar el límite final de la secuencia.',
+      errorCode: 'SEQUENCE_END_NUMBER_REQUIRED',
+      details: {
+        endNumber: dto.endNumber ?? null,
+        maxNumber: dto.maxNumber ?? null,
+      },
+    };
+  }
+
+  return value;
+}
+
+function sequenceRangeEndField(): 'endNumber' | 'maxNumber' {
+  const model = Prisma.dmmf.datamodel.models.find((item) => item.name === 'ElectronicSequence');
+  const fieldNames = new Set((model?.fields ?? []).map((field) => field.name));
+  return fieldNames.has('endNumber') ? 'endNumber' : 'maxNumber';
+}
+
+function sequenceRangeEndNumber(sequence: Record<string, unknown>) {
+  const raw = sequence.endNumber ?? sequence.maxNumber;
+  return sequenceNumberToClient(raw as number | bigint);
+}
+
 function isSequenceRangeStorageError(error: unknown) {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     return error.code === 'P2020' || error.code === 'P2033';
@@ -52,13 +81,14 @@ function sequenceToClient(sequence: {
   documentTypeCode: string;
   prefix: string;
   currentNumber: number | bigint;
-  maxNumber: number | bigint;
+  maxNumber?: number | bigint;
+  endNumber?: number | bigint;
   status: string;
   createdAt?: Date;
   updatedAt?: Date;
 }, startNumber = 1) {
   const currentNumber = sequenceNumberToClient(sequence.currentNumber);
-  const maxNumber = sequenceNumberToClient(sequence.maxNumber);
+  const endNumber = sequenceRangeEndNumber(sequence as Record<string, unknown>);
   return {
     id: sequence.id,
     companyId: sequence.companyId,
@@ -67,10 +97,10 @@ function sequenceToClient(sequence: {
     prefix: sequence.prefix,
     startNumber,
     currentNumber,
-    endNumber: maxNumber,
-    maxNumber,
+    endNumber,
+    maxNumber: endNumber,
     status: sequence.status,
-    remaining: Math.max(0, maxNumber - currentNumber),
+    remaining: Math.max(0, endNumber - currentNumber),
     createdAt: sequence.createdAt,
     updatedAt: sequence.updatedAt,
   };
@@ -84,15 +114,8 @@ export class SequenceService {
 
   async upsertSequence(companyId: number, dto: CreateSequenceDto, username: string, requestId?: string) {
     const prefix = `E${dto.documentTypeCode}`;
-    const endNumber = dto.endNumber ?? dto.maxNumber;
-
-    if (!endNumber) {
-      throw {
-        status: 400,
-        message: 'El límite autorizado de la secuencia es requerido',
-        errorCode: 'SEQUENCE_LIMIT_INVALID',
-      };
-    }
+    const endNumber = resolveSequenceRangeEndNumber(dto);
+    const rangeEndField = sequenceRangeEndField();
 
     if (dto.prefix && dto.prefix.trim().toUpperCase() !== prefix) {
       throw {
@@ -132,8 +155,25 @@ export class SequenceService {
       const existingCurrent = existing ? sequenceNumberToClient(existing.currentNumber) : 0;
       const safeCurrentNumber = Math.max(existingCurrent, dto.currentNumber);
       const status = safeCurrentNumber >= endNumber ? 'EXHAUSTED' : dto.status;
+      const rangeEndData = { [rangeEndField]: BigInt(endNumber) };
 
-      sequence = await this.prisma.electronicSequence.upsert({
+      console.info('[electronic-invoicing.sequence] sequence.upsert_payload', {
+        requestId,
+        companyId,
+        branchId: dto.branchId,
+        documentTypeCode: dto.documentTypeCode,
+        prefix,
+        startNumber: dto.startNumber,
+        currentNumber: dto.currentNumber,
+        safeCurrentNumber,
+        endNumber: dto.endNumber ?? null,
+        maxNumber: dto.maxNumber ?? null,
+        resolvedEndNumber: endNumber,
+        prismaRangeEndField: rangeEndField,
+        status,
+      });
+
+      sequence = await (this.prisma.electronicSequence as any).upsert({
         where: {
           companyId_branchId_documentTypeCode: {
             companyId,
@@ -144,7 +184,7 @@ export class SequenceService {
         update: {
           prefix,
           currentNumber: BigInt(safeCurrentNumber),
-          maxNumber: BigInt(endNumber),
+          ...rangeEndData,
           status,
         },
         create: {
@@ -153,7 +193,7 @@ export class SequenceService {
           documentTypeCode: dto.documentTypeCode,
           prefix,
           currentNumber: BigInt(safeCurrentNumber),
-          maxNumber: BigInt(endNumber),
+          ...rangeEndData,
           status,
         },
       });
@@ -230,7 +270,7 @@ export class SequenceService {
       }
 
       const currentNumber = sequenceNumberToClient(sequence.currentNumber);
-      const maxNumber = sequenceNumberToClient(sequence.maxNumber);
+      const maxNumber = sequenceRangeEndNumber(sequence as unknown as Record<string, unknown>);
 
       console.info('[electronic-invoicing.sequence] sequence.allocate_state', {
         companyId,

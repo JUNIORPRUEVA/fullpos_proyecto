@@ -120,6 +120,73 @@ test('SequenceService upserts sequence using endNumber as maxNumber and preserve
   assert.equal(auditEvents[0]?.payload.currentNumber, 30);
 });
 
+test('SequenceService rejects missing endNumber before Prisma upsert', async () => {
+  let upsertCalled = false;
+  const prisma = {
+    electronicSequence: {
+      async upsert() {
+        upsertCalled = true;
+        return {};
+      },
+    },
+  };
+  const service = new SequenceService(prisma as any, { log: async () => undefined } as any);
+  const dto = createSequenceDtoSchema.parse({
+    documentTypeCode: '32',
+    prefix: 'E32',
+    startNumber: 31,
+    currentNumber: 30,
+    status: 'ACTIVE',
+  });
+
+  await assert.rejects(
+    service.upsertSequence(4, dto, 'fullpos_pos', 'req-missing-end'),
+    (error: any) => error?.errorCode === 'SEQUENCE_END_NUMBER_REQUIRED' && error?.status === 400,
+  );
+  assert.equal(upsertCalled, false);
+});
+
+test('SequenceService accepts maxNumber fallback when endNumber is absent', async () => {
+  let upsertInput: any;
+  const prisma = {
+    electronicSequence: {
+      async findUnique() {
+        return null;
+      },
+      async upsert(input: any) {
+        upsertInput = input;
+        return {
+          id: 3,
+          companyId: 4,
+          branchId: 0,
+          documentTypeCode: '34',
+          prefix: 'E34',
+          currentNumber: input.create.currentNumber,
+          maxNumber: input.create.maxNumber,
+          status: input.create.status,
+          createdAt: new Date('2026-04-26T00:00:00.000Z'),
+          updatedAt: new Date('2026-04-26T00:00:00.000Z'),
+        };
+      },
+    },
+  };
+  const service = new SequenceService(prisma as any, { log: async () => undefined } as any);
+  const dto = createSequenceDtoSchema.parse({
+    documentTypeCode: '34',
+    prefix: 'E34',
+    startNumber: 1,
+    currentNumber: 0,
+    maxNumber: 60,
+    status: 'ACTIVE',
+  });
+
+  const saved = await service.upsertSequence(4, dto, 'fullpos_pos', 'req-max-fallback');
+
+  assert.equal(upsertInput.create.maxNumber, 60n);
+  assert.equal(saved.endNumber, 60);
+  assert.equal(saved.remaining, 60);
+});
+
 test('SequenceService maps schema mismatch errors to migration-required sequence error', async () => {
   const prisma = {
     electronicSequence: {
