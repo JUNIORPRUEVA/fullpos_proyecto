@@ -209,3 +209,30 @@ test('SequenceService maps schema mismatch errors to migration-required sequence
     (error: any) => error?.errorCode === 'ELECTRONIC_SEQUENCE_SCHEMA_MISMATCH' && error?.status === 503,
   );
 });
+
+test('SequenceService maps legacy endNumber null constraint to migration-required sequence error', async () => {
+  const prisma = {
+    electronicSequence: {
+      async findUnique() {
+        return null;
+      },
+      async upsert() {
+        throw new Error('Null constraint violation on the fields: (`endNumber`)');
+      },
+    },
+  };
+  const service = new SequenceService(prisma as any, { log: async () => undefined } as any);
+  const dto = createSequenceDtoSchema.parse({
+    documentTypeCode: '32',
+    prefix: 'E32',
+    startNumber: 31,
+    currentNumber: 30,
+    endNumber: 60,
+    status: 'ACTIVE',
+  });
+
+  await assert.rejects(
+    service.upsertSequence(4, dto, 'fullpos_pos', 'req-legacy-endnumber'),
+    (error: any) => error?.errorCode === 'ELECTRONIC_SEQUENCE_SCHEMA_MISMATCH' && error?.status === 503,
+  );
+});

@@ -50,7 +50,13 @@ function isSequenceRangeStorageError(error: unknown) {
 
 function isSequenceSchemaMismatchError(error: unknown) {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    return error.code === 'P2021' || error.code === 'P2022';
+    if (error.code === 'P2021' || error.code === 'P2022') {
+      return true;
+    }
+    if (error.code === 'P2011') {
+      const meta = JSON.stringify(error.meta ?? {}).toLowerCase();
+      return meta.includes('endnumber') || meta.includes('maxnumber');
+    }
   }
 
   if (error instanceof Prisma.PrismaClientValidationError) {
@@ -59,6 +65,7 @@ function isSequenceSchemaMismatchError(error: unknown) {
 
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return message.includes('column') && message.includes('does not exist') ||
+    message.includes('null constraint violation') && (message.includes('endnumber') || message.includes('maxnumber')) ||
     message.includes('unknown argument') ||
     message.includes('invalid field') ||
     message.includes('maxnumber') && message.includes('does not exist') ||
