@@ -132,3 +132,151 @@ test('DgiiAuthService falls back to legacy env token when automatic auth endpoin
   assert.equal(token, 'legacy-precert-token');
 
 });
+
+test('DgiiAuthService debug auth maps DGII seed validation diagnostics without exposing token', async () => {
+  const service = new DgiiAuthService(
+    {
+      electronicCertificate: {
+        async findFirst() {
+          return {
+            status: 'ACTIVE',
+            validFrom: new Date(Date.now() - 60_000),
+            validTo: new Date(Date.now() + 60_000),
+          };
+        },
+      },
+    } as any,
+    {
+      async resolveCompanyOrThrow() {
+        return { id: 4, rnc: '133080206', cloudCompanyId: 'fp-mnuoujbs-rmt12y', name: 'Fulltech, srl' };
+      },
+    } as any,
+    {} as any,
+    {} as any,
+    {
+      getEnvironmentConfig() {
+        return {
+          environment: 'precertification',
+          authSeedUrl: 'https://dgii.example/semilla',
+          authValidateUrl: 'https://dgii.example/validarsemilla',
+          submitUrl: 'https://dgii.example/recepcion',
+          resultUrlTemplate: 'https://dgii.example/result/{trackId}',
+          timeoutMs: 1000,
+          maxRetries: 0,
+          userAgent: 'FULLPOS-Test',
+        };
+      },
+    } as any,
+  );
+
+  service.getCompanyBearerTokenWithMeta = async () => {
+    throw {
+      status: 400,
+      message: 'La estructura del archivo XML no es válido',
+      errorCode: 'DGII_SEED_VALIDATE_BAD_REQUEST',
+      details: {
+        httpStatus: 400,
+        payloadMode: 'multipart',
+        fieldName: 'xml',
+        requestContentType: 'multipart/form-data',
+        raw: { errores: ["The 'Id' attribute is not declared."] },
+        signedXmlRoot: 'SemillaModel',
+        signedXmlHasSignature: true,
+        signedXmlHasIdAttributeOnRoot: false,
+        signatureReferenceUri: '',
+        canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+        signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+        digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+        signedXmlSize: 3900,
+      },
+    };
+  };
+
+  const result = await service.debugAuthenticateByLocators({
+    companyRnc: '133080206',
+    companyCloudId: 'fp-mnuoujbs-rmt12y',
+    environment: 'precertification',
+    forceRefresh: true,
+  });
+
+  assert.equal(result.seedOk, true);
+  assert.equal(result.signOk, true);
+  assert.equal(result.validateOk, false);
+  assert.equal(result.tokenFound, false);
+  assert.equal(result.errorCode, 'DGII_SEED_VALIDATE_BAD_REQUEST');
+  assert.equal(result.signedXmlRoot, 'SemillaModel');
+  assert.equal(result.signedXmlHasSignature, true);
+  assert.equal(result.signedXmlHasIdAttributeOnRoot, false);
+  assert.equal(result.signatureReferenceUri, '');
+  assert.equal(result.validatePayloadMode, 'multipart');
+  assert.equal(result.validateFieldName, 'xml');
+  assert.equal(result.validateContentType, 'multipart/form-data');
+  assert.equal(Object.prototype.hasOwnProperty.call(result, 'token'), false);
+  assert.equal(JSON.stringify(result).includes('full-token'), false);
+});
+
+test('DgiiAuthService debug auth success reports tokenFound without returning token value', async () => {
+  const service = new DgiiAuthService(
+    {
+      electronicCertificate: {
+        async findFirst() {
+          return {
+            status: 'ACTIVE',
+            validFrom: new Date(Date.now() - 60_000),
+            validTo: new Date(Date.now() + 60_000),
+          };
+        },
+      },
+    } as any,
+    {
+      async resolveCompanyOrThrow() {
+        return { id: 4, rnc: '133080206', cloudCompanyId: 'fp-mnuoujbs-rmt12y', name: 'Fulltech, srl' };
+      },
+    } as any,
+    {} as any,
+    {} as any,
+    {
+      getEnvironmentConfig() {
+        return {
+          environment: 'precertification',
+          authSeedUrl: 'https://dgii.example/semilla',
+          authValidateUrl: 'https://dgii.example/validarsemilla',
+          submitUrl: 'https://dgii.example/recepcion',
+          resultUrlTemplate: 'https://dgii.example/result/{trackId}',
+          timeoutMs: 1000,
+          maxRetries: 0,
+          userAgent: 'FULLPOS-Test',
+        };
+      },
+    } as any,
+  );
+
+  service.getCompanyBearerTokenWithMeta = async () => ({
+    token: 'full-token-value-that-must-not-leak',
+    source: 'auto',
+    meta: {
+      signedXmlRoot: 'SemillaModel',
+      signedXmlHasSignature: true,
+      signedXmlHasIdAttributeOnRoot: false,
+      signatureReferenceUri: '',
+      canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+      signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+      digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+      payloadMode: 'multipart',
+      fieldName: 'xml',
+      requestContentType: 'multipart/form-data',
+    },
+  });
+
+  const result = await service.debugAuthenticateByLocators({ companyRnc: '133080206' });
+
+  assert.equal(result.validateOk, true);
+  assert.equal(result.tokenFound, true);
+  assert.equal(result.tokenSource, 'auto');
+  assert.equal(result.signedXmlRoot, 'SemillaModel');
+  assert.equal(result.signedXmlHasIdAttributeOnRoot, false);
+  assert.equal(result.signatureReferenceUri, '');
+  assert.equal(result.validatePayloadMode, 'multipart');
+  assert.equal(Object.prototype.hasOwnProperty.call(result, 'token'), false);
+  assert.equal(JSON.stringify(result).includes('full-token-value-that-must-not-leak'), false);
+});

@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import env from '../../../config/env';
-import { DgiiSignatureService } from './dgii-signature.service';
+import { DgiiSignatureService, SignedXmlDiagnostics } from './dgii-signature.service';
 import { ElectronicInvoicingAuditService } from './electronic-invoicing-audit.service';
 import { ElectronicInvoicingMapperService } from './electronic-invoicing-mapper.service';
 import { DgiiDirectoryService } from './dgii-directory.service';
@@ -101,7 +101,18 @@ type ValidateSeedMeta = {
   rawTextSummary: string | null;
   signedXmlRoot: string | null;
   signedXmlHasSignature: boolean;
+  signedXmlHasIdAttributeOnRoot: boolean;
+  signatureReferenceUri: string | null;
+  canonicalizationAlgorithm: string | null;
+  signatureAlgorithm: string | null;
+  digestAlgorithm: string | null;
   signedXmlSize: number;
+};
+
+type DgiiBearerTokenResult = {
+  token: string;
+  source: DgiiTokenSource;
+  meta?: Partial<ValidateSeedMeta>;
 };
 
 function extractXmlRootName(rawText: string | null) {
@@ -388,7 +399,7 @@ export class DgiiAuthService {
     environment: DgiiEnvironment,
     requestId?: string,
     options?: { forceRefresh?: boolean; manualToken?: string },
-  ): Promise<{ token: string; source: DgiiTokenSource }> {
+  ): Promise<DgiiBearerTokenResult> {
     const manualToken = options?.manualToken?.trim();
     if (manualToken) {
       return { token: manualToken, source: 'manual' };
@@ -444,7 +455,7 @@ export class DgiiAuthService {
     const seedRootBefore = extractXmlRootName(seedResponse.seedXml);
     let signedSeedXml = '';
     try {
-      signedSeedXml = this.signatureService.signXml(seedResponse.seedXml, loaded.privateKeyPem, loaded.certPem);
+      signedSeedXml = this.signatureService.signSeedXml(seedResponse.seedXml, loaded.privateKeyPem, loaded.certPem);
     } catch (error) {
       throw {
         status: 502,
@@ -462,6 +473,7 @@ export class DgiiAuthService {
 
     const seedRootAfter = extractXmlRootName(signedSeedXml);
     const signedXmlValidation = validateSignedSeedXmlForDgii(signedSeedXml);
+    const signedXmlDiagnostics = this.signatureService.inspectSignedXml(signedXmlValidation.signedXml);
     console.info('[electronic-invoicing.dgii.auth] seed.signed', {
       requestId,
       companyId,
@@ -472,6 +484,11 @@ export class DgiiAuthService {
       rootAfter: seedRootAfter,
       signedXmlSize: signedXmlValidation.signedXmlSize,
       containsSignature: signedXmlValidation.signedXmlHasSignature,
+      signedXmlHasIdAttributeOnRoot: signedXmlDiagnostics.signedXmlHasIdAttributeOnRoot,
+      signatureReferenceUri: signedXmlDiagnostics.signatureReferenceUri,
+      canonicalizationAlgorithm: signedXmlDiagnostics.canonicalizationAlgorithm,
+      signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
+      digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
     });
 
     const validated = await this.validateDgiiSeed(
@@ -497,6 +514,11 @@ export class DgiiAuthService {
       tokenFound: !!validated.token,
       signedXmlRoot: validated.meta.signedXmlRoot,
       signedXmlHasSignature: validated.meta.signedXmlHasSignature,
+      signedXmlHasIdAttributeOnRoot: validated.meta.signedXmlHasIdAttributeOnRoot,
+      signatureReferenceUri: validated.meta.signatureReferenceUri,
+      canonicalizationAlgorithm: validated.meta.canonicalizationAlgorithm,
+      signatureAlgorithm: validated.meta.signatureAlgorithm,
+      digestAlgorithm: validated.meta.digestAlgorithm,
       signedXmlSize: validated.meta.signedXmlSize,
       expiresAt: validated.expiresAt.toISOString(),
     });
@@ -533,7 +555,7 @@ export class DgiiAuthService {
       requestId,
     });
 
-    return { token: validated.token, source: 'auto' };
+    return { token: validated.token, source: 'auto', meta: validated.meta };
   }
 
   private async requestDgiiSeed(
@@ -706,6 +728,7 @@ export class DgiiAuthService {
     signedSeedXml: string,
   ): Promise<{ token: string; issuedAt: Date; expiresAt: Date; validatedAt: Date; meta: ValidateSeedMeta }> {
     const validatedXml = validateSignedSeedXmlForDgii(signedSeedXml);
+    const signedXmlDiagnostics: SignedXmlDiagnostics = this.signatureService.inspectSignedXml(validatedXml.signedXml);
 
     const validateUrls = buildValidateUrlCandidates(url);
 
@@ -750,8 +773,13 @@ export class DgiiAuthService {
             httpStatus: response.status,
             responseContentType: response.headers.get('content-type') ?? '',
             rawTextSummary: summarizeRawText(rawText),
-            signedXmlRoot: validatedXml.signedXmlRoot,
-            signedXmlHasSignature: validatedXml.signedXmlHasSignature,
+            signedXmlRoot: signedXmlDiagnostics.signedXmlRoot ?? validatedXml.signedXmlRoot,
+            signedXmlHasSignature: signedXmlDiagnostics.signedXmlHasSignature,
+            signedXmlHasIdAttributeOnRoot: signedXmlDiagnostics.signedXmlHasIdAttributeOnRoot,
+            signatureReferenceUri: signedXmlDiagnostics.signatureReferenceUri,
+            canonicalizationAlgorithm: signedXmlDiagnostics.canonicalizationAlgorithm,
+            signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
+            digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
             signedXmlSize: validatedXml.signedXmlSize,
           } satisfies ValidateSeedMeta,
         };
@@ -807,6 +835,11 @@ export class DgiiAuthService {
             tokenFound: !!result.token,
             signedXmlRoot: result.meta.signedXmlRoot,
             signedXmlHasSignature: result.meta.signedXmlHasSignature,
+            signedXmlHasIdAttributeOnRoot: result.meta.signedXmlHasIdAttributeOnRoot,
+            signatureReferenceUri: result.meta.signatureReferenceUri,
+            canonicalizationAlgorithm: result.meta.canonicalizationAlgorithm,
+            signatureAlgorithm: result.meta.signatureAlgorithm,
+            digestAlgorithm: result.meta.digestAlgorithm,
             signedXmlSize: result.meta.signedXmlSize,
             rawTextSummary: result.meta.rawTextSummary,
           });
@@ -847,6 +880,11 @@ export class DgiiAuthService {
               rawTextSummary: result.meta.rawTextSummary,
               signedXmlRoot: result.meta.signedXmlRoot,
               signedXmlHasSignature: result.meta.signedXmlHasSignature,
+              signedXmlHasIdAttributeOnRoot: result.meta.signedXmlHasIdAttributeOnRoot,
+              signatureReferenceUri: result.meta.signatureReferenceUri,
+              canonicalizationAlgorithm: result.meta.canonicalizationAlgorithm,
+              signatureAlgorithm: result.meta.signatureAlgorithm,
+              digestAlgorithm: result.meta.digestAlgorithm,
               signedXmlSize: result.meta.signedXmlSize,
             },
           };
@@ -902,6 +940,11 @@ export class DgiiAuthService {
         rawTextSummary: (error as any)?.details?.rawTextSummary ?? null,
         signedXmlRoot: (error as any)?.details?.signedXmlRoot ?? null,
         signedXmlHasSignature: (error as any)?.details?.signedXmlHasSignature ?? null,
+        signedXmlHasIdAttributeOnRoot: (error as any)?.details?.signedXmlHasIdAttributeOnRoot ?? null,
+        signatureReferenceUri: (error as any)?.details?.signatureReferenceUri ?? null,
+        canonicalizationAlgorithm: (error as any)?.details?.canonicalizationAlgorithm ?? null,
+        signatureAlgorithm: (error as any)?.details?.signatureAlgorithm ?? null,
+        digestAlgorithm: (error as any)?.details?.digestAlgorithm ?? null,
         signedXmlSize: (error as any)?.details?.signedXmlSize ?? null,
         errorCode: (error as any)?.errorCode ?? 'DGII_TOKEN_MISSING',
         errorMessage: (error as any)?.message ?? 'DGII no devolvió token válido',
@@ -956,6 +999,16 @@ export class DgiiAuthService {
       validateFieldName?: ValidateSeedMeta['fieldName'];
       validateContentType?: string;
       validateRawResponse?: unknown;
+      signedXmlRoot?: string | null;
+      signedXmlHasSignature?: boolean;
+      signedXmlHasIdAttributeOnRoot?: boolean;
+      signatureReferenceUri?: string | null;
+      canonicalizationAlgorithm?: string | null;
+      signatureAlgorithm?: string | null;
+      digestAlgorithm?: string | null;
+      validatePayloadMode?: ValidateSeedMeta['payloadMode'];
+      tokenPreview?: never;
+      token?: never;
     } = {
       companyResolved: true,
       companyId: company.id,
@@ -985,6 +1038,16 @@ export class DgiiAuthService {
       out.tokenFound = !!tokenResult.token;
       out.tokenSource = tokenResult.source;
       out.httpStatus = 200;
+      out.signedXmlRoot = tokenResult.meta?.signedXmlRoot ?? undefined;
+      out.signedXmlHasSignature = tokenResult.meta?.signedXmlHasSignature ?? undefined;
+      out.signedXmlHasIdAttributeOnRoot = tokenResult.meta?.signedXmlHasIdAttributeOnRoot ?? undefined;
+      out.signatureReferenceUri = tokenResult.meta?.signatureReferenceUri ?? undefined;
+      out.canonicalizationAlgorithm = tokenResult.meta?.canonicalizationAlgorithm ?? undefined;
+      out.signatureAlgorithm = tokenResult.meta?.signatureAlgorithm ?? undefined;
+      out.digestAlgorithm = tokenResult.meta?.digestAlgorithm ?? undefined;
+      out.validatePayloadMode = tokenResult.meta?.payloadMode ?? undefined;
+      out.validateFieldName = tokenResult.meta?.fieldName ?? undefined;
+      out.validateContentType = tokenResult.meta?.requestContentType ?? undefined;
       return out;
     } catch (error) {
       const details = ((error as any)?.details ?? null) as Record<string, unknown> | null;
@@ -997,6 +1060,14 @@ export class DgiiAuthService {
       out.signedXmlSize = (details?.signedXmlSize as number | undefined) ?? undefined;
       out.validateFieldName = (details?.fieldName as ValidateSeedMeta['fieldName'] | undefined) ?? undefined;
       out.validateContentType = (details?.requestContentType as string | undefined) ?? undefined;
+      out.signedXmlRoot = (details?.signedXmlRoot as string | null | undefined) ?? undefined;
+      out.signedXmlHasSignature = (details?.signedXmlHasSignature as boolean | undefined) ?? undefined;
+      out.signedXmlHasIdAttributeOnRoot = (details?.signedXmlHasIdAttributeOnRoot as boolean | undefined) ?? undefined;
+      out.signatureReferenceUri = (details?.signatureReferenceUri as string | null | undefined) ?? undefined;
+      out.canonicalizationAlgorithm = (details?.canonicalizationAlgorithm as string | null | undefined) ?? undefined;
+      out.signatureAlgorithm = (details?.signatureAlgorithm as string | null | undefined) ?? undefined;
+      out.digestAlgorithm = (details?.digestAlgorithm as string | null | undefined) ?? undefined;
+      out.validatePayloadMode = (details?.payloadMode as ValidateSeedMeta['payloadMode'] | undefined) ?? undefined;
       out.validateRawResponse = details?.raw ?? details?.rawTextSummary ?? null;
 
       const errorCode = out.errorCode ?? '';
