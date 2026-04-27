@@ -52,6 +52,35 @@ function isMultipartRequest(req: Request) {
   return typeof contentType === 'string' && contentType.toLowerCase().includes('multipart/form-data');
 }
 
+function hasOverrideCredential(req: Request) {
+  return typeof req.headers['x-cloud-key'] === 'string' || typeof req.headers['x-override-key'] === 'string';
+}
+
+function safeCertificateUploadDetails(req: Request, stage: string) {
+  const requestWithFile = req as Request & {
+    file?: {
+      originalname: string;
+      mimetype: string;
+      size: number;
+    };
+  };
+  const extension = path.extname(requestWithFile.file?.originalname || '').toLowerCase() || null;
+  return {
+    stage,
+    requestId: req.requestId ?? null,
+    hasCloudKey: typeof req.headers['x-cloud-key'] === 'string',
+    hasOverrideKey: typeof req.headers['x-override-key'] === 'string',
+    hasAuthorization: typeof req.headers.authorization === 'string',
+    hasFile: !!requestWithFile.file,
+    extension,
+    mimetype: requestWithFile.file?.mimetype ?? null,
+    size: requestWithFile.file?.size ?? null,
+    hasCompanyId: typeof req.body?.companyId !== 'undefined',
+    hasCompanyRnc: typeof req.body?.companyRnc === 'string' && req.body.companyRnc.trim().length > 0,
+    hasCompanyCloudId: typeof req.body?.companyCloudId === 'string' && req.body.companyCloudId.trim().length > 0,
+  };
+}
+
 export const uploadElectronicCertificate = certificateUpload.single('file');
 
 export const electronicCertificateAccessGuard: RequestHandler = (
@@ -59,7 +88,7 @@ export const electronicCertificateAccessGuard: RequestHandler = (
   res: Response,
   next: NextFunction,
 ) => {
-  if (typeof req.headers['x-cloud-key'] === 'string') {
+  if (hasOverrideCredential(req)) {
     return overrideKeyGuard(req, res, next);
   }
   return authGuard(req, res, next);
@@ -92,6 +121,7 @@ export const validateCreateCertificateRequest: RequestHandler = (
       return res.status(400).json({
         message: 'Archivo .p12 requerido',
         errorCode: 'ELECTRONIC_CERTIFICATE_FILE_REQUIRED',
+        details: safeCertificateUploadDetails(req, 'validate_file'),
       });
     }
 
@@ -100,6 +130,7 @@ export const validateCreateCertificateRequest: RequestHandler = (
       return res.status(400).json({
         message: 'Archivo de certificado inválido. Se requiere .p12 o .pfx',
         errorCode: 'ELECTRONIC_CERTIFICATE_INVALID_FILE',
+        details: safeCertificateUploadDetails(req, 'validate_extension'),
       });
     }
 
@@ -148,10 +179,21 @@ export function createElectronicInvoicingAdminController(service: ElectronicInvo
 
     createCertificate: async (req: Request, res: Response) => {
       const dto = req.body as RegisterCertificateDto;
-      const companyId = req.user?.companyId ?? await service.resolveCertificateCompanyId(dto);
-      const username = req.user?.username ?? dto.uploadedBy?.trim() ?? 'fullpos_pos';
-      const certificate = await service.registerCertificate(companyId, dto, username, req.requestId);
-      res.status(201).json(certificate);
+      try {
+        const companyId = req.user?.companyId ?? await service.resolveCertificateCompanyId(dto);
+        const username = req.user?.username ?? dto.uploadedBy?.trim() ?? 'fullpos_pos';
+        const certificate = await service.registerCertificate(companyId, dto, username, req.requestId);
+        res.status(201).json(certificate);
+      } catch (error) {
+        const err = error as any;
+        if (err && typeof err === 'object') {
+          err.details = {
+            ...safeCertificateUploadDetails(req, err.errorCode === 'ELECTRONIC_CERTIFICATE_COMPANY_REQUIRED' ? 'resolve_company' : 'register_certificate'),
+            ...(err.details ?? {}),
+          };
+        }
+        throw error;
+      }
     },
 
     generateOutbound: async (req: Request, res: Response) => {

@@ -76,6 +76,26 @@ function summarizeRawText(rawText: string | null, maxLength = 400) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
 }
 
+function classifyDgiiSeedValidationFailure(
+  message: string,
+  diagnostics: Partial<ValidateSeedMeta>,
+) {
+  const normalized = message.toLowerCase();
+  if (diagnostics.signedXmlHasIdAttributeOnRoot || (diagnostics.signatureReferenceUri ?? '') !== '') {
+    return 'SEED_XML_SIGNATURE_STRUCTURE_MISMATCH';
+  }
+  if (
+    normalized.includes('firma del certificado inválida') ||
+    normalized.includes('firma del certificado invalida')
+  ) {
+    return 'DGII_CERTIFICATE_SIGNATURE_REJECTED';
+  }
+  if (normalized.includes('certificado') || normalized.includes('certificate')) {
+    return 'DGII_CERTIFICATE_VALIDATION_REJECTED';
+  }
+  return null;
+}
+
 type SeedRequestMeta = {
   authSeedUrl: string;
   methodUsed: 'POST' | 'GET';
@@ -886,6 +906,7 @@ export class DgiiAuthService {
               signatureAlgorithm: result.meta.signatureAlgorithm,
               digestAlgorithm: result.meta.digestAlgorithm,
               signedXmlSize: result.meta.signedXmlSize,
+              dgiiValidationDiagnosis: classifyDgiiSeedValidationFailure(responseMessage, result.meta),
             },
           };
 
@@ -999,6 +1020,7 @@ export class DgiiAuthService {
       validateFieldName?: ValidateSeedMeta['fieldName'];
       validateContentType?: string;
       validateRawResponse?: unknown;
+      dgiiValidationDiagnosis?: string | null;
       signedXmlRoot?: string | null;
       signedXmlHasSignature?: boolean;
       signedXmlHasIdAttributeOnRoot?: boolean;
@@ -1069,6 +1091,7 @@ export class DgiiAuthService {
       out.digestAlgorithm = (details?.digestAlgorithm as string | null | undefined) ?? undefined;
       out.validatePayloadMode = (details?.payloadMode as ValidateSeedMeta['payloadMode'] | undefined) ?? undefined;
       out.validateRawResponse = details?.raw ?? details?.rawTextSummary ?? null;
+      out.dgiiValidationDiagnosis = (details?.dgiiValidationDiagnosis as string | null | undefined) ?? undefined;
 
       const errorCode = out.errorCode ?? '';
       out.seedOk = !errorCode.includes('SEED_REQUEST');

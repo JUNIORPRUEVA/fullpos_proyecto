@@ -341,6 +341,10 @@ test('multipart electronic certificate upload returns 400 for wrong password', a
 
     assert.equal(response.status, 400);
     assert.equal(response.body.errorCode, 'CERTIFICATE_INVALID_PASSWORD');
+    assert.equal(response.body.details.stage, 'register_certificate');
+    assert.equal(response.body.details.hasAuthorization, true);
+    assert.equal(response.body.details.extension, '.p12');
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body.details, 'password'), false);
   } finally {
     cert.cleanup();
   }
@@ -389,6 +393,10 @@ test('multipart electronic certificate upload rejects invalid file extension', a
 
     assert.equal(response.status, 400);
     assert.equal(response.body.errorCode, 'ELECTRONIC_CERTIFICATE_INVALID_FILE');
+    assert.equal(response.body.details.stage, 'validate_extension');
+    assert.equal(response.body.details.extension, '.txt');
+    assert.equal(response.body.details.hasFile, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(response.body.details, 'password'), false);
   } finally {
     fs.rmSync(invalidPath, { force: true });
   }

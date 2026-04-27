@@ -188,6 +188,7 @@ test('DgiiAuthService debug auth maps DGII seed validation diagnostics without e
         signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
         digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
         signedXmlSize: 3900,
+        dgiiValidationDiagnosis: 'DGII_CERTIFICATE_SIGNATURE_REJECTED',
       },
     };
   };
@@ -211,6 +212,7 @@ test('DgiiAuthService debug auth maps DGII seed validation diagnostics without e
   assert.equal(result.validatePayloadMode, 'multipart');
   assert.equal(result.validateFieldName, 'xml');
   assert.equal(result.validateContentType, 'multipart/form-data');
+  assert.equal(result.dgiiValidationDiagnosis, 'DGII_CERTIFICATE_SIGNATURE_REJECTED');
   assert.equal(Object.prototype.hasOwnProperty.call(result, 'token'), false);
   assert.equal(JSON.stringify(result).includes('full-token'), false);
 });
