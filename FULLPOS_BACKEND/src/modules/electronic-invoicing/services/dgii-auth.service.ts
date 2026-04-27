@@ -494,12 +494,18 @@ export class DgiiAuthService {
     const seedRootAfter = extractXmlRootName(signedSeedXml);
     const signedXmlValidation = validateSignedSeedXmlForDgii(signedSeedXml);
     const signedXmlDiagnostics = this.signatureService.inspectSignedXml(signedXmlValidation.signedXml);
+    const selfVerify = this.signatureService.verifySignedXml(signedXmlValidation.signedXml);
     console.info('[electronic-invoicing.dgii.auth] seed.signed', {
       requestId,
       companyId,
       companyRnc: companyIdentity?.rnc ?? null,
       certificateAlias: certificate.alias,
+      certificateSubject: loaded.subject,
+      certificateIssuer: loaded.issuer,
+      certificateSerialNumber: loaded.serialNumber,
       certificateValidTo: loaded.validTo.toISOString(),
+      selfVerifyValid: selfVerify.valid,
+      selfVerifyErrors: selfVerify.errors,
       rootBefore: seedRootBefore,
       rootAfter: seedRootAfter,
       signedXmlSize: signedXmlValidation.signedXmlSize,
