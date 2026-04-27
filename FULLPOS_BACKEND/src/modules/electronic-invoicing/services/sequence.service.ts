@@ -66,6 +66,7 @@ function isSequenceSchemaMismatchError(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return message.includes('column') && message.includes('does not exist') ||
     message.includes('null constraint violation') && (message.includes('endnumber') || message.includes('maxnumber')) ||
+    message.includes('violates check constraint') && message.includes('electronicsequence_currentnumber_check') ||
     message.includes('unknown argument') ||
     message.includes('invalid field') ||
     message.includes('maxnumber') && message.includes('does not exist') ||
@@ -357,17 +358,44 @@ export class SequenceService {
       }
 
       const status = nextNumber >= maxNumber ? 'EXHAUSTED' : 'ACTIVE';
-      const updated = await this.prisma.electronicSequence.updateMany({
-        where: {
-          id: sequence.id,
-          currentNumber: sequence.currentNumber,
-          status: 'ACTIVE',
-        },
-        data: {
-          currentNumber: BigInt(nextNumber),
-          status,
-        },
-      });
+      const rangeEndField = sequenceRangeEndField();
+      const rangeEndData = { [rangeEndField]: BigInt(maxNumber) };
+      let updated: Awaited<ReturnType<PrismaClient['electronicSequence']['updateMany']>>;
+      try {
+        updated = await (this.prisma.electronicSequence as any).updateMany({
+          where: {
+            id: sequence.id,
+            currentNumber: sequence.currentNumber,
+            status: 'ACTIVE',
+          },
+          data: {
+            currentNumber: BigInt(nextNumber),
+            ...rangeEndData,
+            status,
+          },
+        });
+      } catch (error) {
+        if (isSequenceSchemaMismatchError(error)) {
+          throw {
+            status: 503,
+            message: 'La restricción de secuencia del backend está validando contra un límite desactualizado. Aplique las migraciones del backend y reinicie el servicio.',
+            errorCode: 'ELECTRONIC_SEQUENCE_CONSTRAINT_MISMATCH',
+            details: {
+              ...sequenceSchemaMismatchDetails(error),
+              companyId,
+              branchId,
+              selectedBranchId: sequence.branchId,
+              documentTypeCode,
+              sequenceId: sequence.id,
+              currentNumber,
+              nextNumber,
+              endNumber: maxNumber,
+              prismaRangeEndField: rangeEndField,
+            },
+          };
+        }
+        throw error;
+      }
 
       if (updated.count !== 1) {
         continue;

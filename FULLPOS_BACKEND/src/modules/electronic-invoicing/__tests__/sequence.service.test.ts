@@ -25,11 +25,14 @@ test('SequenceService allocates unique e-CF values on consecutive calls', async 
       async findUnique() {
         return { ...sequenceState };
       },
-      async updateMany(input: { where: { currentNumber: bigint }; data: { currentNumber: bigint; status: string } }) {
+      async updateMany(input: { where: { currentNumber: bigint }; data: { currentNumber: bigint; maxNumber?: bigint; status: string } }) {
         if (input.where.currentNumber !== sequenceState.currentNumber || sequenceState.status !== 'ACTIVE') {
           return { count: 0 };
         }
         sequenceState.currentNumber = input.data.currentNumber;
+        if (input.data.maxNumber != null) {
+          sequenceState.maxNumber = input.data.maxNumber;
+        }
         sequenceState.status = input.data.status;
         return { count: 1 };
       },
@@ -53,7 +56,79 @@ test('SequenceService allocates unique e-CF values on consecutive calls', async 
   assert.equal(first.ecf, 'E310000000001');
   assert.equal(second.ecf, 'E310000000002');
   assert.notEqual(first.ecf, second.ecf);
+  assert.equal(sequenceState.maxNumber, 9999999999n);
   assert.equal(auditEvents.length, 2);
+});
+
+test('SequenceService keeps range limit in allocation update to satisfy legacy currentNumber constraints', async () => {
+  const sequenceState = {
+    id: 2,
+    companyId: 4,
+    branchId: 0,
+    documentTypeCode: '32',
+    prefix: 'E32',
+    currentNumber: 30n,
+    maxNumber: 60n,
+    status: 'ACTIVE',
+  };
+  let updateManyInput: any;
+  const prisma = {
+    electronicSequence: {
+      async findUnique() {
+        return { ...sequenceState };
+      },
+      async updateMany(input: any) {
+        updateManyInput = input;
+        sequenceState.currentNumber = input.data.currentNumber;
+        sequenceState.maxNumber = input.data.maxNumber;
+        sequenceState.status = input.data.status;
+        return { count: 1 };
+      },
+      async update(input: { data: { status: string } }) {
+        sequenceState.status = input.data.status;
+        return { ...sequenceState };
+      },
+    },
+  };
+  const service = new SequenceService(prisma as any, { log: async () => undefined } as any);
+
+  const allocated = await service.allocate(4, 0, '32', 'req-e32-allocate');
+
+  assert.equal(allocated.ecf, 'E320000000031');
+  assert.equal(updateManyInput.data.currentNumber, 31n);
+  assert.equal(updateManyInput.data.maxNumber, 60n);
+  assert.equal(updateManyInput.data.status, 'ACTIVE');
+});
+
+test('SequenceService maps currentNumber check constraint failures to constraint mismatch', async () => {
+  const prisma = {
+    electronicSequence: {
+      async findUnique() {
+        return {
+          id: 2,
+          companyId: 4,
+          branchId: 0,
+          documentTypeCode: '32',
+          prefix: 'E32',
+          currentNumber: 30n,
+          maxNumber: 60n,
+          status: 'ACTIVE',
+        };
+      },
+      async updateMany() {
+        throw new Error('new row for relation "ElectronicSequence" violates check constraint "ElectronicSequence_currentNumber_check"');
+      },
+      async update(input: { data: { status: string } }) {
+        return input.data;
+      },
+    },
+  };
+  const service = new SequenceService(prisma as any, { log: async () => undefined } as any);
+
+  await assert.rejects(
+    service.allocate(4, 0, '32', 'req-e32-constraint'),
+    (error: any) => error?.errorCode === 'ELECTRONIC_SEQUENCE_CONSTRAINT_MISMATCH' && error?.status === 503,
+  );
 });
 
 test('SequenceService upserts sequence using endNumber as maxNumber and preserves existing currentNumber', async () => {
