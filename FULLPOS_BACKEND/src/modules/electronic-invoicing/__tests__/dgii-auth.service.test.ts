@@ -282,3 +282,79 @@ test('DgiiAuthService debug auth success reports tokenFound without returning to
   assert.equal(Object.prototype.hasOwnProperty.call(result, 'token'), false);
   assert.equal(JSON.stringify(result).includes('full-token-value-that-must-not-leak'), false);
 });
+
+test('DgiiAuthService debug auth returns diagnostic matrix when requested', async () => {
+  const service = new DgiiAuthService(
+    {
+      electronicCertificate: {
+        async findFirst() {
+          return {
+            status: 'ACTIVE',
+            validFrom: new Date(Date.now() - 60_000),
+            validTo: new Date(Date.now() + 60_000),
+          };
+        },
+      },
+    } as any,
+    {
+      async resolveCompanyOrThrow() {
+        return { id: 4, rnc: '133080206', cloudCompanyId: 'fp-mnuoujbs-rmt12y', name: 'Fulltech, srl' };
+      },
+    } as any,
+    {} as any,
+    {} as any,
+    {
+      getEnvironmentConfig() {
+        return {
+          environment: 'precertification',
+          authSeedUrl: 'https://dgii.example/semilla',
+          authValidateUrl: 'https://dgii.example/validarsemilla',
+          submitUrl: 'https://dgii.example/recepcion',
+          resultUrlTemplate: 'https://dgii.example/result/{trackId}',
+          timeoutMs: 1000,
+          maxRetries: 0,
+          userAgent: 'FULLPOS-Test',
+        };
+      },
+    } as any,
+  );
+
+  service.getCompanyBearerTokenWithMeta = async () => ({
+    token: 'full-token-value-that-must-not-leak',
+    source: 'auto',
+    meta: {
+      signedXmlRoot: 'SemillaModel',
+      signedXmlHasSignature: true,
+      signedXmlHasIdAttributeOnRoot: false,
+      signatureReferenceUri: '',
+      canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+      signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+      digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+      payloadMode: 'multipart',
+      fieldName: 'xml',
+      requestContentType: 'multipart/form-data',
+    },
+  });
+  service.runSeedDiagnosticMatrix = async () => [
+    {
+      signatureMode: 'exc-c14n/rsa-sha256/sha256/leaf',
+      canonicalization: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+      signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+      digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+      referenceUri: '',
+      keyInfoMode: 'leaf-only',
+      payloadMode: 'multipart',
+      fieldName: 'xml',
+      httpStatus: 400,
+      tokenFound: false,
+      safeResponse: 'Firma del certificado invalida',
+      succeeded: false,
+    },
+  ];
+
+  const result = await service.debugAuthenticateByLocators({ companyRnc: '133080206', diagnosticMatrix: true });
+
+  assert.equal(Array.isArray(result.diagnosticMatrix), true);
+  assert.equal(result.diagnosticMatrix?.length, 1);
+  assert.equal(result.diagnosticMatrix?.[0]?.safeResponse, 'Firma del certificado invalida');
+});

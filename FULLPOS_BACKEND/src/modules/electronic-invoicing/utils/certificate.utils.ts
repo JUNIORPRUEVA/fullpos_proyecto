@@ -10,6 +10,16 @@ export interface LoadedPkcs12Certificate {
   subject: string;
   validFrom: Date;
   validTo: Date;
+  chainPems: string[];
+}
+
+export interface CertificateSubjectAnalysis {
+  isNaturalPerson: boolean;
+  isLegalEntity: boolean;
+  rncInCertificate: string | null;
+  rncMatchesCompany: boolean;
+  certSubjectShort: string;
+  chainCertCount: number;
 }
 
 function attrsToText(attrs: forge.pki.CertificateField[]) {
@@ -62,6 +72,10 @@ export function loadPkcs12CertificateFromBuffer(fileBuffer: Buffer, password: st
   const cert = certBag.cert;
   const privateKeyPem = forge.pki.privateKeyToPem(keyBag.key);
   const certPem = forge.pki.certificateToPem(cert);
+  const chainPems = certBags
+    .slice(1)
+    .map((bag) => (bag.cert ? forge.pki.certificateToPem(bag.cert) : null))
+    .filter((pem): pem is string => !!pem);
 
   return {
     certPem,
@@ -71,6 +85,7 @@ export function loadPkcs12CertificateFromBuffer(fileBuffer: Buffer, password: st
     subject: attrsToText(cert.subject.attributes),
     validFrom: cert.validity.notBefore,
     validTo: cert.validity.notAfter,
+    chainPems,
   };
 }
 
@@ -86,4 +101,37 @@ export function certPemToBase64(certPem: string) {
     .replace('-----BEGIN CERTIFICATE-----', '')
     .replace('-----END CERTIFICATE-----', '')
     .replace(/\s+/g, '');
+}
+
+export function analyzeCertificateForDgii(
+  subject: string,
+  issuer: string,
+  companyRnc: string | null,
+  chainCertCount: number,
+): CertificateSubjectAnalysis {
+  const subjectUpper = subject.toUpperCase();
+  const issuerUpper = issuer.toUpperCase();
+  const isNaturalPerson =
+    subjectUpper.includes('NATURAL PERSON') ||
+    subjectUpper.includes('PERSONA NATURAL') ||
+    subjectUpper.includes('PERSONA FISICA') ||
+    issuerUpper.includes('NATURAL PERSON');
+  const isLegalEntity =
+    subjectUpper.includes('LEGAL ENTITY') ||
+    subjectUpper.includes('PERSONA JURIDICA') ||
+    subjectUpper.includes('JURIDICA') ||
+    subjectUpper.includes('LEGAL PERSON');
+  const rncInCertificate = subject.match(/\b\d{9}\b/)?.[0] ?? null;
+  const normalizedCompanyRnc = companyRnc?.replace(/\D/g, '') ?? null;
+  const rncMatchesCompany = !!(rncInCertificate && normalizedCompanyRnc && rncInCertificate === normalizedCompanyRnc);
+  const certSubjectShort = subject.match(/CN=([^,]+)/i)?.[1]?.trim() ?? subject.slice(0, 100);
+
+  return {
+    isNaturalPerson,
+    isLegalEntity,
+    rncInCertificate,
+    rncMatchesCompany,
+    certSubjectShort,
+    chainCertCount,
+  };
 }

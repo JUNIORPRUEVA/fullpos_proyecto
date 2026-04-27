@@ -389,6 +389,7 @@ const posDebugDgiiAuthByRncSchema = posLocatorsBaseSchema
     companyId: z.coerce.number().int().positive().optional(),
     environment: z.preprocess(normalizeDgiiEnvironmentAlias, z.enum(['precertification', 'production'])).optional(),
     forceRefresh: z.coerce.boolean().optional().default(true),
+    diagnosticMatrix: z.coerce.boolean().optional(),
   })
   .strict()
   .refine(requirePosLocators, {
@@ -587,6 +588,7 @@ async function buildSafeDgiiAuthDiagnostic(input: {
   requestedCompanyId?: number;
   environment?: 'precertification' | 'production';
   forceRefresh?: boolean;
+  diagnosticMatrix?: boolean;
   requestId?: string;
 }) {
   const errors: SafeDiagnosticError[] = [];
@@ -652,6 +654,7 @@ async function buildSafeDgiiAuthDiagnostic(input: {
         companyCloudId: input.companyCloudId,
         environment,
         forceRefresh: input.forceRefresh ?? true,
+        diagnosticMatrix: input.diagnosticMatrix,
       },
       input.requestId,
     );
@@ -715,6 +718,8 @@ async function buildSafeDgiiAuthDiagnostic(input: {
       hasSignature: authDebug?.hasSignature ?? null,
       safeErrorCode: authDebug?.errorCode ?? null,
       safeErrorMessage: authDebug?.errorMessage ?? null,
+      certificateDiagnostics: authDebug?.certificateDiagnostics ?? null,
+      diagnosticMatrix: authDebug?.diagnosticMatrix ?? null,
     },
     env: {
       configured: envCheck.configured,
@@ -952,6 +957,7 @@ posElectronicInvoicingRouter.post(
       requestedCompanyId: body.companyId,
       environment: body.environment,
       forceRefresh: body.forceRefresh,
+      diagnosticMatrix: body.diagnosticMatrix,
       requestId: req.requestId,
     });
     res.status(200).json(result);
@@ -977,6 +983,7 @@ posElectronicInvoicingRouter.post(
       requestedCompanyId: body.companyId,
       environment: body.environment,
       forceRefresh: body.forceRefresh,
+      diagnosticMatrix: body.diagnosticMatrix,
       requestId: req.requestId,
     });
     res.status(200).json(result);

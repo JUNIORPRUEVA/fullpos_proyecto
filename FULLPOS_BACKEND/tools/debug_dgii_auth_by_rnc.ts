@@ -18,6 +18,7 @@ async function main() {
   const companyCloudId = readArg('companyCloudId');
   const envRaw = readArg('environment');
   const environment = (envRaw as DgiiEnvironment | undefined) ?? undefined;
+  const diagnosticMatrix = readArg('diagnosticMatrix') === 'true';
 
   if (!companyRnc && !companyCloudId) {
     throw new Error('Debe indicar --companyRnc=... o --companyCloudId=...');
@@ -38,6 +39,7 @@ async function main() {
         companyCloudId,
         environment,
         forceRefresh: true,
+        diagnosticMatrix,
       },
       'debug-dgii-auth-script',
     );

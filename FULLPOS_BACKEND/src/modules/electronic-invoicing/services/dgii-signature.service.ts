@@ -18,6 +18,52 @@ const CANONICALIZATION_ALGORITHM = 'http://www.w3.org/2001/10/xml-exc-c14n#';
 const DIGEST_ALGORITHM = 'http://www.w3.org/2001/04/xmlenc#sha256';
 const ENVELOPED_SIGNATURE_TRANSFORM = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature';
 
+export type SeedSignatureMode = {
+  label: string;
+  signatureAlgorithm: string;
+  canonicalizationAlgorithm: string;
+  digestAlgorithm: string;
+  keyInfoMode: 'leaf-only' | 'chain';
+};
+
+export const SEED_SIGNATURE_MODES: SeedSignatureMode[] = [
+  {
+    label: 'exc-c14n/rsa-sha256/sha256/leaf',
+    signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+    keyInfoMode: 'leaf-only',
+  },
+  {
+    label: 'inc-c14n/rsa-sha256/sha256/leaf',
+    signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+    digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+    keyInfoMode: 'leaf-only',
+  },
+  {
+    label: 'exc-c14n/rsa-sha1/sha1/leaf',
+    signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
+    keyInfoMode: 'leaf-only',
+  },
+  {
+    label: 'inc-c14n/rsa-sha1/sha1/leaf',
+    signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+    digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
+    keyInfoMode: 'leaf-only',
+  },
+  {
+    label: 'exc-c14n/rsa-sha256/sha256/chain',
+    signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
+    keyInfoMode: 'chain',
+  },
+];
+
 function findFirstElementByLocalName(node: any, localName: string): Element | null {
   const current = node as Element;
   if (current.nodeType === 1 && (current.localName === localName || current.nodeName.split(':').pop() === localName)) {
@@ -39,6 +85,22 @@ export class DgiiSignatureService {
 
   signSeedXml(xml: string, privateKeyPem: string, certPem: string) {
     return this.signXmlInternal(xml, privateKeyPem, certPem, { emptyReferenceUri: true });
+  }
+
+  signSeedXmlWithMode(
+    xml: string,
+    privateKeyPem: string,
+    certPem: string,
+    chainPems: string[],
+    mode: SeedSignatureMode,
+  ) {
+    return this.signXmlInternal(xml, privateKeyPem, certPem, {
+      emptyReferenceUri: true,
+      signatureAlgorithm: mode.signatureAlgorithm,
+      canonicalizationAlgorithm: mode.canonicalizationAlgorithm,
+      digestAlgorithm: mode.digestAlgorithm,
+      keyInfoCertificates: mode.keyInfoMode === 'chain' && chainPems.length > 0 ? [certPem, ...chainPems] : [certPem],
+    });
   }
 
   inspectSignedXml(xml: string): SignedXmlDiagnostics {
@@ -65,7 +127,13 @@ export class DgiiSignatureService {
     xml: string,
     privateKeyPem: string,
     certPem: string,
-    options: { emptyReferenceUri: boolean },
+    options: {
+      emptyReferenceUri: boolean;
+      signatureAlgorithm?: string;
+      canonicalizationAlgorithm?: string;
+      digestAlgorithm?: string;
+      keyInfoCertificates?: string[];
+    },
   ) {
     const normalizedXml = xml.replace(/^\uFEFF/, '');
     const document = new DOMParser().parseFromString(normalizedXml, 'text/xml');
@@ -79,22 +147,28 @@ export class DgiiSignatureService {
 
     const rootXpath = `/*[local-name()='${rootName.replace(/^.*:/, '')}']`;
     const signature = new SignedXml();
-  (signature as any).signatureAlgorithm = SIGNATURE_ALGORITHM;
-  (signature as any).canonicalizationAlgorithm = CANONICALIZATION_ALGORITHM;
+    const signatureAlgorithm = options.signatureAlgorithm ?? SIGNATURE_ALGORITHM;
+    const canonicalizationAlgorithm = options.canonicalizationAlgorithm ?? CANONICALIZATION_ALGORITHM;
+    const digestAlgorithm = options.digestAlgorithm ?? DIGEST_ALGORITHM;
+    const keyInfoCertificates = options.keyInfoCertificates ?? [certPem];
+    (signature as any).signatureAlgorithm = signatureAlgorithm;
+    (signature as any).canonicalizationAlgorithm = canonicalizationAlgorithm;
     (signature as any).privateKey = privateKeyPem;
     (signature as any).publicCert = certPem;
     (signature as any).keyInfoProvider = {
       getKeyInfo: () =>
-        `<X509Data><X509Certificate>${certPemToBase64(certPem)}</X509Certificate></X509Data>`,
+        `<X509Data>${keyInfoCertificates
+          .map((certificate) => `<X509Certificate>${certPemToBase64(certificate)}</X509Certificate>`)
+          .join('')}</X509Data>`,
     };
 
     signature.addReference({
       xpath: rootXpath,
       transforms: [
         ENVELOPED_SIGNATURE_TRANSFORM,
-        CANONICALIZATION_ALGORITHM,
+        canonicalizationAlgorithm,
       ],
-      digestAlgorithm: DIGEST_ALGORITHM,
+      digestAlgorithm,
       isEmptyUri: options.emptyReferenceUri,
     });
 
