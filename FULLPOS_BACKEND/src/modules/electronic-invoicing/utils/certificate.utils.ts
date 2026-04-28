@@ -22,6 +22,12 @@ export interface CertificateSubjectAnalysis {
   chainCertCount: number;
 }
 
+export interface CertificateIdentitySnapshot {
+  certificateSubjectName: string | null;
+  certificateDocumentNumber: string | null;
+  certificateAppearsNaturalPerson: boolean;
+}
+
 function attrsToText(attrs: forge.pki.CertificateField[]) {
   return attrs
     .map((attr) => `${attr.shortName ?? attr.name}=${attr.value}`)
@@ -133,5 +139,30 @@ export function analyzeCertificateForDgii(
     rncMatchesCompany,
     certSubjectShort,
     chainCertCount,
+  };
+}
+
+export function normalizeSignerDocumentNumber(value: string | null | undefined) {
+  return (value ?? '').trim().replace(/[\s-]+/g, '');
+}
+
+export function extractCertificateIdentity(subject: string, serialNumber: string): CertificateIdentitySnapshot {
+  const certificateSubjectName = subject.match(/CN=([^,]+)/i)?.[1]?.trim() ?? null;
+  const source = `${serialNumber} ${subject}`;
+  const documentMatch =
+    source.match(/IDCDO[-: ]?(\d{11,13})/i) ??
+    source.match(/CEDULA[-: ]?(\d{11,13})/i) ??
+    source.match(/(?:^|\D)(\d{11,13})(?:\D|$)/);
+  const certificateDocumentNumber = documentMatch?.[1] ?? null;
+  const subjectUpper = subject.toUpperCase();
+  const certificateAppearsNaturalPerson =
+    subjectUpper.includes('NATURAL PERSON') ||
+    subjectUpper.includes('PERSONA NATURAL') ||
+    subjectUpper.includes('PERSONA FISICA');
+
+  return {
+    certificateSubjectName,
+    certificateDocumentNumber,
+    certificateAppearsNaturalPerson,
   };
 }

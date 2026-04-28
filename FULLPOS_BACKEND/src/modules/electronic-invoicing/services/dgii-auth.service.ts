@@ -12,8 +12,10 @@ import {
   analyzeCertificateForDgii,
   assertCertificateIsCurrentlyValid,
   CertificateSubjectAnalysis,
+  extractCertificateIdentity,
   loadPkcs12Certificate,
   loadPkcs12CertificateFromBuffer,
+  normalizeSignerDocumentNumber,
   resolveCertificateFilePath,
 } from '../utils/certificate.utils';
 import {
@@ -116,6 +118,30 @@ function buildCertificateCompatibilityWarning(analysis: CertificateSubjectAnalys
 
 function buildUserFacingSeedValidationMessage(rawMessage: string) {
   return `DGII rechazó la firma del certificado al validar la semilla. Esto normalmente significa que el certificado no está autorizado para este RNC en DGII, no corresponde a la empresa, o la firma XML no está en el formato que DGII espera. DGII: ${rawMessage}`;
+}
+
+function normalizeComparableName(value: string | null | undefined) {
+  if (!value) return '';
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function namesAreCompatible(a: string | null | undefined, b: string | null | undefined) {
+  const left = normalizeComparableName(a);
+  const right = normalizeComparableName(b);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+function maskDocumentNumber(value: string | null | undefined) {
+  const normalized = normalizeSignerDocumentNumber(value ?? null);
+  if (!normalized) return null;
+  if (normalized.length <= 4) return `***${normalized}`;
+  return `${'*'.repeat(Math.max(0, normalized.length - 4))}${normalized.slice(-4)}`;
 }
 
 type SeedRequestMeta = {
@@ -788,6 +814,29 @@ export class DgiiAuthService {
       if ((error as any)?.errorCode === 'DGII_SEED_VALIDATE_BAD_REQUEST') {
         const rawMessage = String((error as any)?.message ?? 'DGII no devolvió detalle');
         const compatibilityWarning = buildCertificateCompatibilityWarning(certificateAnalysis);
+        const signerConfig = await this.prisma.electronicInboundEndpointConfig.findUnique({
+          where: { companyId_branchId: { companyId, branchId: 0 } },
+          select: {
+            signerFullName: true,
+            signerDocumentType: true,
+            signerDocumentNumber: true,
+            signerAuthorizedForDgii: true,
+          },
+        });
+        const certificateIdentity = extractCertificateIdentity(loaded.subject, loaded.serialNumber);
+        const signerNameMatchesCertificate = namesAreCompatible(
+          signerConfig?.signerFullName,
+          certificateIdentity.certificateSubjectName,
+        );
+        const signerDocumentMatchesCertificate =
+          !!signerConfig?.signerDocumentNumber &&
+          !!certificateIdentity.certificateDocumentNumber &&
+          normalizeSignerDocumentNumber(signerConfig.signerDocumentNumber) ===
+            normalizeSignerDocumentNumber(certificateIdentity.certificateDocumentNumber);
+        const maybeInvalidSignature = rawMessage
+          .toLowerCase()
+          .includes('firma del certificado invalida') ||
+          rawMessage.toLowerCase().includes('firma del certificado inválida');
         (error as any).message = buildUserFacingSeedValidationMessage(rawMessage);
         (error as any).details = {
           ...((error as any)?.details ?? {}),
@@ -798,6 +847,24 @@ export class DgiiAuthService {
           requestId,
           certificateCompatibilityWarning: compatibilityWarning,
           dgiiValidationDiagnosis: compatibilityWarning ?? classifyDgiiSeedValidationFailure(rawMessage, (error as any)?.details ?? {}),
+          signerContext: {
+            configured: !!signerConfig?.signerFullName,
+            signerFullName: signerConfig?.signerFullName ?? null,
+            signerDocumentType: signerConfig?.signerDocumentType ?? null,
+            signerDocumentMasked: maskDocumentNumber(signerConfig?.signerDocumentNumber),
+            signerAuthorizedForDgii: signerConfig?.signerAuthorizedForDgii ?? false,
+            certificateName: certificateIdentity.certificateSubjectName,
+            certificateDocumentMasked: maskDocumentNumber(certificateIdentity.certificateDocumentNumber),
+            signerNameMatchesCertificate,
+            signerDocumentMatchesCertificate,
+            certificateLooksNaturalPerson: certificateAnalysis.isNaturalPerson,
+            delegationLikelyRequired: certificateAnalysis.isNaturalPerson,
+            recommendation:
+              maybeInvalidSignature &&
+              (!signerConfig?.signerAuthorizedForDgii || !signerDocumentMatchesCertificate)
+                ? 'Verifique en DGII que el firmante está autorizado para este RNC y que su documento coincide con el certificado cargado.'
+                : null,
+          },
         };
       }
       throw error;
@@ -1247,6 +1314,7 @@ export class DgiiAuthService {
       validateContentType?: string;
       validateRawResponse?: unknown;
       dgiiValidationDiagnosis?: string | null;
+      signerContext?: Record<string, unknown>;
       signedXmlRoot?: string | null;
       signedXmlHasSignature?: boolean;
       signedXmlHasIdAttributeOnRoot?: boolean;
@@ -1368,6 +1436,7 @@ export class DgiiAuthService {
       out.validatePayloadMode = (details?.payloadMode as ValidateSeedMeta['payloadMode'] | undefined) ?? undefined;
       out.validateRawResponse = details?.raw ?? details?.rawTextSummary ?? null;
       out.dgiiValidationDiagnosis = (details?.dgiiValidationDiagnosis as string | null | undefined) ?? undefined;
+      out.signerContext = (details?.signerContext as Record<string, unknown> | undefined) ?? undefined;
       if (input.diagnosticMatrix) {
         out.diagnosticMatrix = await this.runSeedDiagnosticMatrix(company.id, company.rnc ?? null, environment, requestId).catch(() => []);
       }

@@ -749,6 +749,10 @@ model ElectronicInboundEndpointConfig {
   outboundEnabled  Boolean   @default(false)
   environment      String    @default("precertification")
   tokenTtlSeconds  Int       @default(300)
+  signerFullName   String?
+  signerDocumentType String?
+  signerDocumentNumber String?
+  signerAuthorizedForDgii Boolean @default(false)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

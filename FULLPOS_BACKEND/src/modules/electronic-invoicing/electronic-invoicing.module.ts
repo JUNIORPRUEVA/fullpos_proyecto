@@ -42,6 +42,7 @@ import { createEcfDtoSchema } from './dto/create-ecf.dto';
 import { queryTrackDtoSchema } from './dto/query-track.dto';
 import { createSequenceDtoSchema } from './dto/sequence.dto';
 import { sendEcfDtoSchema } from './dto/send-ecf.dto';
+import { signerByRncQuerySchema, signerDocumentTypeSchema, upsertSignerByRncSchema } from './dto/signer.dto';
 import { requestSeedDtoSchema, validateSeedDtoSchema } from './dto/validate-seed.dto';
 
 const directory = new DgiiDirectoryService();
@@ -131,6 +132,16 @@ const posConfigByRncSchema = posLocatorsBaseSchema
     message: 'RNC o ID interno requerido',
     path: ['companyRnc'],
   });
+
+const posSignerByRncQuerySchema = signerByRncQuerySchema;
+
+const posSignerByRncSaveSchema = upsertSignerByRncSchema.extend({
+  signerDocumentNumber: z.preprocess(
+    (value) => String(value ?? '').trim().replace(/[\s-]+/g, ''),
+    z.string().trim().min(1),
+  ),
+  signerDocumentType: signerDocumentTypeSchema,
+});
 
 const posUpsertConfigByRncSchema = upsertElectronicConfigDtoSchema
   .extend({
@@ -254,7 +265,7 @@ function sequenceIsReady(sequence: { prefix: string; documentTypeCode: string; c
 
 async function buildResolvedConfigPayload(company: Awaited<ReturnType<ElectronicInvoicingMapperService['resolveCompanyOrThrow']>>, branchId: number) {
   const companyConfig = (company as any).config as { address?: string | null; phone?: string | null; email?: string | null } | null | undefined;
-  const [config, certificate, sequences] = await Promise.all([
+  const [config, certificate, sequences, signer] = await Promise.all([
     electronicInvoicingService.getConfig(company.id, branchId),
     prisma.electronicCertificate.findFirst({
       where: { companyId: company.id },
@@ -264,7 +275,9 @@ async function buildResolvedConfigPayload(company: Awaited<ReturnType<Electronic
       where: { companyId: company.id, branchId },
       orderBy: [{ documentTypeCode: 'asc' }],
     }),
+    electronicInvoicingService.getSignerConfig(company.id, branchId),
   ]);
+  const certificateComparison = await electronicInvoicingService.buildSignerCertificateComparison(company.id, signer);
 
   if (!config) {
     throw {
@@ -309,6 +322,10 @@ async function buildResolvedConfigPayload(company: Awaited<ReturnType<Electronic
     sequence_31: sequence31Ready,
     sequence_32: sequence32Ready,
     sequence_34: sequence34Ready,
+    signerConfigured: !!signer.signerFullName.trim(),
+    signerDocumentConfigured: !!signer.signerDocumentNumber.trim(),
+    signerMatchesCertificateDocument: certificateComparison.signerDocumentMatchesCertificate,
+    signerAuthorizedForDgii: signer.signerAuthorizedForDgii,
   };
 
   const missing: string[] = [];
@@ -325,8 +342,25 @@ async function buildResolvedConfigPayload(company: Awaited<ReturnType<Electronic
   if (!dgiiSubmitConfigured) missing.push(productionDisabled ? 'PRODUCTION_DISABLED' : 'DGII_SUBMIT_ENDPOINT_MISSING');
   if (!dgiiTokenConfigured) missing.push(productionDisabled ? 'PRODUCTION_DISABLED' : 'AUTH_ENDPOINTS_MISSING');
   if (!checklist.encryptionKeyConfigured) missing.push('FE_MASTER_ENCRYPTION_KEY_MISSING');
+  if (!checklist.signerConfigured) missing.push('SIGNER_REQUIRED');
+  if (!checklist.signerDocumentConfigured) missing.push('SIGNER_DOCUMENT_REQUIRED');
+  if (checklist.signerDocumentConfigured && !checklist.signerMatchesCertificateDocument) {
+    missing.push('SIGNER_CERTIFICATE_DOCUMENT_MISMATCH');
+  }
+  if (checklist.signerConfigured && checklist.signerDocumentConfigured && checklist.signerMatchesCertificateDocument && !checklist.signerAuthorizedForDgii) {
+    missing.push('SIGNER_DGII_AUTHORIZATION_NOT_CONFIRMED');
+  }
 
-  const readinessStatus = missing.length === 0 ? 'READY' : (config.active || certificateFound || sequences.length > 0 ? 'PARTIAL' : 'NOT_READY');
+  const forceNotReadyCodes = new Set([
+    'SIGNER_REQUIRED',
+    'SIGNER_DOCUMENT_REQUIRED',
+    'SIGNER_CERTIFICATE_DOCUMENT_MISMATCH',
+  ]);
+  const hasForceNotReady = missing.some((code) => forceNotReadyCodes.has(code));
+  const baseStatus = missing.length === 0 ? 'READY' : (config.active || certificateFound || sequences.length > 0 ? 'PARTIAL' : 'NOT_READY');
+  const readinessStatus = hasForceNotReady
+    ? 'NOT_READY'
+    : (baseStatus === 'READY' && missing.includes('SIGNER_DGII_AUTHORIZATION_NOT_CONFIRMED') ? 'PARTIAL' : baseStatus);
 
   return {
     company: {
@@ -363,6 +397,8 @@ async function buildResolvedConfigPayload(company: Awaited<ReturnType<Electronic
       productionAllowed: env.DGII_ALLOW_PRODUCTION,
       environment: config.environment,
     },
+    signer,
+    certificateComparison,
     readiness: {
       status: readinessStatus,
       missing: [...new Set(missing)],
@@ -620,6 +656,8 @@ async function buildSafeDgiiAuthDiagnostic(input: {
 
   stage = 'config';
   const config = await electronicInvoicingService.getConfig(company.id, 0);
+  const signer = await electronicInvoicingService.getSignerConfig(company.id, 0);
+  const certificateComparison = await electronicInvoicingService.buildSignerCertificateComparison(company.id, signer);
   const environment = (input.environment ??
     normalizeDgiiEnvironmentAlias(config?.environment ?? env.DGII_DEFAULT_ENVIRONMENT)) as 'precertification' | 'production';
   const envCheck = electronicEnvDiagnostics(environment);
@@ -694,6 +732,8 @@ async function buildSafeDgiiAuthDiagnostic(input: {
       environment,
       productionBlocked: envCheck.productionBlocked,
     },
+    signer,
+    certificateComparison,
     certificate: {
       found: !!certificate,
       status: certificate?.status ?? null,
@@ -718,6 +758,7 @@ async function buildSafeDgiiAuthDiagnostic(input: {
       hasSignature: authDebug?.hasSignature ?? null,
       safeErrorCode: authDebug?.errorCode ?? null,
       safeErrorMessage: authDebug?.errorMessage ?? null,
+      signerContext: authDebug?.signerContext ?? null,
       certificateDiagnostics: authDebug?.certificateDiagnostics ?? null,
       diagnosticMatrix: authDebug?.diagnosticMatrix ?? null,
     },
@@ -806,6 +847,54 @@ posElectronicInvoicingRouter.put(
     }, 'fullpos_pos', req.requestId);
 
     res.json(await buildResolvedConfigPayload(company, dto.branchId));
+  }),
+);
+
+posElectronicInvoicingRouter.get(
+  '/signer/by-rnc',
+  overrideKeyGuard,
+  validate(posSignerByRncQuerySchema, 'query'),
+  asyncHandler(async (req, res) => {
+    const query = req.query as unknown as typeof posSignerByRncQuerySchema._output;
+    const company = await resolvePosCompany(query.companyRnc ?? null, query.companyCloudId ?? null, req.requestId, 'signer_get_by_rnc');
+    const signer = await electronicInvoicingService.getSignerConfig(company.id, 0);
+    const certificateComparison = await electronicInvoicingService.buildSignerCertificateComparison(company.id, signer);
+
+    res.json({
+      ok: true,
+      company: {
+        id: company.id,
+        name: company.name,
+        rnc: company.rnc,
+        cloudCompanyId: company.cloudCompanyId,
+      },
+      signer,
+      certificateComparison,
+    });
+  }),
+);
+
+posElectronicInvoicingRouter.put(
+  '/signer/by-rnc',
+  overrideKeyGuard,
+  validate(posSignerByRncSaveSchema),
+  asyncHandler(async (req, res) => {
+    const body = req.body as typeof posSignerByRncSaveSchema._output;
+    const company = await resolvePosCompany(body.companyRnc ?? null, body.companyCloudId ?? null, req.requestId, 'signer_put_by_rnc');
+    const signer = await electronicInvoicingService.upsertSignerConfig(company.id, body, 'fullpos_pos', req.requestId);
+    const certificateComparison = await electronicInvoicingService.buildSignerCertificateComparison(company.id, signer);
+
+    res.json({
+      ok: true,
+      company: {
+        id: company.id,
+        name: company.name,
+        rnc: company.rnc,
+        cloudCompanyId: company.cloudCompanyId,
+      },
+      signer,
+      certificateComparison,
+    });
   }),
 );
 

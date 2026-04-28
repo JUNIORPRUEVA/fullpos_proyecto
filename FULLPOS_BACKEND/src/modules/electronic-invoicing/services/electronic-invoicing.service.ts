@@ -8,8 +8,10 @@ import { ElectronicInvoicingMapperService } from './electronic-invoicing-mapper.
 import { ElectronicInvoicingAuditService } from './electronic-invoicing-audit.service';
 import { SequenceService } from './sequence.service';
 import {
+  extractCertificateIdentity,
   loadPkcs12Certificate,
   loadPkcs12CertificateFromBuffer,
+  normalizeSignerDocumentNumber,
   resolveCertificateFilePath,
   assertCertificateIsCurrentlyValid,
 } from '../utils/certificate.utils';
@@ -29,6 +31,7 @@ import { SendEcfDto } from '../dto/send-ecf.dto';
 import { CreateCreditNoteDto } from '../dto/credit-note.dto';
 import { OutboundInvoiceListFilters, SupportedDocumentTypeCode } from '../types/electronic-invoice.types';
 import { UpsertElectronicConfigDto } from '../dto/config.dto';
+import { UpsertSignerByRncDto } from '../dto/signer.dto';
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['GENERATED', 'ERROR'],
@@ -213,6 +216,133 @@ export class ElectronicInvoicingService {
     });
 
     return config;
+  }
+
+  async getSignerConfig(companyId: number, branchId = 0): Promise<ElectronicSignerSnapshot> {
+    const config = await this.prisma.electronicInboundEndpointConfig.findUnique({
+      where: { companyId_branchId: { companyId, branchId } },
+      select: {
+        signerFullName: true,
+        signerDocumentType: true,
+        signerDocumentNumber: true,
+        signerAuthorizedForDgii: true,
+      },
+    });
+
+    return {
+      signerFullName: config?.signerFullName?.trim() ?? '',
+      signerDocumentType: config?.signerDocumentType?.trim() ?? '',
+      signerDocumentNumber: normalizeSignerDocumentNumber(config?.signerDocumentNumber),
+      signerAuthorizedForDgii: config?.signerAuthorizedForDgii === true,
+    };
+  }
+
+  async upsertSignerConfig(companyId: number, dto: UpsertSignerByRncDto, username: string, requestId?: string) {
+    const normalizedDocument = normalizeSignerDocumentNumber(dto.signerDocumentNumber);
+    const signerPayload = {
+      signerFullName: dto.signerFullName.trim(),
+      signerDocumentType: dto.signerDocumentType.trim().toUpperCase(),
+      signerDocumentNumber: normalizedDocument,
+      signerAuthorizedForDgii: dto.signerAuthorizedForDgii === true,
+    };
+
+    const config = await this.prisma.electronicInboundEndpointConfig.upsert({
+      where: { companyId_branchId: { companyId, branchId: 0 } },
+      update: signerPayload,
+      create: {
+        companyId,
+        branchId: 0,
+        authEnabled: true,
+        authPath: '/fe/autenticacion/api/semilla',
+        receptionPath: '/fe/recepcion/api/ecf',
+        approvalPath: '/fe/aprobacioncomercial/api/ecf',
+        publicBaseUrl: env.PUBLIC_BASE_URL?.trim() || 'http://localhost',
+        active: false,
+        outboundEnabled: false,
+        environment: 'precertification',
+        tokenTtlSeconds: 300,
+        ...signerPayload,
+      },
+      select: {
+        signerFullName: true,
+        signerDocumentType: true,
+        signerDocumentNumber: true,
+        signerAuthorizedForDgii: true,
+      },
+    });
+
+    await this.audit.log({
+      companyId,
+      eventType: 'config.signer.upserted',
+      eventSource: 'ADMIN',
+      message: `Responsable de firma actualizado por ${username}`,
+      payload: {
+        signerFullName: config.signerFullName,
+        signerDocumentType: config.signerDocumentType,
+        signerDocumentNumberMasked: maskSignerDocument(config.signerDocumentNumber),
+        signerAuthorizedForDgii: config.signerAuthorizedForDgii,
+      },
+      requestId,
+    });
+
+    return {
+      signerFullName: config.signerFullName?.trim() ?? '',
+      signerDocumentType: config.signerDocumentType?.trim() ?? '',
+      signerDocumentNumber: normalizeSignerDocumentNumber(config.signerDocumentNumber),
+      signerAuthorizedForDgii: config.signerAuthorizedForDgii === true,
+    };
+  }
+
+  async buildSignerCertificateComparison(
+    companyId: number,
+    signer: ElectronicSignerSnapshot,
+  ): Promise<ElectronicSignerCertificateComparison> {
+    const certificate = await this.prisma.electronicCertificate.findFirst({
+      where: { companyId },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const identity = certificate
+      ? extractCertificateIdentity(certificate.subject, certificate.serialNumber)
+      : {
+          certificateSubjectName: null,
+          certificateDocumentNumber: null,
+          certificateAppearsNaturalPerson: false,
+        };
+    const signerName = normalizeSignerName(signer.signerFullName);
+    const certificateName = normalizeSignerName(identity.certificateSubjectName);
+    const signerDoc = normalizeSignerDocumentNumber(signer.signerDocumentNumber);
+    const certificateDoc = normalizeSignerDocumentNumber(identity.certificateDocumentNumber);
+    const signerNameMatchesCertificate = !!signerName && !!certificateName && signerName === certificateName;
+    const signerDocumentMatchesCertificate = !!signerDoc && !!certificateDoc && signerDoc === certificateDoc;
+    const signerMatchesCertificate = signerNameMatchesCertificate && signerDocumentMatchesCertificate;
+    const warnings: string[] = [];
+
+    if (!signer.signerFullName.trim()) warnings.push('SIGNER_REQUIRED');
+    if (!signerDoc) warnings.push('SIGNER_DOCUMENT_REQUIRED');
+    if (signerDoc && certificateDoc && !signerDocumentMatchesCertificate) {
+      warnings.push('SIGNER_CERTIFICATE_DOCUMENT_MISMATCH');
+    }
+    if (signerName && certificateName && !signerNameMatchesCertificate) {
+      warnings.push('SIGNER_CERTIFICATE_NAME_MISMATCH');
+    }
+    if (!signer.signerAuthorizedForDgii) {
+      warnings.push('SIGNER_DGII_AUTHORIZATION_NOT_CONFIRMED');
+    }
+    if (identity.certificateAppearsNaturalPerson) {
+      warnings.push('CERTIFICATE_IS_NATURAL_PERSON');
+    }
+
+    return {
+      certificateSubjectName: identity.certificateSubjectName,
+      certificateSubjectShort: identity.certificateSubjectName,
+      certificateDocumentNumber: identity.certificateDocumentNumber,
+      signerMatchesCertificate,
+      signerNameMatchesCertificate,
+      signerDocumentMatchesCertificate,
+      certificateAppearsNaturalPerson: identity.certificateAppearsNaturalPerson,
+      requiresDgiiDelegationCheck: identity.certificateAppearsNaturalPerson,
+      warnings,
+    };
   }
 
   async resolveCertificateCompanyId(dto: RegisterCertificateDto) {
@@ -1066,3 +1196,33 @@ export class ElectronicInvoicingService {
     return { filename: `${invoice.ecf}-${variant}.xml`, xml };
   }
 }
+
+function normalizeSignerName(value: string | null | undefined) {
+  return (value ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function maskSignerDocument(value: string | null | undefined) {
+  const normalized = normalizeSignerDocumentNumber(value);
+  if (!normalized) return null;
+  if (normalized.length <= 4) return `${normalized.slice(0, 1)}***`;
+  return `${normalized.slice(0, 2)}***${normalized.slice(-2)}`;
+}
+
+export type ElectronicSignerSnapshot = {
+  signerFullName: string;
+  signerDocumentType: string;
+  signerDocumentNumber: string;
+  signerAuthorizedForDgii: boolean;
+};
+
+export type ElectronicSignerCertificateComparison = {
+  certificateSubjectName: string | null;
+  certificateSubjectShort: string | null;
+  certificateDocumentNumber: string | null;
+  signerMatchesCertificate: boolean;
+  signerNameMatchesCertificate: boolean;
+  signerDocumentMatchesCertificate: boolean;
+  certificateAppearsNaturalPerson: boolean;
+  requiresDgiiDelegationCheck: boolean;
+  warnings: string[];
+};
