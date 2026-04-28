@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
+import '../../../core/errors/friendly_api_error.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/storage/secure_storage.dart';
 import 'auth_state.dart';
@@ -42,6 +44,11 @@ class AuthRepository extends StateNotifier<AuthState> {
     return normalized == 'admin' || normalized == 'owner';
   }
 
+  String _cleanExceptionMessage(Object error) {
+    final text = error.toString().replaceFirst('Exception: ', '').trim();
+    return text.isEmpty ? 'No pudimos iniciar sesion.' : text;
+  }
+
   Future<void> login(String identifier, String password) async {
     state = state.copyWith(loading: true);
     try {
@@ -68,7 +75,9 @@ class AuthRepository extends StateNotifier<AuthState> {
 
       final role = user['role']?.toString();
       if (!_isCloudRoleAllowed(role)) {
-        throw Exception('Solo usuarios Admin u Owner pueden usar FULLPOS Owner');
+        throw Exception(
+          'Solo usuarios Admin u Owner pueden usar FULLPOS Owner',
+        );
       }
 
       final accessToken = tokens['accessToken']?.toString();
@@ -96,11 +105,20 @@ class AuthRepository extends StateNotifier<AuthState> {
       );
     } on DioException catch (e) {
       state = state.copyWith(loading: false);
-      final message = _extractErrorMessage(e.response?.data);
+      debugPrint('FULLPOS Owner login DioException: ${e.message}');
+      debugPrint('FULLPOS Owner login response: ${e.response?.data}');
+      final message = e.response?.statusCode == null
+          ? FriendlyApiError.message(
+              e,
+              fallback: 'No pudimos iniciar sesion. Verifica tu conexion.',
+            )
+          : _extractErrorMessage(e.response?.data);
       throw Exception(message);
-    } catch (e) {
+    } catch (e, st) {
       state = state.copyWith(loading: false);
-      rethrow;
+      debugPrint('FULLPOS Owner login error: $e');
+      debugPrintStack(stackTrace: st);
+      throw Exception(_cleanExceptionMessage(e));
     }
   }
 

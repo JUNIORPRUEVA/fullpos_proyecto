@@ -99,21 +99,43 @@ function isCloudRoleAllowed(role: string) {
   return r === 'admin' || r === 'owner';
 }
 
+function loginFailureMessage() {
+  return 'Usuario o contraseña inválidos. Verifica que estés usando el usuario de nube configurado para FULLPOS Owner.';
+}
+
 export async function login(identifier: string, password: string) {
+  const normalizedIdentifier = identifier.trim();
+  const identifierType = normalizedIdentifier.includes('@') ? 'email' : 'username';
+
+  console.info('[auth.login] request_received', {
+    identifierType,
+    identifierLength: normalizedIdentifier.length,
+  });
+
   const user = await prisma.user.findFirst({
     where: {
       isActive: true,
-      OR: [{ username: identifier }, { email: identifier }],
+      OR: [{ username: normalizedIdentifier }, { email: normalizedIdentifier.toLowerCase() }],
     },
     include: { company: true },
   });
 
   if (!user || !user.company || !user.company.isActive) {
-    throw { status: 401, message: 'Credenciales inv\u00e1lidas' };
+    console.warn('[auth.login] failed', {
+      reason: 'user_or_company_not_found',
+      identifierType,
+    });
+    throw { status: 401, message: loginFailureMessage(), errorCode: 'AUTH_INVALID_CREDENTIALS' };
   }
 
   // Cloud Owner app: bloquear login de cajeros/usuarios no admin.
   if (!isCloudRoleAllowed(user.role)) {
+    console.warn('[auth.login] failed', {
+      reason: 'role_not_allowed',
+      userId: user.id,
+      companyId: user.companyId,
+      role: user.role,
+    });
     throw {
       status: 403,
       message: 'Acceso denegado (solo administradores)',
@@ -140,11 +162,23 @@ export async function login(identifier: string, password: string) {
     }
   }
   if (!passwordMatches) {
-    throw { status: 401, message: 'Credenciales inv\u00e1lidas' };
+    console.warn('[auth.login] failed', {
+      reason: 'password_mismatch_or_cloud_password_not_provisioned',
+      userId: user.id,
+      companyId: user.companyId,
+      role: user.role,
+    });
+    throw { status: 401, message: loginFailureMessage(), errorCode: 'AUTH_INVALID_CREDENTIALS' };
   }
 
   const payload = buildJwtPayload(user);
   const tokens = await generateTokenPair(payload);
+
+  console.info('[auth.login] success', {
+    userId: user.id,
+    companyId: user.companyId,
+    role: user.role,
+  });
 
   return {
     user: {

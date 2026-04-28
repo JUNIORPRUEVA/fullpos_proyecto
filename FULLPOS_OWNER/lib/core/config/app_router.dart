@@ -12,10 +12,13 @@ import '../../features/settings/presentation/owner_settings_page.dart';
 import '../../features/shared/owner_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authRepositoryProvider);
-  final hasSession =
-      (authState.accessToken?.trim().isNotEmpty ?? false) ||
-      (authState.refreshToken?.trim().isNotEmpty ?? false);
+  final hasSession = ref.watch(
+    authRepositoryProvider.select(
+      (authState) =>
+          (authState.accessToken?.trim().isNotEmpty ?? false) ||
+          (authState.refreshToken?.trim().isNotEmpty ?? false),
+    ),
+  );
 
   return GoRouter(
     initialLocation: '/dashboard',
