@@ -16,15 +16,7 @@ ReportData applySaleRealtimeProjection({
   required DateTime to,
 }) {
   final normalizedFrom = DateTime(from.year, from.month, from.day);
-  final normalizedTo = DateTime(
-    to.year,
-    to.month,
-    to.day,
-    23,
-    59,
-    59,
-    999,
-  );
+  final normalizedTo = DateTime(to.year, to.month, to.day, 23, 59, 59, 999);
 
   final sales = List<SaleRow>.from(current.sales);
   final payload = message.sale;
@@ -40,7 +32,12 @@ ReportData applySaleRealtimeProjection({
   final projected = _buildSaleRow(payload, previous: existing);
   final shouldInclude =
       projected != null &&
-      _isVisibleInReport(projected, payload, from: normalizedFrom, to: normalizedTo);
+      _isVisibleInReport(
+        projected,
+        payload,
+        from: normalizedFrom,
+        to: normalizedTo,
+      );
 
   if (existingIndex >= 0) {
     if (shouldInclude) {
@@ -65,7 +62,10 @@ ReportData applySaleRealtimeProjection({
 
 SaleRow? _buildSaleRow(Map<String, dynamic> payload, {SaleRow? previous}) {
   final id = _readInt(payload['id']) ?? previous?.id;
-  final localCode = _readString(payload['localCode'], fallback: previous?.localCode ?? '');
+  final localCode = _readString(
+    payload['localCode'],
+    fallback: previous?.localCode ?? '',
+  );
   final createdAt = _readDateTime(payload['createdAt']) ?? previous?.createdAt;
   if (id == null || localCode.isEmpty || createdAt == null) {
     return previous;
@@ -112,6 +112,8 @@ bool _isVisibleInReport(
 
 ReportData _rebuildReportData(ReportData current, List<SaleRow> sales) {
   final totalSales = sales.fold<double>(0, (sum, sale) => sum + sale.total);
+  final totalCost = current.totalCost;
+  final grossProfit = totalSales - totalCost;
   final salesCount = sales.length;
   final averageTicket = salesCount == 0 ? 0.0 : totalSales / salesCount;
   final salesByDayMap = <String, ({double total, int count})>{};
@@ -143,8 +145,10 @@ ReportData _rebuildReportData(ReportData current, List<SaleRow> sales) {
         )
         .toList(growable: false),
     totalSales: totalSales,
-    totalExpenses: current.totalExpenses,
-    profit: totalSales - current.totalExpenses,
+    totalCost: totalCost,
+    grossProfit: grossProfit,
+    totalExpenses: 0,
+    profit: grossProfit,
     salesCount: salesCount,
     averageTicket: averageTicket,
   );

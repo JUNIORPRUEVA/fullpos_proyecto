@@ -32,6 +32,8 @@ class ReportsRepository {
         expenses: const <ReportExpenseRow>[],
         salesByDay: const <SalesByDay>[],
         totalSales: 0,
+        totalCost: 0,
+        grossProfit: 0,
         totalExpenses: 0,
         profit: 0,
         salesCount: 0,
@@ -42,30 +44,11 @@ class ReportsRepository {
 
   Future<SalesSummary> salesSummary(String from, String to) async {
     return _guard(() async {
-      final results = await Future.wait([
-        _dio.get(
-          '/api/reports/sales/summary',
-          queryParameters: {'from': from, 'to': to},
-        ),
-        _dio.get(
-          '/api/expenses/summary',
-          queryParameters: {'from': from, 'to': to},
-          options: _allowNotFoundOptions(),
-        ),
-      ]);
-
-      final summaryResponse = results[0];
-      final expensesResponse = results[1];
-      final summary = SalesSummary.fromJson(
-        summaryResponse.data as Map<String, dynamic>,
+      final res = await _dio.get(
+        '/api/reports/sales/summary',
+        queryParameters: {'from': from, 'to': to},
       );
-      final expenses = expensesResponse.statusCode == 404
-          ? 0.0
-          : ExpensesSummary.fromJson(
-              expensesResponse.data as Map<String, dynamic>,
-            ).total;
-
-      return summary.copyWith(expenses: expenses);
+      return SalesSummary.fromJson(res.data as Map<String, dynamic>);
     }, fallback: const SalesSummary(total: 0, count: 0, average: 0));
   }
 
@@ -159,5 +142,4 @@ class ReportsRepository {
       throw Exception('Error inesperado: ${error.toString()}');
     }
   }
-
 }

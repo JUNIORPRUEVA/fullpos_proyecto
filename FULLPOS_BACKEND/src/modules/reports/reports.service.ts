@@ -12,6 +12,12 @@ const REPORT_SALE_KINDS = ['invoice', 'sale'];
 const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND'] as const;
 
 const reportSaleInclude = {
+  items: {
+    include: {
+      product: { select: { id: true, code: true, name: true, cost: true } },
+    },
+    orderBy: { id: 'asc' },
+  },
   session: {
     select: {
       status: true,
@@ -55,6 +61,47 @@ function getReportExpensesWhere(
   };
 }
 
+function getReportReturnsWhere(companyId: number, fromDate: Date, toDate: Date): Prisma.ReturnWhereInput {
+  return {
+    companyId,
+    returnSale: {
+      companyId,
+      kind: 'return',
+      status: { in: [...REPORT_SALE_STATUSES] },
+      deletedAt: null,
+      createdAt: { gte: fromDate, lte: toDate },
+    },
+  };
+}
+
+function resolveItemUnitCost(item: { purchasePriceSnapshot?: any; product?: { cost?: any } | null }) {
+  const snapshotCost = toNumber(item.purchasePriceSnapshot);
+  if (snapshotCost > 0) return snapshotCost;
+  return toNumber(item.product?.cost);
+}
+
+function calculateSaleCost(sale: { items?: Array<{ qty: any; purchasePriceSnapshot?: any; product?: { cost?: any } | null }> }) {
+  return (sale.items ?? []).reduce((sum, item) => {
+    return sum + (toNumber(item.qty) * resolveItemUnitCost(item));
+  }, 0);
+}
+
+function calculateReturnCost(row: {
+  items?: Array<{
+    qty: any;
+    product?: { cost?: any } | null;
+    saleItem?: { purchasePriceSnapshot?: any; product?: { cost?: any } | null } | null;
+  }>;
+}) {
+  return (row.items ?? []).reduce((sum, item) => {
+    const unitCost = resolveItemUnitCost({
+      purchasePriceSnapshot: item.saleItem?.purchasePriceSnapshot,
+      product: item.saleItem?.product ?? item.product,
+    });
+    return sum + (toNumber(item.qty) * unitCost);
+  }, 0);
+}
+
 async function listReportSales(companyId: number, fromDate: Date, toDate: Date) {
   const rows: ReportSaleRow[] = await prisma.sale.findMany({
     where: getReportSalesWhere(companyId, fromDate, toDate),
@@ -62,24 +109,62 @@ async function listReportSales(companyId: number, fromDate: Date, toDate: Date) 
     orderBy: { createdAt: 'desc' },
   });
 
-  return rows.map((sale) => ({
-    id: sale.id,
-    localCode: sale.localCode,
-    customerName: sale.customerNameSnapshot,
-    total: toNumber(sale.total),
-    paymentMethod: sale.paymentMethod,
-    sessionId: sale.sessionId,
-    sessionStatus: sale.session?.status,
-    sessionOpenedAt: sale.session?.openedAt,
-    createdAt: sale.createdAt,
-    user: sale.createdBy
-      ? {
-          id: sale.createdBy.id,
-          username: sale.createdBy.username,
-          displayName: sale.createdBy.displayName,
-        }
-      : null,
-  }));
+  return rows.map((sale) => {
+    const total = toNumber(sale.total);
+    const totalCost = calculateSaleCost(sale);
+    return {
+      id: sale.id,
+      localCode: sale.localCode,
+      customerName: sale.customerNameSnapshot,
+      total,
+      totalCost,
+      profit: total - totalCost,
+      paymentMethod: sale.paymentMethod,
+      sessionId: sale.sessionId,
+      sessionStatus: sale.session?.status,
+      sessionOpenedAt: sale.session?.openedAt,
+      createdAt: sale.createdAt,
+      user: sale.createdBy
+        ? {
+            id: sale.createdBy.id,
+            username: sale.createdBy.username,
+            displayName: sale.createdBy.displayName,
+          }
+        : null,
+    };
+  });
+}
+
+async function listReportReturns(companyId: number, fromDate: Date, toDate: Date) {
+  const rows = await prisma.return.findMany({
+    where: getReportReturnsWhere(companyId, fromDate, toDate),
+    include: {
+      returnSale: { select: { id: true, total: true, createdAt: true } },
+      items: {
+        include: {
+          product: { select: { id: true, cost: true } },
+          saleItem: {
+            include: {
+              product: { select: { id: true, cost: true } },
+            },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return rows.map((row) => {
+    const total = Math.abs(toNumber(row.returnSale.total));
+    const totalCost = calculateReturnCost(row);
+    return {
+      id: row.id,
+      returnSaleId: row.returnSaleId,
+      total,
+      totalCost,
+      createdAt: row.returnSale.createdAt,
+    };
+  });
 }
 
 async function listReportExpenses(companyId: number, fromDate: Date, toDate: Date) {
@@ -124,22 +209,34 @@ export async function getReportData(companyId: number, from: string, to: string)
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
 
-  const [sales, expenses] = await Promise.all([
+  const [sales, returns] = await Promise.all([
     listReportSales(companyId, fromDate, toDate),
-    listReportExpenses(companyId, fromDate, toDate),
+    listReportReturns(companyId, fromDate, toDate),
   ]);
 
-  const totalSales = sales.reduce((sum, sale) => sum + sale.total, 0);
-  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const grossSales = sales.reduce((sum, sale) => sum + sale.total, 0);
+  const refundedSales = returns.reduce((sum, row) => sum + row.total, 0);
+  const totalSales = grossSales - refundedSales;
+  const soldCost = sales.reduce((sum, sale) => sum + sale.totalCost, 0);
+  const returnedCost = returns.reduce((sum, row) => sum + row.totalCost, 0);
+  const totalCost = soldCost - returnedCost;
+  const grossProfit = totalSales - totalCost;
+  const totalExpenses = 0;
   const salesCount = sales.length;
   const averageTicket = salesCount > 0 ? totalSales / salesCount : 0;
-  const profit = totalSales - totalExpenses;
+  const profit = grossProfit;
+  const salesByDayRows = [
+    ...sales.map((sale) => ({ createdAt: sale.createdAt, total: sale.total })),
+    ...returns.map((row) => ({ createdAt: row.createdAt, total: -row.total })),
+  ];
 
   return {
     sales,
-    expenses,
-    salesByDay: buildSalesByDay(sales),
+    expenses: [],
+    salesByDay: buildSalesByDay(salesByDayRows),
     totalSales,
+    totalCost,
+    grossProfit,
     totalExpenses,
     profit,
     salesCount,
@@ -154,8 +251,8 @@ function toNumber(value: any) {
   return Number(value);
 }
 
-function calculateProfit(revenue: number, cost: number, expenses: number) {
-  return revenue - cost - expenses;
+function calculateProfit(revenue: number, cost: number) {
+  return revenue - cost;
 }
 
 function calculateDeferredTotalDue(sale: {
@@ -169,13 +266,6 @@ function calculateDeferredTotalDue(sale: {
     return total + (total * toNumber(sale.creditInterestRate) / 100);
   }
   return total;
-}
-
-function allocateExpenseShare(totalExpenses: number, revenue: number, revenueBase: number) {
-  if (Math.abs(totalExpenses) <= 0.009 || revenue <= 0 || revenueBase <= 0) {
-    return 0;
-  }
-  return totalExpenses * (revenue / revenueBase);
 }
 
 export async function getReportsStatus(companyId: number, from: string, to: string) {
@@ -263,9 +353,9 @@ export async function getSalesSummary(companyId: number, from: string, to: strin
     total: report.totalSales,
     count: report.salesCount,
     average: report.averageTicket,
-    totalCost: 0,
+    totalCost: report.totalCost,
     profit: report.profit,
-    expenses: report.totalExpenses,
+    expenses: 0,
     paymentsReceived: 0,
     creditPaymentsReceived: 0,
     layawayPaymentsReceived: 0,
@@ -326,7 +416,7 @@ export async function getSaleDetail(companyId: number, saleId: number) {
       },
       items: {
         include: {
-          product: { select: { id: true, code: true, name: true } },
+          product: { select: { id: true, code: true, name: true, cost: true } },
         },
         orderBy: { id: 'asc' },
       },
@@ -338,44 +428,13 @@ export async function getSaleDetail(companyId: number, saleId: number) {
   }
 
   const saleTotal = toNumber(sale.total);
-  const [sessionRevenueAggregate, sessionExpenseAggregate] = sale.sessionId
-    ? await Promise.all([
-        prisma.sale.aggregate({
-          _sum: { total: true },
-          where: {
-            companyId,
-            sessionId: sale.sessionId,
-            kind: { in: ['invoice', 'sale'] },
-            status: { in: [...REPORT_SALE_STATUSES] },
-            deletedAt: null,
-          },
-        }),
-        prisma.cashMovement.aggregate({
-          _sum: { amount: true },
-          where: {
-            companyId,
-            sessionId: sale.sessionId,
-            type: 'out',
-            movementType: 'expense',
-            affectsProfit: true,
-          },
-        }),
-      ])
-    : [null, null] as const;
-  const sessionRevenue = toNumber(sessionRevenueAggregate?._sum.total);
-  const allocatedExpenses = allocateExpenseShare(
-    toNumber(sessionExpenseAggregate?._sum.amount),
-    saleTotal,
-    sessionRevenue,
-  );
   const lineRevenueBase = sale.items.reduce((sum, item) => sum + Math.max(toNumber(item.totalLine), 0), 0);
   let remainingRevenue = saleTotal;
-  let remainingExpenses = allocatedExpenses;
 
   const items = sale.items.map((item, index) => {
     const qty = toNumber(item.qty);
     const unitPrice = toNumber(item.unitPrice);
-    const cost = toNumber(item.purchasePriceSnapshot);
+    const cost = resolveItemUnitCost(item);
     const discountLine = toNumber(item.discountLine);
     const totalLine = toNumber(item.totalLine);
     const lineCost = qty * cost;
@@ -388,16 +447,8 @@ export async function getSaleDetail(companyId: number, saleId: number) {
         : sale.items.length > 0
           ? saleTotal / sale.items.length
           : 0;
-    const expenseShare = isLastItem
-      ? remainingExpenses
-      : lineRevenueBase > 0
-        ? allocatedExpenses * (revenueWeight / lineRevenueBase)
-        : sale.items.length > 0
-          ? allocatedExpenses / sale.items.length
-          : 0;
     remainingRevenue -= revenueShare;
-    remainingExpenses -= expenseShare;
-    const lineProfit = calculateProfit(revenueShare, lineCost, expenseShare);
+    const lineProfit = calculateProfit(revenueShare, lineCost);
     return {
       id: item.id,
       productId: item.productId,
@@ -415,7 +466,7 @@ export async function getSaleDetail(companyId: number, saleId: number) {
   });
 
   const totalCost = items.reduce((sum, item) => sum + item.lineCost, 0);
-  const profit = calculateProfit(saleTotal, totalCost, allocatedExpenses);
+  const profit = calculateProfit(saleTotal, totalCost);
   const totalDue = calculateDeferredTotalDue(sale);
   const deferredPayments = sale.payments.map((payment) => ({
     id: payment.id,

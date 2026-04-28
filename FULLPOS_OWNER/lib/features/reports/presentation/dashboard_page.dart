@@ -97,6 +97,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           expenses: const <ReportExpenseRow>[],
           salesByDay: const <SalesByDay>[],
           totalSales: 0,
+          totalCost: 0,
+          grossProfit: 0,
           totalExpenses: 0,
           profit: 0,
           salesCount: 0,
@@ -119,6 +121,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           expenses: const <ReportExpenseRow>[],
           salesByDay: const <SalesByDay>[],
           totalSales: 0,
+          totalCost: 0,
+          grossProfit: 0,
           totalExpenses: 0,
           profit: 0,
           salesCount: 0,
@@ -587,7 +591,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     final appConfig = ref.watch(appConfigProvider);
     final report = _reportData;
     final total = report?.totalSales ?? 0;
-    final expensesTotal = report?.totalExpenses ?? 0;
+    final totalCost = report?.totalCost ?? 0;
     final profit = report?.profit ?? 0;
     final margin = total > 0 ? (profit / total) * 100 : 0.0;
     final reportSalesByDay = report?.salesByDay ?? const <SalesByDay>[];
@@ -625,11 +629,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
             color: theme.colorScheme.primary,
           ),
           _MetricInfo(
-            title: 'Gastos',
-            value: _formatReportAmount(expensesTotal),
+            title: 'Costo',
+            value: _formatReportAmount(totalCost),
             caption: '',
-            icon: Icons.receipt_long_outlined,
-            color: AppColors.warning,
+            icon: Icons.inventory_2_outlined,
+            color: theme.colorScheme.secondary,
           ),
           _MetricInfo(
             title: 'Ganancias',
@@ -729,7 +733,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                 isPhone: isPhone,
                 averageDay: averageDay,
                 margin: margin,
-                expensesTotal: expensesTotal,
+                totalCost: totalCost,
                 peakDay: peakDay,
                 formatAmount: _formatReportAmount,
                 onOpenDetails: () {
@@ -1030,7 +1034,7 @@ class _SalesOverviewSection extends StatelessWidget {
     required this.isPhone,
     required this.averageDay,
     required this.margin,
-    required this.expensesTotal,
+    required this.totalCost,
     required this.peakDay,
     required this.formatAmount,
     required this.onOpenDetails,
@@ -1043,7 +1047,7 @@ class _SalesOverviewSection extends StatelessWidget {
   final bool isPhone;
   final double averageDay;
   final double margin;
-  final double expensesTotal;
+  final double totalCost;
   final SalesByDay? peakDay;
   final String Function(num value) formatAmount;
   final VoidCallback onOpenDetails;
@@ -1065,9 +1069,9 @@ class _SalesOverviewSection extends StatelessWidget {
         compact: isPhone,
       ),
       _StatPill(
-        label: 'Gastos',
-        value: formatAmount(expensesTotal),
-        color: AppColors.warning,
+        label: 'Costo',
+        value: formatAmount(totalCost),
+        color: theme.colorScheme.secondary,
         compact: isPhone,
       ),
       _StatPill(

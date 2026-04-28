@@ -43,6 +43,8 @@ class ReportData {
     required this.expenses,
     required this.salesByDay,
     required this.totalSales,
+    required this.totalCost,
+    required this.grossProfit,
     required this.totalExpenses,
     required this.profit,
     required this.salesCount,
@@ -53,6 +55,8 @@ class ReportData {
   final List<ReportExpenseRow> expenses;
   final List<SalesByDay> salesByDay;
   final double totalSales;
+  final double totalCost;
+  final double grossProfit;
   final double totalExpenses;
   final double profit;
   final int salesCount;
@@ -73,6 +77,11 @@ class ReportData {
       expenses: expensesJson.map(ReportExpenseRow.fromJson).toList(),
       salesByDay: salesByDayJson.map(SalesByDay.fromJson).toList(),
       totalSales: (json['totalSales'] as num?)?.toDouble() ?? 0,
+      totalCost: (json['totalCost'] as num?)?.toDouble() ?? 0,
+      grossProfit:
+          (json['grossProfit'] as num?)?.toDouble() ??
+          (json['profit'] as num?)?.toDouble() ??
+          0,
       totalExpenses: (json['totalExpenses'] as num?)?.toDouble() ?? 0,
       profit: (json['profit'] as num?)?.toDouble() ?? 0,
       salesCount: (json['salesCount'] as num?)?.toInt() ?? 0,

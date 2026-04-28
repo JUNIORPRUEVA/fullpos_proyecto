@@ -239,11 +239,11 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                           const SizedBox(width: _salesHorizontalGap),
                           Expanded(
                             child: _SalesMetric(
-                              title: 'Gastos',
+                              title: 'Costo',
                               value: report != null
-                                  ? formatAccountingAmount(report.totalExpenses)
+                                  ? formatAccountingAmount(report.totalCost)
                                   : '--',
-                              icon: Icons.receipt_long_outlined,
+                              icon: Icons.inventory_2_outlined,
                             ),
                           ),
                           const SizedBox(width: _salesHorizontalGap),
