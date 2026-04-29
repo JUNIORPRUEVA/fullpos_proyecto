@@ -714,7 +714,7 @@ async function buildSafeDgiiAuthDiagnostic(input: {
 
   return {
     ok,
-    buildMarker: 'dgii-auth-debug-v5-final-xml-sanitize',
+    buildMarker: 'dgii-auth-debug-v6-official-empty-uri-inclusive-c14n',
     stage,
     requestId: input.requestId,
     originalSeedRoot: authDebug?.originalSeedRoot ?? null,

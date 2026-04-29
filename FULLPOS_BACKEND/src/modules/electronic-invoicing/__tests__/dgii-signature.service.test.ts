@@ -27,12 +27,23 @@ test('DgiiSignatureService signs and verifies XML', () => {
   const xml = '<?xml version="1.0" encoding="UTF-8"?><eCF><Encabezado><IdDoc><eNCF>E310000000001</eNCF></IdDoc></Encabezado></eCF>';
 
   const signed = service.signXml(xml, privateKeyPem, certPem);
+  const diagnostics = service.inspectSignedXml(signed);
   const verification = service.verifySignedXml(signed);
 
   assert.match(signed, /<Signature/);
+  assert.doesNotMatch(signed, /<eCF[^>]+\s(?:Id|ID|id)="/);
+  assert.match(signed, /<Reference URI=""/);
+  assert.match(signed, /<Transform Algorithm="http:\/\/www\.w3\.org\/2000\/09\/xmldsig#enveloped-signature"/);
+  assert.match(signed, /<Transform Algorithm="http:\/\/www\.w3\.org\/TR\/2001\/REC-xml-c14n-20010315"/);
   assert.match(signed, /<DigestValue>/);
   assert.match(signed, /<SignatureValue>/);
-  assert.match(signed, /<X509Certificate>/);
+  assert.match(signed, /<KeyInfo><X509Data><X509Certificate>/);
+  assert.equal(diagnostics.signedXmlRoot, 'eCF');
+  assert.equal(diagnostics.signedXmlHasIdAttributeOnRoot, false);
+  assert.equal(diagnostics.signatureReferenceUri, '');
+  assert.equal(diagnostics.canonicalizationAlgorithm, 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315');
+  assert.equal(diagnostics.signatureAlgorithm, 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256');
+  assert.equal(diagnostics.digestAlgorithm, 'http://www.w3.org/2001/04/xmlenc#sha256');
   assert.equal(verification.valid, true);
   assert.equal(verification.errors.length, 0);
 });
@@ -49,13 +60,16 @@ test('DgiiSignatureService signs DGII SemillaModel with empty Reference URI and 
   assert.doesNotMatch(signed, /<SemillaModel[^>]+\s(?:Id|ID|id)="/);
   assert.match(signed, /<Signature/);
   assert.match(signed, /<Reference URI=""/);
+  assert.match(signed, /<Transform Algorithm="http:\/\/www\.w3\.org\/2000\/09\/xmldsig#enveloped-signature"/);
+  assert.match(signed, /<Transform Algorithm="http:\/\/www\.w3\.org\/TR\/2001\/REC-xml-c14n-20010315"/);
+  assert.match(signed, /<KeyInfo><X509Data><X509Certificate>/);
   assert.match(signed, /<valor>abc123<\/valor>\s*<fecha>2026-04-26T00:00:00<\/fecha>\s*<Signature/);
   assert.equal(diagnostics.signedXmlRoot, 'SemillaModel');
   assert.equal(diagnostics.signedXmlHasSignature, true);
   assert.equal(diagnostics.signedXmlHasIdAttributeOnRoot, false);
   assert.equal(diagnostics.signedXmlRootId, null);
   assert.equal(diagnostics.signatureReferenceUri, '');
-  assert.equal(diagnostics.canonicalizationAlgorithm, 'http://www.w3.org/2001/10/xml-exc-c14n#');
+  assert.equal(diagnostics.canonicalizationAlgorithm, 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315');
   assert.equal(diagnostics.signatureAlgorithm, 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256');
   assert.equal(diagnostics.digestAlgorithm, 'http://www.w3.org/2001/04/xmlenc#sha256');
   assert.equal(verification.valid, true);

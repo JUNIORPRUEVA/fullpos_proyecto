@@ -3,7 +3,7 @@ import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import path from 'path';
 import { PrismaClient } from '@prisma/client';
-import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
+import { DOMParser } from '@xmldom/xmldom';
 import env from '../../../config/env';
 import { DgiiSignatureService, SEED_SIGNATURE_MODES, SeedSignatureMode, SignedXmlDiagnostics } from './dgii-signature.service';
 import { ElectronicInvoicingAuditService } from './electronic-invoicing-audit.service';
@@ -304,64 +304,31 @@ function inspectSignedSeedBasics(xml: string) {
   };
 }
 
-function sanitizeSignedSeedXmlForDgii(signedXml: string, originalSeedXml: string): { xml: string; diagnostics: SignedSeedSanitizerDiagnostics } {
-  const before = inspectSignedSeedBasics(signedXml);
+function inspectSignedSeedXmlForDgiiWithoutMutation(signedXml: string, originalSeedXml: string): { xml: string; diagnostics: SignedSeedSanitizerDiagnostics } {
+  const inspected = inspectSignedSeedBasics(signedXml);
   const signedXmlSizeBeforeSanitize = signedXml.length;
   const signedXmlHasBomBeforeSanitize = hasUtf8Bom(signedXml);
   const signedXmlHasDeclarationBeforeSanitize = hasXmlDeclaration(signedXml);
-  let xml = signedXml
-    .replace(/^\uFEFF/, '')
-    .replace(/^\s*<\?xml[^>]*\?>\s*/i, '');
-
-  const document = new DOMParser().parseFromString(xml, 'text/xml');
-  const root = document.documentElement;
-  if (root?.localName !== 'SemillaModel' && root?.nodeName !== 'SemillaModel') {
-    throw {
-      status: 400,
-      message: 'La semilla firmada no conserva raíz SemillaModel después de sanitizar',
-      errorCode: 'DGII_SEED_SIGNED_XML_STRUCTURE_INVALID',
-      details: { rootName: root?.localName || root?.nodeName || null },
-    };
-  }
-
-  for (const attribute of ['Id', 'ID', 'id']) {
-    if (root.hasAttribute(attribute)) {
-      root.removeAttribute(attribute);
-    }
-  }
-
-  const reference = findFirstElementByLocalName(document, 'Reference');
-  const rootHasIdAfterRemoval = root.hasAttribute('Id') || root.hasAttribute('ID') || root.hasAttribute('id');
-  const referenceUri = reference?.getAttribute('URI') ?? null;
-  if (reference && !rootHasIdAfterRemoval && referenceUri?.startsWith('#')) {
-    reference.setAttribute('URI', '');
-  }
-
-  xml = new XMLSerializer().serializeToString(document)
-    .replace(/^\uFEFF/, '')
-    .replace(/^\s*<\?xml[^>]*\?>\s*/i, '')
-    .trim();
-  const after = inspectSignedSeedBasics(xml);
 
   return {
-    xml,
+    xml: signedXml,
     diagnostics: {
       originalSeedRoot: extractXmlRootName(originalSeedXml),
       signedXmlHasBomBeforeSanitize,
-      signedXmlHasBomAfterSanitize: hasUtf8Bom(xml),
+      signedXmlHasBomAfterSanitize: signedXmlHasBomBeforeSanitize,
       signedXmlHasDeclarationBeforeSanitize,
-      signedXmlHasDeclarationAfterSanitize: hasXmlDeclaration(xml),
-      signedXmlRootBeforeSanitize: before.rootName,
-      signedXmlRootAfterSanitize: after.rootName,
-      signedXmlHasRootIdAttributeBeforeSanitize: before.hasRootIdAttribute,
-      signedXmlHasRootIdAttributeAfterSanitize: after.hasRootIdAttribute,
-      rootIdBeforeSanitize: before.rootId,
-      rootIdAfterSanitize: after.rootId,
-      signatureReferenceUriBeforeSanitize: before.signatureReferenceUri,
-      signatureReferenceUriAfterSanitize: after.signatureReferenceUri,
+      signedXmlHasDeclarationAfterSanitize: signedXmlHasDeclarationBeforeSanitize,
+      signedXmlRootBeforeSanitize: inspected.rootName,
+      signedXmlRootAfterSanitize: inspected.rootName,
+      signedXmlHasRootIdAttributeBeforeSanitize: inspected.hasRootIdAttribute,
+      signedXmlHasRootIdAttributeAfterSanitize: inspected.hasRootIdAttribute,
+      rootIdBeforeSanitize: inspected.rootId,
+      rootIdAfterSanitize: inspected.rootId,
+      signatureReferenceUriBeforeSanitize: inspected.signatureReferenceUri,
+      signatureReferenceUriAfterSanitize: inspected.signatureReferenceUri,
       signedXmlSizeBeforeSanitize,
-      finalXmlSize: xml.length,
-      finalXmlStartsWith: xmlStartsWithPreview(xml),
+      finalXmlSize: signedXml.length,
+      finalXmlStartsWith: xmlStartsWithPreview(signedXml),
     },
   };
 }
@@ -424,11 +391,11 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
     };
   }
 
-  const withoutBom = signedSeedXml.replace(/^\uFEFF/, '');
-  const firstNonWhitespace = withoutBom.search(/\S/);
+  const inspectableXml = signedSeedXml.replace(/^\uFEFF/, '');
+  const firstNonWhitespace = inspectableXml.search(/\S/);
   const startsLikeXml =
     firstNonWhitespace >= 0 &&
-    (withoutBom.slice(firstNonWhitespace).startsWith('<?xml') || withoutBom.slice(firstNonWhitespace).startsWith('<'));
+    (inspectableXml.slice(firstNonWhitespace).startsWith('<?xml') || inspectableXml.slice(firstNonWhitespace).startsWith('<'));
   if (!startsLikeXml) {
     throw {
       status: 400,
@@ -436,12 +403,12 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
       errorCode: 'DGII_SEED_SIGNED_XML_INVALID',
       details: {
         startsLikeXml,
-        firstChars: withoutBom.slice(0, 60),
+        firstChars: inspectableXml.slice(0, 60),
       },
     };
   }
 
-  if (withoutBom.includes('\\"') || withoutBom.includes('[object Object]')) {
+  if (inspectableXml.includes('\\"') || inspectableXml.includes('[object Object]')) {
     throw {
       status: 400,
       message: 'La semilla firmada parece serializada/escapada incorrectamente',
@@ -449,7 +416,7 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
     };
   }
 
-  if (withoutBom.includes('&lt;') && withoutBom.includes('&gt;')) {
+  if (inspectableXml.includes('&lt;') && inspectableXml.includes('&gt;')) {
     throw {
       status: 400,
       message: 'La semilla firmada está escapada como texto en lugar de XML',
@@ -458,7 +425,7 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
   }
 
   try {
-    parseXml(withoutBom);
+    parseXml(inspectableXml);
   } catch {
     throw {
       status: 400,
@@ -467,7 +434,7 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
     };
   }
 
-  const root = extractXmlRootName(withoutBom);
+  const root = extractXmlRootName(inspectableXml);
   const rootNormalized = (root ?? '').toLowerCase();
   if (rootNormalized !== 'semillamodel') {
     throw {
@@ -478,9 +445,9 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
     };
   }
 
-  const hasSignature = hasXmlNode(withoutBom, 'Signature');
-  const hasValor = hasXmlNode(withoutBom, 'valor');
-  const hasFecha = hasXmlNode(withoutBom, 'fecha');
+  const hasSignature = hasXmlNode(inspectableXml, 'Signature');
+  const hasValor = hasXmlNode(inspectableXml, 'valor');
+  const hasFecha = hasXmlNode(inspectableXml, 'fecha');
   if (!hasSignature || !hasValor || !hasFecha) {
     throw {
       status: 400,
@@ -495,7 +462,7 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
     };
   }
 
-  const structure = inspectDgiiSeedXsdStructure(withoutBom);
+  const structure = inspectDgiiSeedXsdStructure(inspectableXml);
   if (
     !structure.rootMatchesOfficialSeed ||
     !structure.seedElementOrderMatchesOfficialSeed ||
@@ -511,10 +478,10 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
   }
 
   return {
-    signedXml: withoutBom,
+    signedXml: signedSeedXml,
     signedXmlRoot: root,
     signedXmlHasSignature: hasSignature,
-    signedXmlSize: withoutBom.length,
+    signedXmlSize: signedSeedXml.length,
   };
 }
 
@@ -992,8 +959,8 @@ export class DgiiAuthService {
       loaded.chainPems.length,
     );
     const seedRootAfter = extractXmlRootName(signedSeedXml);
-    const sanitizedSignedSeed = sanitizeSignedSeedXmlForDgii(signedSeedXml, seedResponse.seedXml);
-    signedSeedXml = sanitizedSignedSeed.xml;
+    const signedSeedFinalXml = inspectSignedSeedXmlForDgiiWithoutMutation(signedSeedXml, seedResponse.seedXml);
+    signedSeedXml = signedSeedFinalXml.xml;
     const signedXmlValidation = validateSignedSeedXmlForDgii(signedSeedXml);
     const signedXmlDiagnostics = this.signatureService.inspectSignedXml(signedXmlValidation.signedXml);
     const selfVerify = this.signatureService.verifySignedXml(signedXmlValidation.signedXml);
@@ -1046,18 +1013,18 @@ export class DgiiAuthService {
       signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
       digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
       signedXmlRootId: signedXmlDiagnostics.signedXmlRootId,
-      signedXmlHasBom: sanitizedSignedSeed.diagnostics.signedXmlHasBomAfterSanitize,
-      signedXmlHasDeclaration: sanitizedSignedSeed.diagnostics.signedXmlHasDeclarationAfterSanitize,
-      signedXmlHasRootIdAttribute: sanitizedSignedSeed.diagnostics.signedXmlHasRootIdAttributeAfterSanitize,
-      signatureReferenceUriBeforeSanitize: sanitizedSignedSeed.diagnostics.signatureReferenceUriBeforeSanitize,
-      signatureReferenceUriAfterSanitize: sanitizedSignedSeed.diagnostics.signatureReferenceUriAfterSanitize,
-      rootIdBeforeSanitize: sanitizedSignedSeed.diagnostics.rootIdBeforeSanitize,
-      rootIdAfterSanitize: sanitizedSignedSeed.diagnostics.rootIdAfterSanitize,
-      xmlDeclarationBeforeSanitize: sanitizedSignedSeed.diagnostics.signedXmlHasDeclarationBeforeSanitize,
-      xmlDeclarationAfterSanitize: sanitizedSignedSeed.diagnostics.signedXmlHasDeclarationAfterSanitize,
-      finalXmlSize: sanitizedSignedSeed.diagnostics.finalXmlSize,
-      finalXmlStartsWith: sanitizedSignedSeed.diagnostics.finalXmlStartsWith,
-      finalXmlRootAfterSanitize: sanitizedSignedSeed.diagnostics.signedXmlRootAfterSanitize,
+      signedXmlHasBom: signedSeedFinalXml.diagnostics.signedXmlHasBomAfterSanitize,
+      signedXmlHasDeclaration: signedSeedFinalXml.diagnostics.signedXmlHasDeclarationAfterSanitize,
+      signedXmlHasRootIdAttribute: signedSeedFinalXml.diagnostics.signedXmlHasRootIdAttributeAfterSanitize,
+      signatureReferenceUriBeforeSanitize: signedSeedFinalXml.diagnostics.signatureReferenceUriBeforeSanitize,
+      signatureReferenceUriAfterSanitize: signedSeedFinalXml.diagnostics.signatureReferenceUriAfterSanitize,
+      rootIdBeforeSanitize: signedSeedFinalXml.diagnostics.rootIdBeforeSanitize,
+      rootIdAfterSanitize: signedSeedFinalXml.diagnostics.rootIdAfterSanitize,
+      xmlDeclarationBeforeSanitize: signedSeedFinalXml.diagnostics.signedXmlHasDeclarationBeforeSanitize,
+      xmlDeclarationAfterSanitize: signedSeedFinalXml.diagnostics.signedXmlHasDeclarationAfterSanitize,
+      finalXmlSize: signedSeedFinalXml.diagnostics.finalXmlSize,
+      finalXmlStartsWith: signedSeedFinalXml.diagnostics.finalXmlStartsWith,
+      finalXmlRootAfterSanitize: signedSeedFinalXml.diagnostics.signedXmlRootAfterSanitize,
     });
 
     const debugSavedPath = saveSignedSeedXmlForDebug(signedXmlValidation.signedXml);
@@ -1067,7 +1034,7 @@ export class DgiiAuthService {
       companyRnc: companyIdentity?.rnc ?? null,
       debugXmlSaved: !!debugSavedPath,
       debugXmlPath: debugSavedPath,
-      diagnostics: sanitizedSignedSeed.diagnostics,
+      diagnostics: signedSeedFinalXml.diagnostics,
       structure: inspectDgiiSeedXsdStructure(signedXmlValidation.signedXml),
     });
 
@@ -1080,7 +1047,7 @@ export class DgiiAuthService {
         config.userAgent,
         config.timeoutMs,
         signedXmlValidation.signedXml,
-        sanitizedSignedSeed.diagnostics,
+        signedSeedFinalXml.diagnostics,
       );
     } catch (error) {
       if ((error as any)?.errorCode === 'DGII_SEED_VALIDATE_BAD_REQUEST') {

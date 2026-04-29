@@ -185,7 +185,7 @@ test('DgiiAuthService debug auth maps DGII seed validation diagnostics without e
         signedXmlHasIdAttributeOnRoot: false,
         signatureReferenceUri: '',
         signedXmlRootId: null,
-        canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+        canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
         signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
         digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
         signedXmlSize: 3900,
@@ -263,7 +263,7 @@ test('DgiiAuthService debug auth success reports tokenFound without returning to
       signedXmlHasIdAttributeOnRoot: false,
       signatureReferenceUri: '',
       signedXmlRootId: null,
-      canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+      canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
       signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
       digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
       payloadMode: 'multipart',
@@ -330,7 +330,7 @@ test('DgiiAuthService debug auth returns diagnostic matrix when requested', asyn
       signedXmlHasIdAttributeOnRoot: false,
       signatureReferenceUri: '',
       signedXmlRootId: null,
-      canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+      canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
       signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
       digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
       payloadMode: 'multipart',
@@ -340,8 +340,8 @@ test('DgiiAuthService debug auth returns diagnostic matrix when requested', asyn
   });
   service.runSeedDiagnosticMatrix = async () => [
     {
-      signatureMode: 'exc-c14n/rsa-sha256/sha256/leaf',
-      canonicalization: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+      signatureMode: 'official-inc-c14n/rsa-sha256/sha256/leaf',
+      canonicalization: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
       signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
       digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
       referenceUri: '',

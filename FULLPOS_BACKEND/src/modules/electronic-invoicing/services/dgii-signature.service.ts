@@ -15,7 +15,7 @@ export type SignedXmlDiagnostics = {
 };
 
 const SIGNATURE_ALGORITHM = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
-const CANONICALIZATION_ALGORITHM = 'http://www.w3.org/2001/10/xml-exc-c14n#';
+const CANONICALIZATION_ALGORITHM = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
 const DIGEST_ALGORITHM = 'http://www.w3.org/2001/04/xmlenc#sha256';
 const ENVELOPED_SIGNATURE_TRANSFORM = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature';
 
@@ -29,16 +29,16 @@ export type SeedSignatureMode = {
 
 export const SEED_SIGNATURE_MODES: SeedSignatureMode[] = [
   {
-    label: 'exc-c14n/rsa-sha256/sha256/leaf',
+    label: 'official-inc-c14n/rsa-sha256/sha256/leaf',
     signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
-    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
     digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
     keyInfoMode: 'leaf-only',
   },
   {
-    label: 'inc-c14n/rsa-sha256/sha256/leaf',
+    label: 'exc-c14n/rsa-sha256/sha256/leaf',
     signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
-    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
     digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
     keyInfoMode: 'leaf-only',
   },
@@ -57,9 +57,9 @@ export const SEED_SIGNATURE_MODES: SeedSignatureMode[] = [
     keyInfoMode: 'leaf-only',
   },
   {
-    label: 'exc-c14n/rsa-sha256/sha256/chain',
+    label: 'official-inc-c14n/rsa-sha256/sha256/chain',
     signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
-    canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+    canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
     digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
     keyInfoMode: 'chain',
   },
@@ -81,7 +81,7 @@ function findFirstElementByLocalName(node: any, localName: string): Element | nu
 
 export class DgiiSignatureService {
   signXml(xml: string, privateKeyPem: string, certPem: string) {
-    return this.signXmlInternal(xml, privateKeyPem, certPem, { emptyReferenceUri: false });
+    return this.signXmlInternal(xml, privateKeyPem, certPem, { emptyReferenceUri: true });
   }
 
   signSeedXml(xml: string, privateKeyPem: string, certPem: string) {
