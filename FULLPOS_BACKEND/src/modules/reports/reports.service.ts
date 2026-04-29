@@ -9,7 +9,14 @@ const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo'
 const REPORT_SALE_KINDS = ['invoice', 'sale'];
 // Fully refunded sales should disappear from owner sales reports, while
 // partially refunded sales must remain visible with their updated status.
-const REPORT_SALE_STATUSES = ['completed', 'PAID', 'PARTIAL_REFUND'] as const;
+const REPORT_SALE_STATUSES = [
+  'completed',
+  'COMPLETED',
+  'paid',
+  'PAID',
+  'partial_refund',
+  'PARTIAL_REFUND',
+] as const;
 
 const reportSaleInclude = {
   items: {

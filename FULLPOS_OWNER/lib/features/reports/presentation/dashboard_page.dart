@@ -6,11 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
-import '../../../core/config/app_config.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/accounting_format.dart';
-import '../../auth/data/auth_repository.dart';
 import '../data/report_data.dart';
 import '../data/report_models.dart';
 import '../data/report_realtime_projection.dart';
@@ -587,8 +585,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     });
 
     final theme = Theme.of(context);
-    final authState = ref.watch(authRepositoryProvider);
-    final appConfig = ref.watch(appConfigProvider);
     final report = _reportData;
     final total = report?.totalSales ?? 0;
     final totalCost = report?.totalCost ?? 0;
@@ -676,70 +672,69 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                 ),
                 const SizedBox(height: 12),
               ],
-              if (hasNoVisibleData) ...[
-                _TenantHintBanner(
-                  companyName: authState.companyName?.trim(),
-                  companyRnc: authState.companyRnc?.trim(),
-                  companyId: authState.companyId?.toString(),
-                  serverUrl: appConfig.baseUrl,
+              if (hasNoVisibleData)
+                const _SimpleNoDataState()
+              else ...[
+                isPhone
+                    ? _MobileMetricStrip(
+                        items: metricItems,
+                        onTap: (index) {
+                          _showMetricPreview(
+                            context,
+                            metric: metricItems[index],
+                            isPhone: isPhone,
+                            width: width,
+                          );
+                        },
+                      )
+                    : GridView.count(
+                        crossAxisCount: columns,
+                        childAspectRatio: metricRatio,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          for (
+                            var index = 0;
+                            index < metricItems.length;
+                            index++
+                          )
+                            _MetricCard(
+                              title: metricItems[index].title,
+                              value: metricItems[index].value,
+                              caption: metricItems[index].caption,
+                              icon: metricItems[index].icon,
+                              color: metricItems[index].color,
+                              emphasized: true,
+                              onTap: () {
+                                _showMetricPreview(
+                                  context,
+                                  metric: metricItems[index],
+                                  isPhone: isPhone,
+                                  width: width,
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                const SizedBox(height: 18),
+                _SalesOverviewSection(
+                  fromLabel: fromStr,
+                  toLabel: toStr,
+                  chartData: chartData,
+                  chartHeight: chartHeight,
+                  isPhone: isPhone,
+                  averageDay: averageDay,
+                  margin: margin,
+                  totalCost: totalCost,
+                  peakDay: peakDay,
+                  formatAmount: _formatReportAmount,
+                  onOpenDetails: () {
+                    context.go('/sales/list?from=$fromStr&to=$toStr');
+                  },
                 ),
-                const SizedBox(height: 12),
               ],
-              isPhone
-                  ? _MobileMetricStrip(
-                      items: metricItems,
-                      onTap: (index) {
-                        _showMetricPreview(
-                          context,
-                          metric: metricItems[index],
-                          isPhone: isPhone,
-                          width: width,
-                        );
-                      },
-                    )
-                  : GridView.count(
-                      crossAxisCount: columns,
-                      childAspectRatio: metricRatio,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      children: [
-                        for (var index = 0; index < metricItems.length; index++)
-                          _MetricCard(
-                            title: metricItems[index].title,
-                            value: metricItems[index].value,
-                            caption: metricItems[index].caption,
-                            icon: metricItems[index].icon,
-                            color: metricItems[index].color,
-                            emphasized: true,
-                            onTap: () {
-                              _showMetricPreview(
-                                context,
-                                metric: metricItems[index],
-                                isPhone: isPhone,
-                                width: width,
-                              );
-                            },
-                          ),
-                      ],
-                    ),
-              const SizedBox(height: 18),
-              _SalesOverviewSection(
-                fromLabel: fromStr,
-                toLabel: toStr,
-                chartData: chartData,
-                chartHeight: chartHeight,
-                isPhone: isPhone,
-                averageDay: averageDay,
-                margin: margin,
-                totalCost: totalCost,
-                peakDay: peakDay,
-                formatAmount: _formatReportAmount,
-                onOpenDetails: () {
-                  context.go('/sales/list?from=$fromStr&to=$toStr');
-                },
-              ),
             ],
           ),
         );
@@ -1258,71 +1253,23 @@ class _WarningBanner extends StatelessWidget {
   }
 }
 
-class _TenantHintBanner extends StatelessWidget {
-  const _TenantHintBanner({
-    required this.companyName,
-    required this.companyRnc,
-    required this.companyId,
-    required this.serverUrl,
-  });
-
-  final String? companyName;
-  final String? companyRnc;
-  final String? companyId;
-  final String serverUrl;
+class _SimpleNoDataState extends StatelessWidget {
+  const _SimpleNoDataState();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final sessionParts = <String>[
-      if (companyName != null && companyName!.isNotEmpty) companyName!,
-      if (companyRnc != null && companyRnc!.isNotEmpty) 'RNC $companyRnc',
-      if (companyId != null && companyId!.isNotEmpty) 'ID $companyId',
-    ];
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primary.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.16),
+    return SizedBox(
+      width: double.infinity,
+      height: MediaQuery.sizeOf(context).height * 0.55,
+      child: Center(
+        child: Text(
+          'Sin datos',
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w700,
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'No hubo movimientos en el rango actual',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'La sesión activa está consultando esta empresa en la nube. Si otro admin sí ve ventas y este no, el problema suele ser la empresa asociada al usuario, no la pantalla.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              height: 1.35,
-            ),
-          ),
-          if (sessionParts.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Text(
-              sessionParts.join(' · '),
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-          const SizedBox(height: 4),
-          Text(
-            serverUrl,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
       ),
     );
   }

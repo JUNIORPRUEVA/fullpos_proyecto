@@ -44,6 +44,55 @@ function toSaleRealtimePayload(sale: {
   };
 }
 
+type CompanyLocatorRecord = {
+  id: number;
+  rnc: string | null;
+  cloudCompanyId: string | null;
+};
+
+function locatorDiagnostic(company: CompanyLocatorRecord | null) {
+  if (!company) return null;
+  return {
+    id: company.id,
+    rnc: company.rnc ?? null,
+    cloudCompanyId: company.cloudCompanyId ?? null,
+  };
+}
+
+async function attachRncIfMissing(
+  company: CompanyLocatorRecord,
+  rnc: string,
+): Promise<CompanyLocatorRecord> {
+  const normalized = normalizeRnc(rnc);
+  if (!normalized) return company;
+
+  const currentRnc = company.rnc?.trim() ?? '';
+  if (currentRnc.length > 0) return company;
+
+  return prisma.company.update({
+    where: { id: company.id },
+    data: { rnc: rnc.trim() },
+    select: { id: true, rnc: true, cloudCompanyId: true },
+  });
+}
+
+async function attachCloudIdIfMissing(
+  company: CompanyLocatorRecord,
+  cloudId: string,
+): Promise<CompanyLocatorRecord> {
+  const normalized = cloudId.trim();
+  if (!normalized) return company;
+
+  const currentCloudId = company.cloudCompanyId?.trim() ?? '';
+  if (currentCloudId.length > 0) return company;
+
+  return prisma.company.update({
+    where: { id: company.id },
+    data: { cloudCompanyId: normalized },
+    select: { id: true, rnc: true, cloudCompanyId: true },
+  });
+}
+
 async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
   const rnc = companyRnc?.trim() ?? '';
   const cloudId = companyCloudId?.trim() ?? '';
@@ -51,29 +100,30 @@ async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
     throw { status: 400, message: 'RNC o ID interno requerido' };
   }
 
-  let company = null as { id: number; rnc: string | null } | null;
+  let companyByCloudId: CompanyLocatorRecord | null = null;
 
   if (cloudId) {
-    company = await prisma.company.findFirst({
+    companyByCloudId = await prisma.company.findFirst({
       where: { cloudCompanyId: cloudId },
-      select: { id: true, rnc: true },
+      select: { id: true, rnc: true, cloudCompanyId: true },
     });
   }
 
-  if (!company && rnc) {
-    company = await prisma.company.findFirst({
+  let companyByRnc: CompanyLocatorRecord | null = null;
+  if (rnc) {
+    companyByRnc = await prisma.company.findFirst({
       where: { rnc },
-      select: { id: true, rnc: true },
+      select: { id: true, rnc: true, cloudCompanyId: true },
     });
 
-    if (!company) {
+    if (!companyByRnc) {
       const normalized = normalizeRnc(rnc);
       if (normalized.length > 0) {
         const candidates = await prisma.company.findMany({
           where: { rnc: { not: null } },
-          select: { id: true, rnc: true },
+          select: { id: true, rnc: true, cloudCompanyId: true },
         });
-        company =
+        companyByRnc =
           candidates.find(
             (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
           ) ?? null;
@@ -81,11 +131,25 @@ async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
     }
   }
 
-  if (!company) {
-    throw { status: 404, message: 'Empresa no encontrada' };
+  if (companyByCloudId) {
+    const resolved = await attachRncIfMissing(companyByCloudId, rnc);
+    if (companyByRnc && companyByRnc.id !== resolved.id) {
+      console.warn('[sales.resolveCompany] rnc_cloud_locator_conflict_cloud_preferred', {
+        requestedCompanyRnc: rnc || null,
+        requestedCompanyCloudId: cloudId || null,
+        companyByRnc: locatorDiagnostic(companyByRnc),
+        resolvedByCloudId: locatorDiagnostic(resolved),
+      });
+    }
+    return resolved.id;
   }
 
-  return company.id;
+  if (companyByRnc) {
+    const resolved = await attachCloudIdIfMissing(companyByRnc, cloudId);
+    return resolved.id;
+  }
+
+  throw { status: 404, message: 'Empresa no encontrada' };
 }
 
 export type SyncSaleInput = {
