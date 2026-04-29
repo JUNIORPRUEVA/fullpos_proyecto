@@ -426,8 +426,7 @@ async function main() {
   const signedXml = signXml(xmlContent, certInfo.certificate, certInfo.privateKey);
   
   // Verify signature locally
-  const hasSignature = verifySignatureLocal(signedXml, certInfo.certificate);
-  console.log(`   ✓ Signature inserted: ${hasSignature}`);
+  const localSignatureVerify = verifySignatureLocal(signedXml, certInfo.certificate);
   
   // Check root element preserved
   const signedDoc = new DOMParser().parseFromString(signedXml, 'text/xml');
@@ -436,6 +435,7 @@ async function main() {
   console.log(`   ✓ Root element preserved: ${rootPreserved} (${rootAfter})`);
 
   const dsig = collectSafeSignatureDiagnostics(signedXml);
+  console.log(`   ✓ Signature inserted: ${dsig.hasSignature}`);
   console.log(`   ✓ Reference URI: ${dsig.referenceUri}`);
   console.log(`   ✓ XML well-formed: ${dsig.xmlWellFormed}`);
   
@@ -449,32 +449,18 @@ async function main() {
   console.log(`   ✓ Output file: ${args.out}`);
   
   // Print diagnostics
-  console.log('\n📊 Signing Complete - Diagnostics:');
-  console.log(`   Input file:              ${args.xml}`);
-  console.log(`   Output file:             ${args.out}`);
-  console.log(`   Root before:             ${rootBefore}`);
-  console.log(`   Root after:              ${rootAfter}`);
-  console.log(`   Has signature:           ${hasSignature}`);
-  console.log(`   Signature position:      ${dsig.signaturePosition}`);
-  console.log(`   Reference URI:           ${dsig.referenceUri}`);
-  console.log(`   Root has Id/id/ID:       ${dsig.rootHasId}`);
-  console.log(`   Root Id attribute:       ${dsig.rootIdAttributeName}`);
-  console.log(`   Canonicalization alg:    ${dsig.canonicalizationAlgorithm}`);
-  console.log(`   Signature alg:           ${dsig.signatureAlgorithm}`);
-  console.log(`   Digest alg:              ${dsig.digestAlgorithm}`);
-  console.log(`   Transforms:              ${dsig.transforms.join(' | ')}`);
-  console.log(`   KeyInfo/X509Certificate: ${dsig.hasX509Certificate}`);
-  console.log(`   X509 has line breaks:    ${dsig.x509HasLineBreaks}`);
-  console.log(`   X509 clean base64:       ${dsig.x509IsCleanBase64}`);
-  console.log(`   XML well-formed:         ${dsig.xmlWellFormed}`);
-  console.log(`   Certificate subject:     ${certInfo.subject}`);
-  console.log(`   Certificate issuer:      ${certInfo.issuer}`);
-  console.log(`   Certificate count in P12:${certInfo.certificateCount}`);
-  console.log(`   Selection method:        ${certInfo.selectionMethod}`);
-  console.log(`   Valid from:              ${certInfo.validFrom}`);
-  console.log(`   Valid to:                ${certInfo.validTo}`);
-  console.log(`   Is CA certificate:       ${certInfo.isCA}`);
-  console.log(`   Local signature verify:  ${hasSignature}`);
+  console.log('\n📊 Safe Diagnostics:');
+  console.log(`   rootBefore:                 ${rootBefore}`);
+  console.log(`   rootAfter:                  ${rootAfter}`);
+  console.log(`   hasSignature:               ${dsig.hasSignature}`);
+  console.log(`   signatureReferenceUri:      ${dsig.referenceUri}`);
+  console.log(`   canonicalizationAlgorithm:  ${dsig.canonicalizationAlgorithm}`);
+  console.log(`   signatureAlgorithm:         ${dsig.signatureAlgorithm}`);
+  console.log(`   digestAlgorithm:            ${dsig.digestAlgorithm}`);
+  console.log(`   hasIdAttributeOnRoot:       ${dsig.rootHasId}`);
+  console.log(`   selectedCertificateSubject: ${certInfo.subject}`);
+  console.log(`   outputFile:                 ${args.out}`);
+  console.log(`   localSignatureVerify:       ${localSignatureVerify}`);
   
   console.log('\n✅ XML signed successfully!\n');
 }
