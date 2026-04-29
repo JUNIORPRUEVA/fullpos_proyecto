@@ -18,7 +18,6 @@ const SIGNATURE_ALGORITHM = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
 const CANONICALIZATION_ALGORITHM = 'http://www.w3.org/2001/10/xml-exc-c14n#';
 const DIGEST_ALGORITHM = 'http://www.w3.org/2001/04/xmlenc#sha256';
 const ENVELOPED_SIGNATURE_TRANSFORM = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature';
-const DGII_SEED_ROOT_ID = 'SEMILLA';
 
 export type SeedSignatureMode = {
   label: string;
@@ -87,8 +86,7 @@ export class DgiiSignatureService {
 
   signSeedXml(xml: string, privateKeyPem: string, certPem: string) {
     return this.signXmlInternal(xml, privateKeyPem, certPem, {
-      emptyReferenceUri: false,
-      rootIdValue: DGII_SEED_ROOT_ID,
+      emptyReferenceUri: true,
     });
   }
 
@@ -100,8 +98,7 @@ export class DgiiSignatureService {
     mode: SeedSignatureMode,
   ) {
     return this.signXmlInternal(xml, privateKeyPem, certPem, {
-      emptyReferenceUri: false,
-      rootIdValue: DGII_SEED_ROOT_ID,
+      emptyReferenceUri: true,
       signatureAlgorithm: mode.signatureAlgorithm,
       canonicalizationAlgorithm: mode.canonicalizationAlgorithm,
       digestAlgorithm: mode.digestAlgorithm,

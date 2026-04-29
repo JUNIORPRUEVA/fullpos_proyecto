@@ -182,9 +182,9 @@ test('DgiiAuthService debug auth maps DGII seed validation diagnostics without e
         raw: { errores: ["The 'Id' attribute is not declared."] },
         signedXmlRoot: 'SemillaModel',
         signedXmlHasSignature: true,
-        signedXmlHasIdAttributeOnRoot: true,
-        signatureReferenceUri: '#SEMILLA',
-        signedXmlRootId: 'SEMILLA',
+        signedXmlHasIdAttributeOnRoot: false,
+        signatureReferenceUri: '',
+        signedXmlRootId: null,
         canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
         signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
         digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
@@ -208,8 +208,8 @@ test('DgiiAuthService debug auth maps DGII seed validation diagnostics without e
   assert.equal(result.errorCode, 'DGII_SEED_VALIDATE_BAD_REQUEST');
   assert.equal(result.signedXmlRoot, 'SemillaModel');
   assert.equal(result.signedXmlHasSignature, true);
-  assert.equal(result.signedXmlHasIdAttributeOnRoot, true);
-  assert.equal(result.signatureReferenceUri, '#SEMILLA');
+  assert.equal(result.signedXmlHasIdAttributeOnRoot, false);
+  assert.equal(result.signatureReferenceUri, '');
   assert.equal(result.validatePayloadMode, 'multipart');
   assert.equal(result.validateFieldName, 'xml');
   assert.equal(result.validateContentType, 'multipart/form-data');
@@ -260,9 +260,9 @@ test('DgiiAuthService debug auth success reports tokenFound without returning to
     meta: {
       signedXmlRoot: 'SemillaModel',
       signedXmlHasSignature: true,
-      signedXmlHasIdAttributeOnRoot: true,
-      signatureReferenceUri: '#SEMILLA',
-      signedXmlRootId: 'SEMILLA',
+      signedXmlHasIdAttributeOnRoot: false,
+      signatureReferenceUri: '',
+      signedXmlRootId: null,
       canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
       signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
       digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
@@ -278,8 +278,8 @@ test('DgiiAuthService debug auth success reports tokenFound without returning to
   assert.equal(result.tokenFound, true);
   assert.equal(result.tokenSource, 'auto');
   assert.equal(result.signedXmlRoot, 'SemillaModel');
-  assert.equal(result.signedXmlHasIdAttributeOnRoot, true);
-  assert.equal(result.signatureReferenceUri, '#SEMILLA');
+  assert.equal(result.signedXmlHasIdAttributeOnRoot, false);
+  assert.equal(result.signatureReferenceUri, '');
   assert.equal(result.validatePayloadMode, 'multipart');
   assert.equal(Object.prototype.hasOwnProperty.call(result, 'token'), false);
   assert.equal(JSON.stringify(result).includes('full-token-value-that-must-not-leak'), false);
@@ -327,9 +327,9 @@ test('DgiiAuthService debug auth returns diagnostic matrix when requested', asyn
     meta: {
       signedXmlRoot: 'SemillaModel',
       signedXmlHasSignature: true,
-      signedXmlHasIdAttributeOnRoot: true,
-      signatureReferenceUri: '#SEMILLA',
-      signedXmlRootId: 'SEMILLA',
+      signedXmlHasIdAttributeOnRoot: false,
+      signatureReferenceUri: '',
+      signedXmlRootId: null,
       canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
       signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
       digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
@@ -344,7 +344,7 @@ test('DgiiAuthService debug auth returns diagnostic matrix when requested', asyn
       canonicalization: 'http://www.w3.org/2001/10/xml-exc-c14n#',
       signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
       digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
-      referenceUri: '#SEMILLA',
+      referenceUri: '',
       keyInfoMode: 'leaf-only',
       payloadMode: 'multipart',
       fieldName: 'xml',

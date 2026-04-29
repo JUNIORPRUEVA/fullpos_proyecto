@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import { DOMParser } from '@xmldom/xmldom';
 import env from '../../../config/env';
 import { DgiiSignatureService, SEED_SIGNATURE_MODES, SeedSignatureMode, SignedXmlDiagnostics } from './dgii-signature.service';
 import { ElectronicInvoicingAuditService } from './electronic-invoicing-audit.service';
@@ -85,7 +86,7 @@ function classifyDgiiSeedValidationFailure(
   diagnostics: Partial<ValidateSeedMeta>,
 ) {
   const normalized = message.toLowerCase();
-  if (!diagnostics.signedXmlHasIdAttributeOnRoot || diagnostics.signatureReferenceUri !== '#SEMILLA') {
+  if (diagnostics.signedXmlHasIdAttributeOnRoot || (diagnostics.signatureReferenceUri ?? '') !== '') {
     return 'SEED_XML_SIGNATURE_STRUCTURE_MISMATCH';
   }
   if (
@@ -229,6 +230,60 @@ function xmlEdgePreview(rawText: string, size = 120) {
   };
 }
 
+function formatXmlForLog(xml: string) {
+  const compact = xml.replace(/>\s+</g, '><').trim();
+  let formatted = '';
+  let depth = 0;
+  for (const part of compact.replace(/></g, '>\n<').split('\n')) {
+    const line = part.trim();
+    if (!line) continue;
+    if (/^<\//.test(line)) depth = Math.max(0, depth - 1);
+    formatted += `${'  '.repeat(depth)}${line}\n`;
+    if (/^<[^!?/][^>]*[^/]?>$/.test(line) && !/^<[^>]+>[^<]+<\//.test(line)) depth += 1;
+  }
+  return formatted.trim();
+}
+
+function inspectDgiiSeedXsdStructure(xml: string) {
+  const document = new DOMParser().parseFromString(xml.replace(/^\uFEFF/, ''), 'text/xml');
+  const root = document.documentElement;
+  const rootName = root?.localName || root?.nodeName || null;
+  const rootAttributes = root
+    ? Array.from({ length: root.attributes.length }, (_, index) => root.attributes.item(index)!)
+        .filter(Boolean)
+        .map((attr) => ({ name: attr.name, value: attr.value }))
+    : [];
+  const rootNonNamespaceAttributes = rootAttributes.filter(
+    (attr) => attr.name !== 'xmlns:xsi' && attr.name !== 'xmlns:xsd' && attr.name !== 'xmlns' && attr.name !== 'xsi:schemaLocation',
+  );
+  const childElements = root
+    ? Array.from({ length: root.childNodes.length }, (_, index) => root.childNodes.item(index))
+        .filter((node) => !!node && node.nodeType === 1)
+        .map((node) => (node as any).localName || (node as any).nodeName)
+    : [];
+  const nonSignatureChildren = childElements.filter((name) => name !== 'Signature');
+  const signatureIndex = childElements.indexOf('Signature');
+  const expectedSeedChildren = ['valor', 'fecha'];
+
+  return {
+    officialSeedRootExpected: 'SemillaModel',
+    officialSeedChildrenExpected: expectedSeedChildren,
+    rootName,
+    rootAttributes,
+    rootNonNamespaceAttributes,
+    childElements,
+    nonSignatureChildren,
+    rootMatchesOfficialSeed: rootName === 'SemillaModel',
+    seedElementOrderMatchesOfficialSeed:
+      nonSignatureChildren.length === expectedSeedChildren.length &&
+      expectedSeedChildren.every((name, index) => nonSignatureChildren[index] === name),
+    hasRootIdAttribute: !!root?.hasAttribute('Id') || !!root?.hasAttribute('ID') || !!root?.hasAttribute('id'),
+    hasOnlyNamespaceRootAttributes: rootNonNamespaceAttributes.length === 0,
+    signatureIsEnvelopedAsLastChild: signatureIndex >= 0 && signatureIndex === childElements.length - 1,
+    hasSchemaLocation: !!root?.hasAttribute('xsi:schemaLocation'),
+  };
+}
+
 function validateSignedSeedXmlForDgii(signedSeedXml: string) {
   if (typeof signedSeedXml !== 'string' || signedSeedXml.trim().length === 0) {
     throw {
@@ -306,6 +361,21 @@ function validateSignedSeedXmlForDgii(signedSeedXml: string) {
         hasFecha,
         signedXmlRoot: root ?? null,
       },
+    };
+  }
+
+  const structure = inspectDgiiSeedXsdStructure(withoutBom);
+  if (
+    !structure.rootMatchesOfficialSeed ||
+    !structure.seedElementOrderMatchesOfficialSeed ||
+    structure.hasRootIdAttribute ||
+    !structure.signatureIsEnvelopedAsLastChild
+  ) {
+    throw {
+      status: 400,
+      message: 'La semilla firmada no cumple la estructura SemillaModel oficial esperada por DGII',
+      errorCode: 'DGII_SEED_SIGNED_XML_STRUCTURE_INVALID',
+      details: { structure },
     };
   }
 
@@ -824,6 +894,22 @@ export class DgiiAuthService {
       signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
       digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
       signedXmlRootId: signedXmlDiagnostics.signedXmlRootId,
+    });
+
+    console.info('[electronic-invoicing.dgii.auth] seed.signed.raw_xml_before_send', {
+      requestId,
+      companyId,
+      companyRnc: companyIdentity?.rnc ?? null,
+      signedSeedXml: signedXmlValidation.signedXml,
+    });
+    console.info(
+      `[electronic-invoicing.dgii.auth] seed.signed.formatted_xml_before_send\n${formatXmlForLog(signedXmlValidation.signedXml)}`,
+    );
+    console.info('[electronic-invoicing.dgii.auth] seed.signed.official_xsd_structure_check', {
+      requestId,
+      companyId,
+      companyRnc: companyIdentity?.rnc ?? null,
+      structure: inspectDgiiSeedXsdStructure(signedXmlValidation.signedXml),
     });
 
     let validated;
