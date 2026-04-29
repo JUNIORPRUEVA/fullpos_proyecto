@@ -10,7 +10,7 @@ const router = Router();
 // No requiere JWT (POS no tiene login), solo overrideKeyGuard.
 router.post('/sync/by-rnc', overrideKeyGuard, validate(syncSalesByRncSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, sales } = req.body;
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, sales } = req.body;
     const localCodes = Array.isArray(sales)
       ? Array.from(
           new Set(
@@ -23,11 +23,15 @@ router.post('/sync/by-rnc', overrideKeyGuard, validate(syncSalesByRncSchema), as
     console.info('[cloud_sync] sales.sync.by-rnc', {
       companyRnc: companyRnc ?? null,
       companyCloudId: companyCloudId ?? null,
+      companyTenantKey: companyTenantKey ?? null,
       count: Array.isArray(sales) ? sales.length : 0,
       uniqueLocalCodes: localCodes.length,
       localCodesSample: localCodes.slice(0, 6),
     });
-    const result = await syncSalesByRnc(companyRnc, companyCloudId, sales ?? []);
+    const result = await syncSalesByRnc(
+      { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId },
+      sales ?? [],
+    );
     console.info('[cloud_sync] sales.sync.by-rnc.done', {
       ok: (result as any)?.ok ?? null,
       upserted: (result as any)?.upserted ?? null,

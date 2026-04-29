@@ -107,18 +107,25 @@ router.post(
   validate(syncProductsByRncSchema),
   async (req, res, next) => {
     try {
-      const { companyId, companyRnc, companyCloudId, products, deletedProducts } = req.body;
+      const { companyId, companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, products, deletedProducts } = req.body;
       console.info('[cloud_sync] products.sync.by-rnc', {
         companyId: companyId ?? null,
         companyRnc: companyRnc ?? null,
         companyCloudId: companyCloudId ?? null,
+        companyTenantKey: companyTenantKey ?? null,
         count: Array.isArray(products) ? products.length : 0,
       });
       const result = await syncProductsByRnc(
-        companyId,
-        companyRnc,
+        {
+          companyId,
+          companyRnc,
+          companyCloudId,
+          companyTenantKey,
+          businessId,
+          deviceId,
+          terminalId,
+        },
         products ?? [],
-        companyCloudId,
         deletedProducts ?? [],
       );
       res.json(result);
@@ -138,6 +145,10 @@ router.post(
         companyId: req.body.companyId,
         companyRnc: req.body.companyRnc,
         companyCloudId: req.body.companyCloudId,
+        companyTenantKey: req.body.companyTenantKey,
+        businessId: req.body.businessId,
+        deviceId: req.body.deviceId,
+        terminalId: req.body.terminalId,
         operations: req.body.operations,
       });
       res.json(result);

@@ -260,10 +260,14 @@ export const syncProductOperationsSchema = z
     companyId: z.coerce.number().int().positive().optional(),
     companyRnc: z.string().trim().min(3).optional(),
     companyCloudId: z.string().trim().min(6).optional(),
+    companyTenantKey: z.string().trim().min(6).optional(),
+    businessId: z.string().trim().min(3).optional(),
+    deviceId: z.string().trim().min(3).optional(),
+    terminalId: z.string().trim().min(3).optional(),
     operations: z.array(syncOperationSchema).min(1).max(100),
   })
-  .refine((data) => data.companyId != null || !!data.companyRnc || !!data.companyCloudId, {
-    message: 'companyId, RNC o companyCloudId requerido',
+  .refine((data) => data.companyId != null || !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
+    message: 'companyTenantKey, companyId, RNC o companyCloudId requerido',
     path: ['companyId'],
   });
 
@@ -272,6 +276,10 @@ export const syncProductsByRncSchema = z
     companyId: z.coerce.number().int().positive().optional(),
     companyRnc: z.string().trim().min(3).optional(),
     companyCloudId: z.string().trim().min(6).optional(),
+    companyTenantKey: z.string().trim().min(6).optional(),
+    businessId: z.string().trim().min(3).optional(),
+    deviceId: z.string().trim().min(3).optional(),
+    terminalId: z.string().trim().min(3).optional(),
     products: z
       .array(
         z.object({
@@ -289,7 +297,7 @@ export const syncProductsByRncSchema = z
       .default([]),
     deletedProducts: z.array(z.string().trim().min(1)).max(2000).default([]),
   })
-  .refine((data) => data.companyId != null || !!data.companyRnc || !!data.companyCloudId, {
-    message: 'companyId, RNC o companyCloudId requerido',
+  .refine((data) => data.companyId != null || !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
+    message: 'companyTenantKey, companyId, RNC o companyCloudId requerido',
     path: ['companyId'],
   });

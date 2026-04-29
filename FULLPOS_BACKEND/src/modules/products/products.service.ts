@@ -7,6 +7,7 @@ import {
   updateProductSchema,
 } from './products.validation';
 import { emitProductEvent } from '../../realtime/realtime.gateway';
+import { resolveCompanyIdentity } from '../companies/companyIdentity.service';
 
 function toNumber(value: Prisma.Decimal | number | null) {
   if (value === null || value === undefined) return 0;
@@ -111,120 +112,15 @@ async function resolveCompany(params: {
   companyId?: number;
   companyRnc?: string;
   companyCloudId?: string;
+  companyTenantKey?: string;
+  businessId?: string;
+  deviceId?: string;
+  terminalId?: string;
 }): Promise<CompanyLocatorRecord> {
-  const cloudId = params.companyCloudId?.trim() ?? '';
-  const rnc = params.companyRnc?.trim() ?? '';
-
-  const companyById =
-    params.companyId != null
-      ? await prisma.company.findUnique({
-          where: { id: params.companyId },
-          select: { id: true, rnc: true, cloudCompanyId: true },
-        })
-      : null;
-
-  const companyByCloudId =
-    cloudId.length > 0
-      ? await prisma.company.findFirst({
-          where: { cloudCompanyId: cloudId },
-          select: { id: true, rnc: true, cloudCompanyId: true },
-        })
-      : null;
-
-  let companyByRnc: { id: number; rnc: string | null; cloudCompanyId: string | null } | null = null;
-  if (rnc.length > 0) {
-    const exact = await prisma.company.findFirst({
-      where: { rnc },
-      select: { id: true, rnc: true, cloudCompanyId: true },
-    });
-    if (exact) {
-      companyByRnc = exact;
-    } else {
-      const normalized = normalizeRnc(rnc);
-      const companies = await prisma.company.findMany({
-        where: { rnc: { not: null } },
-        select: { id: true, rnc: true, cloudCompanyId: true },
-      });
-      companyByRnc =
-        companies.find(
-          (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-        ) ?? null;
-    }
-  }
-
-  if (companyByCloudId) {
-    const resolved = await attachRncIfMissing(companyByCloudId, rnc);
-    if (companyById && companyById.id !== resolved.id) {
-      console.warn('[products.resolveCompany] legacy_company_id_ignored', {
-        requestedCompanyId: params.companyId,
-        companyById: locatorDiagnostic(companyById),
-        resolvedByCloudId: locatorDiagnostic(resolved),
-      });
-    }
-    if (companyByRnc && companyByRnc.id !== resolved.id) {
-      console.warn('[products.resolveCompany] rnc_cloud_locator_conflict_cloud_preferred', {
-        requestedCompanyRnc: rnc || null,
-        requestedCompanyCloudId: cloudId || null,
-        companyByRnc: locatorDiagnostic(companyByRnc),
-        resolvedByCloudId: locatorDiagnostic(resolved),
-      });
-    }
-    return resolved;
-  }
-
-  if (companyByRnc) {
-    const resolved = await attachCloudIdIfMissing(companyByRnc, cloudId);
-    if (companyById && companyById.id !== resolved.id) {
-      console.warn('[products.resolveCompany] legacy_company_id_ignored', {
-        requestedCompanyId: params.companyId,
-        companyById: locatorDiagnostic(companyById),
-        resolvedByRnc: locatorDiagnostic(resolved),
-      });
-    }
-    return resolved;
-  }
-
-  if (params.companyId != null && !companyById) {
-    throw { status: 404, message: 'Empresa no encontrada', errorCode: 'COMPANY_NOT_FOUND' };
-  }
-
-  if (companyById && cloudId.length === 0 && rnc.length === 0) {
-    return companyById;
-  }
-
-  if (companyById && cloudId.length > 0) {
-    throw {
-      status: 409,
-      message: 'companyCloudId no corresponde con la empresa indicada',
-      errorCode: 'COMPANY_LOCATOR_CONFLICT',
-    };
-  }
-
-  if (companyById && rnc.length > 0) {
-    throw {
-      status: 409,
-      message: 'companyRnc no corresponde con la empresa indicada',
-      errorCode: 'COMPANY_LOCATOR_CONFLICT',
-    };
-  }
-
-  if (cloudId.length > 0) {
-    throw {
-      status: 404,
-      message: 'Empresa no encontrada para el companyCloudId enviado',
-      errorCode: 'COMPANY_NOT_FOUND',
-    };
-  }
-
-  if (rnc.length > 0) {
-    throw { status: 404, message: 'Empresa no encontrada', errorCode: 'COMPANY_NOT_FOUND' };
-  }
-
-  throw {
-    status: 400,
-    message: 'companyId, RNC o companyCloudId requerido',
-    errorCode: 'COMPANY_LOCATOR_REQUIRED',
-  };
+  return resolveCompanyIdentity({
+    ...params,
+    source: 'products.resolveCompany',
+  });
 }
 
 export type CreateProductInput = Omit<
@@ -651,6 +547,10 @@ export async function syncProductOperations(params: {
   companyId?: number;
   companyRnc?: string;
   companyCloudId?: string;
+  companyTenantKey?: string;
+  businessId?: string;
+  deviceId?: string;
+  terminalId?: string;
   operations: ProductSyncOperation[];
 }) {
   let company;
@@ -658,18 +558,24 @@ export async function syncProductOperations(params: {
     companyId: params.companyId ?? null,
     companyRnc: params.companyRnc ?? null,
     companyCloudId: params.companyCloudId ?? null,
+    companyTenantKey: params.companyTenantKey ?? null,
   });
   try {
     company = await resolveCompany({
       companyId: params.companyId,
       companyRnc: params.companyRnc,
       companyCloudId: params.companyCloudId,
+      companyTenantKey: params.companyTenantKey,
+      businessId: params.businessId,
+      deviceId: params.deviceId,
+      terminalId: params.terminalId,
     });
   } catch (error: any) {
     console.warn('[products.sync.operations] company_lookup_failed', {
       companyId: params.companyId ?? null,
       companyRnc: params.companyRnc ?? null,
       companyCloudId: params.companyCloudId ?? null,
+      companyTenantKey: params.companyTenantKey ?? null,
       message: error?.message ?? 'Empresa no encontrada',
       errorCode: error?.errorCode ?? null,
     });
@@ -680,9 +586,11 @@ export async function syncProductOperations(params: {
     requestedCompanyId: params.companyId ?? null,
     requestedCompanyRnc: params.companyRnc ?? null,
     requestedCompanyCloudId: params.companyCloudId ?? null,
+    requestedCompanyTenantKey: params.companyTenantKey ?? null,
     resolvedCompanyId: company.id,
     resolvedCompanyRnc: company.rnc ?? null,
     resolvedCompanyCloudId: company.cloudCompanyId ?? null,
+    resolvedCompanyTenantKey: (company as any).tenantKey ?? null,
   });
 
   console.info('[products.sync.operations] service_start', {
@@ -723,13 +631,19 @@ export async function syncProductOperations(params: {
 }
 
 export async function syncProductsByRnc(
-  companyId: number | undefined,
-  companyRnc: string | undefined,
+  identity: {
+    companyId?: number;
+    companyRnc?: string;
+    companyCloudId?: string;
+    companyTenantKey?: string;
+    businessId?: string;
+    deviceId?: string;
+    terminalId?: string;
+  },
   products: SyncProductInput[],
-  companyCloudId?: string,
   deletedProducts?: string[],
 ) {
-  const company = await resolveCompany({ companyId, companyRnc, companyCloudId });
+  const company = await resolveCompany(identity);
   const events: Array<{ type: ReturnType<typeof productEventTypeFromOperation>; product: Product }> = [];
 
   for (const item of products) {

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/prisma';
 import { emitSaleEvent } from '../../realtime/realtime.gateway';
+import { resolveCompanyIdentity } from '../companies/companyIdentity.service';
 
 function toNumber(value: Prisma.Decimal | number | null | undefined) {
   if (value === null || value === undefined) return 0;
@@ -93,63 +94,19 @@ async function attachCloudIdIfMissing(
   });
 }
 
-async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
-  const rnc = companyRnc?.trim() ?? '';
-  const cloudId = companyCloudId?.trim() ?? '';
-  if (!rnc && !cloudId) {
-    throw { status: 400, message: 'RNC o ID interno requerido' };
-  }
-
-  let companyByCloudId: CompanyLocatorRecord | null = null;
-
-  if (cloudId) {
-    companyByCloudId = await prisma.company.findFirst({
-      where: { cloudCompanyId: cloudId },
-      select: { id: true, rnc: true, cloudCompanyId: true },
-    });
-  }
-
-  let companyByRnc: CompanyLocatorRecord | null = null;
-  if (rnc) {
-    companyByRnc = await prisma.company.findFirst({
-      where: { rnc },
-      select: { id: true, rnc: true, cloudCompanyId: true },
-    });
-
-    if (!companyByRnc) {
-      const normalized = normalizeRnc(rnc);
-      if (normalized.length > 0) {
-        const candidates = await prisma.company.findMany({
-          where: { rnc: { not: null } },
-          select: { id: true, rnc: true, cloudCompanyId: true },
-        });
-        companyByRnc =
-          candidates.find(
-            (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-          ) ?? null;
-      }
-    }
-  }
-
-  if (companyByCloudId) {
-    const resolved = await attachRncIfMissing(companyByCloudId, rnc);
-    if (companyByRnc && companyByRnc.id !== resolved.id) {
-      console.warn('[sales.resolveCompany] rnc_cloud_locator_conflict_cloud_preferred', {
-        requestedCompanyRnc: rnc || null,
-        requestedCompanyCloudId: cloudId || null,
-        companyByRnc: locatorDiagnostic(companyByRnc),
-        resolvedByCloudId: locatorDiagnostic(resolved),
-      });
-    }
-    return resolved.id;
-  }
-
-  if (companyByRnc) {
-    const resolved = await attachCloudIdIfMissing(companyByRnc, cloudId);
-    return resolved.id;
-  }
-
-  throw { status: 404, message: 'Empresa no encontrada' };
+async function resolveCompanyId(params: {
+  companyRnc?: string;
+  companyCloudId?: string;
+  companyTenantKey?: string;
+  businessId?: string;
+  deviceId?: string;
+  terminalId?: string;
+}) {
+  const companyByIdentity = await resolveCompanyIdentity({
+    ...params,
+    source: 'sales.resolveCompany',
+  });
+  return companyByIdentity.id;
 }
 
 export type SyncSaleInput = {
@@ -194,11 +151,17 @@ export type SyncSaleInput = {
 };
 
 export async function syncSalesByRnc(
-  companyRnc: string | undefined,
-  companyCloudId: string | undefined,
+  identity: {
+    companyRnc?: string;
+    companyCloudId?: string;
+    companyTenantKey?: string;
+    businessId?: string;
+    deviceId?: string;
+    terminalId?: string;
+  },
   sales: SyncSaleInput[],
 ) {
-  const companyId = await resolveCompanyId(companyRnc, companyCloudId);
+  const companyId = await resolveCompanyId(identity);
   if (!sales || sales.length === 0) {
     return { ok: true, upserted: 0, companyId };
   }
