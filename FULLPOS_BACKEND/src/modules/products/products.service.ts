@@ -7,6 +7,7 @@ import {
   updateProductSchema,
 } from './products.validation';
 import { emitProductEvent } from '../../realtime/realtime.gateway';
+import { resolveProductDataCompanyId } from '../companies/companyScope.service';
 
 function toNumber(value: Prisma.Decimal | number | null) {
   if (value === null || value === undefined) return 0;
@@ -457,12 +458,13 @@ export async function listProducts(
   pageSize = 20,
   search?: string,
 ) {
+  const productCompanyId = await resolveProductDataCompanyId(companyId, 'products.list');
   const { skip, take, page: safePage } = buildPagination(page, pageSize);
 
-  await prisma.product.deleteMany({ where: { companyId, isDemo: true } });
+  await prisma.product.deleteMany({ where: { companyId: productCompanyId, isDemo: true } });
 
   const where: Prisma.ProductWhereInput = {
-    companyId,
+    companyId: productCompanyId,
     isDemo: false,
     deletedAt: null,
     ...(search
@@ -494,8 +496,9 @@ export async function listProducts(
 }
 
 export async function getProductById(companyId: number, productId: number) {
+  const productCompanyId = await resolveProductDataCompanyId(companyId, 'products.detail');
   const product = await prisma.product.findFirst({
-    where: { id: productId, companyId, isDemo: false },
+    where: { id: productId, companyId: productCompanyId, isDemo: false },
   });
   if (!product) {
     throw { status: 404, message: 'Producto no encontrado' };
@@ -504,10 +507,11 @@ export async function getProductById(companyId: number, productId: number) {
 }
 
 export async function createProduct(companyId: number, input: CreateProductInput) {
+  const productCompanyId = await resolveProductDataCompanyId(companyId, 'products.create');
   try {
     const created = await prisma.product.create({
       data: {
-        companyId,
+        companyId: productCompanyId,
         code: input.code.trim(),
         name: input.name.trim(),
         category: input.category?.trim() || null,
@@ -524,7 +528,7 @@ export async function createProduct(companyId: number, input: CreateProductInput
     });
 
     await emitProductEvent({
-      companyId,
+      companyId: productCompanyId,
       type: 'product.created',
       product: created,
     });
@@ -542,8 +546,9 @@ export async function updateProduct(
   productId: number,
   input: UpdateProductInput,
 ) {
+  const productCompanyId = await resolveProductDataCompanyId(companyId, 'products.update');
   const existing = await prisma.product.findFirst({
-    where: { id: productId, companyId, isDemo: false },
+    where: { id: productId, companyId: productCompanyId, isDemo: false },
   });
   if (!existing) {
     throw { status: 404, message: 'Producto no encontrado' };
@@ -579,7 +584,7 @@ export async function updateProduct(
     });
 
     await emitProductEvent({
-      companyId,
+      companyId: productCompanyId,
       type: 'product.updated',
       product: updated,
     });
@@ -593,8 +598,9 @@ export async function updateProduct(
 }
 
 export async function softDeleteProduct(companyId: number, productId: number) {
+  const productCompanyId = await resolveProductDataCompanyId(companyId, 'products.delete');
   const existing = await prisma.product.findFirst({
-    where: { id: productId, companyId, isDemo: false },
+    where: { id: productId, companyId: productCompanyId, isDemo: false },
   });
   if (!existing) {
     throw { status: 404, message: 'Producto no encontrado' };
@@ -611,7 +617,7 @@ export async function softDeleteProduct(companyId: number, productId: number) {
     },
   });
   await emitProductEvent({
-    companyId,
+    companyId: productCompanyId,
     type: 'product.deleted',
     product: deleted,
   });
@@ -623,8 +629,9 @@ export async function updateProductStock(
   productId: number,
   stock: number,
 ) {
+  const productCompanyId = await resolveProductDataCompanyId(companyId, 'products.stock');
   const existing = await prisma.product.findFirst({
-    where: { id: productId, companyId, isDemo: false },
+    where: { id: productId, companyId: productCompanyId, isDemo: false },
   });
   if (!existing) {
     throw { status: 404, message: 'Producto no encontrado' };
@@ -640,7 +647,7 @@ export async function updateProductStock(
     },
   });
   await emitProductEvent({
-    companyId,
+    companyId: productCompanyId,
     type: 'product.stock_updated',
     product: updated,
   });
