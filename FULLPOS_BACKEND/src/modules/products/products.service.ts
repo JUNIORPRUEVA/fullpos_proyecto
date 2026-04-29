@@ -29,6 +29,55 @@ function normalizeOptionalText(value?: string | null) {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+type CompanyLocatorRecord = {
+  id: number;
+  rnc: string | null;
+  cloudCompanyId: string | null;
+};
+
+function locatorDiagnostic(company: CompanyLocatorRecord | null) {
+  if (!company) return null;
+  return {
+    id: company.id,
+    rnc: company.rnc ?? null,
+    cloudCompanyId: company.cloudCompanyId ?? null,
+  };
+}
+
+async function attachRncIfMissing(
+  company: CompanyLocatorRecord,
+  rnc: string,
+): Promise<CompanyLocatorRecord> {
+  const normalized = normalizeRnc(rnc);
+  if (!normalized) return company;
+
+  const currentRnc = company.rnc?.trim() ?? '';
+  if (currentRnc.length > 0) return company;
+
+  return prisma.company.update({
+    where: { id: company.id },
+    data: { rnc: rnc.trim() },
+    select: { id: true, rnc: true, cloudCompanyId: true },
+  });
+}
+
+async function attachCloudIdIfMissing(
+  company: CompanyLocatorRecord,
+  cloudId: string,
+): Promise<CompanyLocatorRecord> {
+  const normalized = cloudId.trim();
+  if (!normalized) return company;
+
+  const currentCloudId = company.cloudCompanyId?.trim() ?? '';
+  if (currentCloudId.length > 0) return company;
+
+  return prisma.company.update({
+    where: { id: company.id },
+    data: { cloudCompanyId: normalized },
+    select: { id: true, rnc: true, cloudCompanyId: true },
+  });
+}
+
 function productEventTypeFromOperation(operationType: string, created: boolean) {
   if (operationType === 'delete') return 'product.deleted' as const;
   if (operationType === 'stock') return 'product.stock_updated' as const;
@@ -62,7 +111,7 @@ async function resolveCompany(params: {
   companyId?: number;
   companyRnc?: string;
   companyCloudId?: string;
-}) {
+}): Promise<CompanyLocatorRecord> {
   const cloudId = params.companyCloudId?.trim() ?? '';
   const rnc = params.companyRnc?.trim() ?? '';
 
@@ -73,10 +122,6 @@ async function resolveCompany(params: {
           select: { id: true, rnc: true, cloudCompanyId: true },
         })
       : null;
-
-  if (params.companyId != null && !companyById) {
-    throw { status: 404, message: 'Empresa no encontrada', errorCode: 'COMPANY_NOT_FOUND' };
-  }
 
   const companyByCloudId =
     cloudId.length > 0
@@ -107,7 +152,47 @@ async function resolveCompany(params: {
     }
   }
 
-  if (companyById && cloudId.length > 0 && !companyByCloudId) {
+  if (companyByCloudId) {
+    const resolved = await attachRncIfMissing(companyByCloudId, rnc);
+    if (companyById && companyById.id !== resolved.id) {
+      console.warn('[products.resolveCompany] legacy_company_id_ignored', {
+        requestedCompanyId: params.companyId,
+        companyById: locatorDiagnostic(companyById),
+        resolvedByCloudId: locatorDiagnostic(resolved),
+      });
+    }
+    if (companyByRnc && companyByRnc.id !== resolved.id) {
+      console.warn('[products.resolveCompany] rnc_cloud_locator_conflict_cloud_preferred', {
+        requestedCompanyRnc: rnc || null,
+        requestedCompanyCloudId: cloudId || null,
+        companyByRnc: locatorDiagnostic(companyByRnc),
+        resolvedByCloudId: locatorDiagnostic(resolved),
+      });
+    }
+    return resolved;
+  }
+
+  if (companyByRnc) {
+    const resolved = await attachCloudIdIfMissing(companyByRnc, cloudId);
+    if (companyById && companyById.id !== resolved.id) {
+      console.warn('[products.resolveCompany] legacy_company_id_ignored', {
+        requestedCompanyId: params.companyId,
+        companyById: locatorDiagnostic(companyById),
+        resolvedByRnc: locatorDiagnostic(resolved),
+      });
+    }
+    return resolved;
+  }
+
+  if (params.companyId != null && !companyById) {
+    throw { status: 404, message: 'Empresa no encontrada', errorCode: 'COMPANY_NOT_FOUND' };
+  }
+
+  if (companyById && cloudId.length === 0 && rnc.length === 0) {
+    return companyById;
+  }
+
+  if (companyById && cloudId.length > 0) {
     throw {
       status: 409,
       message: 'companyCloudId no corresponde con la empresa indicada',
@@ -115,41 +200,12 @@ async function resolveCompany(params: {
     };
   }
 
-  if (companyById && rnc.length > 0 && !companyByRnc) {
+  if (companyById && rnc.length > 0) {
     throw {
       status: 409,
       message: 'companyRnc no corresponde con la empresa indicada',
       errorCode: 'COMPANY_LOCATOR_CONFLICT',
     };
-  }
-
-  if (companyById && companyByCloudId && companyById.id !== companyByCloudId.id) {
-    throw {
-      status: 409,
-      message: 'companyId y companyCloudId pertenecen a empresas distintas',
-      errorCode: 'COMPANY_LOCATOR_CONFLICT',
-    };
-  }
-
-  if (companyById && companyByRnc && companyById.id !== companyByRnc.id) {
-    throw {
-      status: 409,
-      message: 'companyId y companyRnc pertenecen a empresas distintas',
-      errorCode: 'COMPANY_LOCATOR_CONFLICT',
-    };
-  }
-
-  if (companyByCloudId && companyByRnc && companyByCloudId.id !== companyByRnc.id) {
-    throw {
-      status: 409,
-      message: 'companyCloudId y companyRnc pertenecen a empresas distintas',
-      errorCode: 'COMPANY_LOCATOR_CONFLICT',
-    };
-  }
-
-  const resolved = companyById ?? companyByCloudId ?? companyByRnc;
-  if (resolved) {
-    return resolved;
   }
 
   if (cloudId.length > 0) {
