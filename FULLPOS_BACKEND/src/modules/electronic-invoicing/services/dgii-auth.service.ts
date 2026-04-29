@@ -1361,11 +1361,17 @@ export class DgiiAuthService {
       certificateSubject?: string | null;
       certificateIssuer?: string | null;
       certificateSerialNumber?: string | null;
+      certificateFingerprint?: string | null;
+      certificateValidTo?: string | null;
+      certificateSelectedIndex?: number | null;
+      certificateHasPrivateKey?: boolean | null;
       certificateDiagnostics?: {
         subject: string;
         certSubjectShort: string;
         issuer: string;
         serialNumber: string;
+        fingerprint: string;
+        selectedIndex: number;
         validTo: string;
         hasPrivateKey: boolean;
         keyMatchesCertificate: boolean;
@@ -1412,6 +1418,8 @@ export class DgiiAuthService {
         certSubjectShort: analysis.certSubjectShort,
         issuer: certificateDetails.loaded.issuer,
         serialNumber: certificateDetails.loaded.serialNumber,
+        fingerprint: certificateDetails.loaded.fingerprintSha256,
+        selectedIndex: certificateDetails.loaded.selectedCertificateIndex,
         validTo: certificateDetails.loaded.validTo.toISOString(),
         hasPrivateKey: !!certificateDetails.loaded.privateKeyPem,
         keyMatchesCertificate: certificateDetails.loaded.keyMatchesCertificate,
@@ -1454,6 +1462,10 @@ export class DgiiAuthService {
       out.certificateSubject = out.certificateDiagnostics?.subject ?? undefined;
       out.certificateIssuer = out.certificateDiagnostics?.issuer ?? undefined;
       out.certificateSerialNumber = out.certificateDiagnostics?.serialNumber ?? undefined;
+      out.certificateFingerprint = out.certificateDiagnostics?.fingerprint ?? undefined;
+      out.certificateValidTo = out.certificateDiagnostics?.validTo ?? undefined;
+      out.certificateSelectedIndex = out.certificateDiagnostics?.selectedIndex ?? undefined;
+      out.certificateHasPrivateKey = out.certificateDiagnostics?.hasPrivateKey ?? undefined;
       if (input.diagnosticMatrix) {
         out.diagnosticMatrix = await this.runSeedDiagnosticMatrix(company.id, company.rnc ?? null, environment, requestId);
       }
@@ -1482,6 +1494,10 @@ export class DgiiAuthService {
       out.certificateSubject = (details?.certificateSubject as string | undefined) ?? out.certificateDiagnostics?.subject ?? undefined;
       out.certificateIssuer = (details?.certificateIssuer as string | undefined) ?? (details?.certIssuer as string | undefined) ?? out.certificateDiagnostics?.issuer ?? undefined;
       out.certificateSerialNumber = (details?.certificateSerialNumber as string | undefined) ?? (details?.certSerialNumber as string | undefined) ?? out.certificateDiagnostics?.serialNumber ?? undefined;
+      out.certificateFingerprint = out.certificateDiagnostics?.fingerprint ?? undefined;
+      out.certificateValidTo = out.certificateDiagnostics?.validTo ?? undefined;
+      out.certificateSelectedIndex = out.certificateDiagnostics?.selectedIndex ?? undefined;
+      out.certificateHasPrivateKey = out.certificateDiagnostics?.hasPrivateKey ?? undefined;
       out.validateRawResponse = details?.raw ?? details?.rawTextSummary ?? null;
       out.dgiiValidationDiagnosis = (details?.dgiiValidationDiagnosis as string | null | undefined) ?? undefined;
       out.signerContext = (details?.signerContext as Record<string, unknown> | undefined) ?? undefined;

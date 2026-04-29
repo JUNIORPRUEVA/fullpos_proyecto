@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import forge from 'node-forge';
 
 export interface LoadedPkcs12Certificate {
@@ -12,6 +13,10 @@ export interface LoadedPkcs12Certificate {
   validTo: Date;
   chainPems: string[];
   keyMatchesCertificate: boolean;
+  certificateCount: number;
+  selectedCertificateIndex: number;
+  fingerprintSha1: string;
+  fingerprintSha256: string;
 }
 
 export interface CertificateSubjectAnalysis {
@@ -70,6 +75,17 @@ function keyMatchesCertificate(privateKey: forge.pki.PrivateKey, cert: forge.pki
     certPublicKey.n.equals(rsaPrivateKey.n) &&
     certPublicKey.e.equals(rsaPrivateKey.e)
   );
+}
+
+function certificateFingerprint(cert: forge.pki.Certificate, algorithm: 'sha1' | 'sha256') {
+  const derBytes = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+  return crypto
+    .createHash(algorithm)
+    .update(Buffer.from(derBytes, 'binary'))
+    .digest('hex')
+    .match(/.{2}/g)!
+    .join(':')
+    .toUpperCase();
 }
 
 type CertBagEntry = {
@@ -200,6 +216,10 @@ export function loadPkcs12CertificateFromBuffer(fileBuffer: Buffer, password: st
     validTo: cert.validity.notAfter,
     chainPems,
     keyMatchesCertificate: selected.keyMatchesCertificate,
+    certificateCount: certEntries.length,
+    selectedCertificateIndex: selected.certEntry.index,
+    fingerprintSha1: certificateFingerprint(cert, 'sha1'),
+    fingerprintSha256: certificateFingerprint(cert, 'sha256'),
   };
 }
 
