@@ -85,8 +85,11 @@ export class DgiiSignatureService {
   }
 
   signSeedXml(xml: string, privateKeyPem: string, certPem: string) {
-    return this.signXmlInternal(xml, privateKeyPem, certPem, {
-      emptyReferenceUri: true,
+    return this.signDgiiSeedXmlInternal(xml, privateKeyPem, certPem, {
+      signatureAlgorithm: SIGNATURE_ALGORITHM,
+      canonicalizationAlgorithm: CANONICALIZATION_ALGORITHM,
+      digestAlgorithm: DIGEST_ALGORITHM,
+      keyInfoCertificates: [certPem],
     });
   }
 
@@ -97,8 +100,7 @@ export class DgiiSignatureService {
     chainPems: string[],
     mode: SeedSignatureMode,
   ) {
-    return this.signXmlInternal(xml, privateKeyPem, certPem, {
-      emptyReferenceUri: true,
+    return this.signDgiiSeedXmlInternal(xml, privateKeyPem, certPem, {
       signatureAlgorithm: mode.signatureAlgorithm,
       canonicalizationAlgorithm: mode.canonicalizationAlgorithm,
       digestAlgorithm: mode.digestAlgorithm,
@@ -148,6 +150,71 @@ export class DgiiSignatureService {
       xml: new XMLSerializer().serializeToString(document).replace(/^\uFEFF/, ''),
       rootName,
     };
+  }
+
+  private prepareDgiiSeedXmlForSigning(xml: string) {
+    const normalizedXml = xml.replace(/^\uFEFF/, '');
+    const document = new DOMParser().parseFromString(normalizedXml, 'text/xml');
+    const root = document.documentElement;
+    const rootName = root?.localName || root?.nodeName;
+    if (!root || rootName !== 'SemillaModel') {
+      throw new Error('La semilla DGII a firmar debe conservar raíz SemillaModel');
+    }
+    if (rootName.toLowerCase().includes('parsererror')) {
+      throw new Error('XML inválido: parsererror al intentar firmar semilla DGII');
+    }
+
+    for (const attribute of ['Id', 'ID', 'id']) {
+      if (root.hasAttribute(attribute)) {
+        root.removeAttribute(attribute);
+      }
+    }
+
+    return {
+      xml: new XMLSerializer().serializeToString(document).replace(/^\uFEFF/, ''),
+      rootName,
+    };
+  }
+
+  private signDgiiSeedXmlInternal(
+    xml: string,
+    privateKeyPem: string,
+    certPem: string,
+    options: {
+      signatureAlgorithm: string;
+      canonicalizationAlgorithm: string;
+      digestAlgorithm: string;
+      keyInfoCertificates: string[];
+    },
+  ) {
+    const prepared = this.prepareDgiiSeedXmlForSigning(xml);
+    const rootXpath = "/*[local-name()='SemillaModel']";
+    const signature = new SignedXml({
+      privateKey: privateKeyPem,
+      publicCert: certPem,
+      signatureAlgorithm: options.signatureAlgorithm,
+      canonicalizationAlgorithm: options.canonicalizationAlgorithm,
+      getKeyInfoContent: () =>
+        `<X509Data>${options.keyInfoCertificates
+          .map((certificate) => `<X509Certificate>${certPemToBase64(certificate)}</X509Certificate>`)
+          .join('')}</X509Data>`,
+    });
+
+    signature.addReference({
+      xpath: rootXpath,
+      transforms: [ENVELOPED_SIGNATURE_TRANSFORM],
+      digestAlgorithm: options.digestAlgorithm,
+      isEmptyUri: true,
+    });
+
+    signature.computeSignature(prepared.xml, {
+      location: {
+        reference: rootXpath,
+        action: 'append',
+      },
+    });
+
+    return signature.getSignedXml();
   }
 
   private signXmlInternal(
@@ -217,7 +284,14 @@ export class DgiiSignatureService {
       return { valid: false, certificatePem: certPem, errors: ['No se encontró nodo Signature en el XML firmado'] };
     }
 
-    const verifier = new SignedXml();
+    const transformNodes = Array.from(signatureNode.getElementsByTagName('Transform')) as any[];
+    const hasCanonicalizationTransform = transformNodes.some((node) =>
+      (node.getAttribute('Algorithm') ?? '').includes('xml-c14n') ||
+      (node.getAttribute('Algorithm') ?? '').includes('REC-xml-c14n'),
+    );
+    const verifier = new SignedXml({
+      implicitTransforms: hasCanonicalizationTransform ? [] : [CANONICALIZATION_ALGORITHM],
+    });
     (verifier as any).publicCert = certPem;
     verifier.loadSignature(signatureNode as unknown as Node);
     const valid = verifier.checkSignature(xml);

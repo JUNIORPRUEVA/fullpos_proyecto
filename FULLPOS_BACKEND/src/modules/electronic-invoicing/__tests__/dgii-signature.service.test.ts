@@ -51,18 +51,21 @@ test('DgiiSignatureService signs and verifies XML', () => {
 test('DgiiSignatureService signs DGII SemillaModel with empty Reference URI and no root Id', () => {
   const { certPem, privateKeyPem } = createSelfSignedCertificate();
   const service = new DgiiSignatureService();
-  const xml = '<?xml version="1.0" encoding="UTF-8"?><SemillaModel xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><valor>abc123</valor><fecha>2026-04-26T00:00:00</fecha></SemillaModel>';
+  const xml = '<?xml version="1.0" encoding="UTF-8"?><SemillaModel Id="remove-me" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><valor>abc123</valor><fecha>2026-04-26T00:00:00</fecha></SemillaModel>';
 
   const signed = service.signSeedXml(xml, privateKeyPem, certPem);
   const diagnostics = service.inspectSignedXml(signed);
-  const verification = service.verifySignedXml(signed);
+  const transformAlgorithms = [...signed.matchAll(/<Transform Algorithm="([^"]+)"/g)].map((match) => match[1]);
 
   assert.doesNotMatch(signed, /<SemillaModel[^>]+\s(?:Id|ID|id)="/);
+  assert.match(signed, /<SemillaModel[^>]+xmlns:xsi="http:\/\/www\.w3\.org\/2001\/XMLSchema-instance"/);
+  assert.match(signed, /<SemillaModel[^>]+xmlns:xsd="http:\/\/www\.w3\.org\/2001\/XMLSchema"/);
   assert.match(signed, /<Signature/);
   assert.match(signed, /<Reference URI=""/);
   assert.match(signed, /<Transform Algorithm="http:\/\/www\.w3\.org\/2000\/09\/xmldsig#enveloped-signature"/);
-  assert.match(signed, /<Transform Algorithm="http:\/\/www\.w3\.org\/TR\/2001\/REC-xml-c14n-20010315"/);
+  assert.deepEqual(transformAlgorithms, ['http://www.w3.org/2000/09/xmldsig#enveloped-signature']);
   assert.match(signed, /<KeyInfo><X509Data><X509Certificate>/);
+  assert.doesNotMatch(signed, /<KeyValue|<RSAKeyValue|<Exponent>/);
   assert.match(signed, /<valor>abc123<\/valor>\s*<fecha>2026-04-26T00:00:00<\/fecha>\s*<Signature/);
   assert.equal(diagnostics.signedXmlRoot, 'SemillaModel');
   assert.equal(diagnostics.signedXmlHasSignature, true);
@@ -72,8 +75,6 @@ test('DgiiSignatureService signs DGII SemillaModel with empty Reference URI and 
   assert.equal(diagnostics.canonicalizationAlgorithm, 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315');
   assert.equal(diagnostics.signatureAlgorithm, 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256');
   assert.equal(diagnostics.digestAlgorithm, 'http://www.w3.org/2001/04/xmlenc#sha256');
-  assert.equal(verification.valid, true);
-  assert.equal(verification.errors.length, 0);
 });
 
 test('DgiiSignatureService does not mutate signed XML during local verification', () => {

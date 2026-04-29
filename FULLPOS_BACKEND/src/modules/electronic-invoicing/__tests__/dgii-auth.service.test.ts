@@ -285,6 +285,19 @@ test('DgiiAuthService debug auth success reports tokenFound without returning to
   assert.equal(JSON.stringify(result).includes('full-token-value-that-must-not-leak'), false);
 });
 
+test('DgiiAuthService builds DGII validarsemilla multipart with xml field and text/xml file content type', () => {
+  const service = new DgiiAuthService({} as any, {} as any, {} as any, {} as any, {} as any);
+
+  const attempt = (service as any).buildValidateAttempt('<SemillaModel><valor>abc</valor></SemillaModel>', 'multipart', 'xml');
+  const file = attempt.body.get('xml') as any;
+
+  assert.equal(attempt.payloadMode, 'multipart');
+  assert.equal(attempt.fieldName, 'xml');
+  assert.equal(attempt.requestContentType, 'multipart/form-data');
+  assert.equal(file?.type, 'text/xml');
+  assert.equal(file?.name, 'semilla.xml');
+});
+
 test('DgiiAuthService debug auth returns diagnostic matrix when requested', async () => {
   const service = new DgiiAuthService(
     {

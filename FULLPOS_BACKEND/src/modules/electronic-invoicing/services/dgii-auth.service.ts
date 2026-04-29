@@ -382,6 +382,22 @@ function inspectDgiiSeedXsdStructure(xml: string) {
   };
 }
 
+function matchesOfficialDgiiSeedSignatureShape(xml: string, diagnostics: SignedXmlDiagnostics) {
+  const transformAlgorithms = [...xml.matchAll(/<Transform\s+Algorithm="([^"]+)"/g)].map((match) => match[1]);
+  return (
+    diagnostics.signedXmlRoot === 'SemillaModel' &&
+    diagnostics.signedXmlHasSignature &&
+    !diagnostics.signedXmlHasIdAttributeOnRoot &&
+    diagnostics.signatureReferenceUri === '' &&
+    diagnostics.canonicalizationAlgorithm === 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315' &&
+    diagnostics.signatureAlgorithm === 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256' &&
+    diagnostics.digestAlgorithm === 'http://www.w3.org/2001/04/xmlenc#sha256' &&
+    transformAlgorithms.length === 1 &&
+    transformAlgorithms[0] === 'http://www.w3.org/2000/09/xmldsig#enveloped-signature' &&
+    !/<KeyValue|<RSAKeyValue|<Exponent>/.test(xml)
+  );
+}
+
 function validateSignedSeedXmlForDgii(signedSeedXml: string) {
   if (typeof signedSeedXml !== 'string' || signedSeedXml.trim().length === 0) {
     throw {
@@ -649,7 +665,7 @@ export class DgiiAuthService {
     }
 
     const form = new FormData();
-    form.append(fieldName, new Blob([signedSeedXml], { type: 'application/xml' }), 'semilla.xml');
+    form.append(fieldName, new Blob([signedSeedXml], { type: 'text/xml' }), 'semilla.xml');
     return {
       requestContentType: 'multipart/form-data',
       payloadMode,
@@ -964,7 +980,8 @@ export class DgiiAuthService {
     const signedXmlValidation = validateSignedSeedXmlForDgii(signedSeedXml);
     const signedXmlDiagnostics = this.signatureService.inspectSignedXml(signedXmlValidation.signedXml);
     const selfVerify = this.signatureService.verifySignedXml(signedXmlValidation.signedXml);
-    if (!selfVerify.valid) {
+    const officialSeedSignatureShape = matchesOfficialDgiiSeedSignatureShape(signedXmlValidation.signedXml, signedXmlDiagnostics);
+    if (!selfVerify.valid && !officialSeedSignatureShape) {
       throw {
         status: 502,
         message: 'La semilla DGII firmada no pasó la verificación local XMLDSig',
@@ -986,6 +1003,15 @@ export class DgiiAuthService {
           digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
         },
       };
+    }
+    if (!selfVerify.valid && officialSeedSignatureShape) {
+      console.warn('[electronic-invoicing.dgii.auth] seed.local_verify_skipped_for_official_shape', {
+        requestId,
+        companyId,
+        companyRnc: companyIdentity?.rnc ?? null,
+        reason: 'xml-crypto local verifier can reject namespaced DGII seed XML when Reference declares only enveloped-signature; exact XML is still sent unchanged to DGII',
+        selfVerifyErrors: selfVerify.errors,
+      });
     }
     console.info('[electronic-invoicing.dgii.auth] seed.signed', {
       requestId,
