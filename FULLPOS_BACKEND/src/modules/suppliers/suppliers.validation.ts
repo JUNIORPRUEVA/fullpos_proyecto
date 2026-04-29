@@ -4,6 +4,10 @@ export const syncSuppliersByRncSchema = z
   .object({
     companyRnc: z.string().trim().min(3).optional(),
     companyCloudId: z.string().trim().min(6).optional(),
+    companyTenantKey: z.string().trim().min(6).optional(),
+    businessId: z.string().trim().min(3).optional(),
+    deviceId: z.string().trim().min(3).optional(),
+    terminalId: z.string().trim().min(3).optional(),
     suppliers: z
       .array(
         z.object({
@@ -20,7 +24,7 @@ export const syncSuppliersByRncSchema = z
       .max(3000)
       .default([]),
   })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
+    message: 'companyTenantKey, RNC o ID interno requerido',
     path: ['companyRnc'],
   });

@@ -5,6 +5,7 @@ import { prisma } from '../../config/prisma';
 import env from '../../config/env';
 import { verifyPassword, hashPassword } from '../../utils/password';
 import { JwtUser, TokenPair } from './auth.types';
+import { resolveCompanyIdentity } from '../companies/companyIdentity.service';
 
 function parseDurationToMs(duration: string): number {
   const fallback = 15 * 60 * 1000;
@@ -292,91 +293,20 @@ export async function ensureUserPassword(userId: number, password: string) {
   });
 }
 
-function normalizeRnc(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function normalizeCloudId(value: string) {
-  return value.trim();
-}
-
 async function resolveCompanyForProvision(params: {
   companyRnc?: string;
   companyCloudId?: string;
+  companyTenantKey?: string;
+  businessId?: string;
+  deviceId?: string;
+  terminalId?: string;
   companyName?: string;
 }) {
-  const rnc = params.companyRnc?.trim() ?? '';
-  const cloudId = params.companyCloudId?.trim() ?? '';
-  const cname = params.companyName?.trim();
-
-  if (!rnc && !cloudId) {
-    throw { status: 400, message: 'RNC o ID interno requerido' };
-  }
-
-  let company = null as { id: number; name: string; rnc: string | null; isActive: boolean } | null;
-
-  if (cloudId) {
-    company = await prisma.company.findFirst({
-      where: { cloudCompanyId: cloudId },
-      select: { id: true, name: true, rnc: true, isActive: true },
-    });
-  }
-
-  if (!company && rnc) {
-    const normalized = normalizeRnc(rnc);
-    company = await prisma.company.findFirst({
-      where: { rnc: rnc },
-      select: { id: true, name: true, rnc: true, isActive: true },
-    });
-
-    if (!company && normalized.length > 0) {
-      const candidates = await prisma.company.findMany({
-        where: { rnc: { not: null } },
-        select: { id: true, name: true, rnc: true, isActive: true },
-      });
-      company =
-        candidates.find(
-          (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-        ) ?? null;
-    }
-  }
-
-  if (company && !company.isActive) {
-    company = await prisma.company.update({
-      where: { id: company.id },
-      data: { isActive: true },
-      select: { id: true, name: true, rnc: true, isActive: true },
-    });
-  }
-
-  if (!company) {
-    const nameSeed = rnc || cloudId;
-    let resolvedName = cname && cname.length > 1 ? cname : `Empresa ${nameSeed}`;
-    const nameClash = await prisma.company.findFirst({
-      where: { name: resolvedName },
-      select: { id: true },
-    });
-    if (nameClash) {
-      resolvedName = `Empresa ${nameSeed}`;
-    }
-
-    company = await prisma.company.create({
-      data: {
-        name: resolvedName,
-        rnc: rnc || null,
-        cloudCompanyId: cloudId || null,
-        isActive: true,
-      },
-      select: { id: true, name: true, rnc: true, isActive: true },
-    });
-  } else if (cloudId) {
-    await prisma.company.update({
-      where: { id: company.id },
-      data: { cloudCompanyId: normalizeCloudId(cloudId) },
-    });
-  }
-
-  return company;
+  return resolveCompanyIdentity({
+    ...params,
+    allowCreate: true,
+    source: 'auth.provision',
+  });
 }
 
 export async function provisionOwnerByRnc(
@@ -385,18 +315,28 @@ export async function provisionOwnerByRnc(
   password: string,
   companyName?: string,
   companyCloudId?: string,
+  identity?: {
+    companyTenantKey?: string;
+    businessId?: string;
+    deviceId?: string;
+    terminalId?: string;
+  },
 ) {
   const rnc = companyRnc?.trim() ?? '';
   const cloudId = companyCloudId?.trim() ?? '';
   const uname = username.trim();
   const cname = companyName?.trim();
-  if ((!rnc && !cloudId) || !uname) {
+  if ((!rnc && !cloudId && !identity?.companyTenantKey) || !uname) {
     throw { status: 400, message: 'Datos incompletos' };
   }
   const company = await resolveCompanyForProvision({
     companyRnc: rnc,
     companyCloudId: cloudId,
     companyName: cname,
+    companyTenantKey: identity?.companyTenantKey,
+    businessId: identity?.businessId,
+    deviceId: identity?.deviceId,
+    terminalId: identity?.terminalId,
   });
 
   const hashed = await hashPassword(password);
@@ -450,6 +390,10 @@ export async function provisionOwnerByRnc(
 export async function provisionAdminUser(params: {
   companyRnc?: string;
   companyCloudId?: string;
+  companyTenantKey?: string;
+  businessId?: string;
+  deviceId?: string;
+  terminalId?: string;
   companyName?: string;
   username: string;
   password: string;
@@ -460,6 +404,10 @@ export async function provisionAdminUser(params: {
   const company = await resolveCompanyForProvision({
     companyRnc: params.companyRnc,
     companyCloudId: params.companyCloudId,
+    companyTenantKey: params.companyTenantKey,
+    businessId: params.businessId,
+    deviceId: params.deviceId,
+    terminalId: params.terminalId,
     companyName: params.companyName,
   });
 
@@ -527,12 +475,20 @@ function normalizeEmailForSync(email?: string) {
 export async function syncUsers(params: {
   companyRnc?: string;
   companyCloudId?: string;
+  companyTenantKey?: string;
+  businessId?: string;
+  deviceId?: string;
+  terminalId?: string;
   companyName?: string;
   users: SyncUserInput[];
 }) {
   const company = await resolveCompanyForProvision({
     companyRnc: params.companyRnc,
     companyCloudId: params.companyCloudId,
+    companyTenantKey: params.companyTenantKey,
+    businessId: params.businessId,
+    deviceId: params.deviceId,
+    terminalId: params.terminalId,
     companyName: params.companyName,
   });
 
@@ -658,6 +614,10 @@ export async function syncUsers(params: {
 export async function usernameAvailable(params: {
   companyRnc?: string;
   companyCloudId?: string;
+  companyTenantKey?: string;
+  businessId?: string;
+  deviceId?: string;
+  terminalId?: string;
   username: string;
 }) {
   const uname = params.username.trim();
@@ -673,22 +633,18 @@ export async function usernameAvailable(params: {
 
   // Si podemos resolver la compañía, permitimos si el username ya pertenece a esa misma empresa.
   let companyId: number | null = null;
-  const rnc = params.companyRnc?.trim() ?? '';
-  const cloudId = params.companyCloudId?.trim() ?? '';
-  if (cloudId) {
-    const c = await prisma.company.findFirst({
-      where: { cloudCompanyId: cloudId },
-      select: { id: true },
+  try {
+    const company = await resolveCompanyIdentity({
+      companyRnc: params.companyRnc,
+      companyCloudId: params.companyCloudId,
+      companyTenantKey: params.companyTenantKey,
+      businessId: params.businessId,
+      deviceId: params.deviceId,
+      terminalId: params.terminalId,
+      source: 'auth.usernameAvailable',
     });
-    companyId = c?.id ?? null;
-  }
-  if (!companyId && rnc) {
-    const c = await prisma.company.findFirst({
-      where: { rnc },
-      select: { id: true },
-    });
-    companyId = c?.id ?? null;
-  }
+    companyId = company.id;
+  } catch (_) {}
 
   if (companyId != null && existing.companyId === companyId) {
     return { available: true };

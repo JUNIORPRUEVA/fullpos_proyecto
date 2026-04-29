@@ -47,16 +47,17 @@ router.put(
   validate(updateCompanyConfigByRncSchema),
   async (req, res, next) => {
     try {
-      const { companyRnc, companyCloudId, ...payload } = req.body;
+      const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, ...payload } = req.body;
       console.info('[cloud_sync] companies.config.by-rnc', {
         companyRnc: companyRnc ?? null,
         companyCloudId: companyCloudId ?? null,
+        companyTenantKey: companyTenantKey ?? null,
         companyName: payload?.companyName ?? null,
       });
-      const updated = await updateCompanyConfigByRnc(companyRnc, {
-        ...payload,
-        companyCloudId,
-      });
+      const updated = await updateCompanyConfigByRnc(
+        { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId },
+        { ...payload, companyCloudId, companyTenantKey, businessId, deviceId, terminalId },
+      );
       if (typeof updated?.companyId === 'number') {
         await emitCompanyDataChangeEvent({
           companyId: updated.companyId,

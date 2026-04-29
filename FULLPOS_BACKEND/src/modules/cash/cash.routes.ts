@@ -8,16 +8,16 @@ const router = Router();
 
 router.post('/sync/by-rnc', overrideKeyGuard, validate(syncCashByRncSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, sessions, movements } = req.body;
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, sessions, movements } = req.body;
     console.info('[cloud_sync] cash.sync.by-rnc', {
       companyRnc: companyRnc ?? null,
       companyCloudId: companyCloudId ?? null,
+      companyTenantKey: companyTenantKey ?? null,
       sessions: Array.isArray(sessions) ? sessions.length : 0,
       movements: Array.isArray(movements) ? movements.length : 0,
     });
     const result = await syncCashByRnc(
-      companyRnc,
-      companyCloudId,
+      { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId },
       sessions ?? [],
       movements ?? [],
     );

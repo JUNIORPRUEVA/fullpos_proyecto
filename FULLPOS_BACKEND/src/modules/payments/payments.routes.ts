@@ -43,13 +43,14 @@ router.get('/', authGuard, validate(listPaymentsQuerySchema, 'query'), async (re
 
 router.post('/sync/by-rnc', overrideKeyGuard, validate(syncPaymentsByRncSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, payments } = req.body;
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, payments } = req.body;
     console.info('[cloud_sync] payments.sync.by-rnc', {
       companyRnc: companyRnc ?? null,
       companyCloudId: companyCloudId ?? null,
+      companyTenantKey: companyTenantKey ?? null,
       count: Array.isArray(payments) ? payments.length : 0,
     });
-    const result = await syncPaymentsByRnc(companyRnc, companyCloudId, payments ?? []);
+    const result = await syncPaymentsByRnc({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId }, payments ?? []);
     res.json(result);
   } catch (err) {
     next(err);

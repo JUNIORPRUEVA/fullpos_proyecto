@@ -36,13 +36,14 @@ router.get('/', authGuard, validate(listReturnsQuerySchema, 'query'), async (req
 
 router.post('/sync/by-rnc', overrideKeyGuard, validate(syncReturnsByRncSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, returns } = req.body;
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, returns } = req.body;
     console.info('[cloud_sync] returns.sync.by-rnc', {
       companyRnc: companyRnc ?? null,
       companyCloudId: companyCloudId ?? null,
+      companyTenantKey: companyTenantKey ?? null,
       count: Array.isArray(returns) ? returns.length : 0,
     });
-    const result = await syncReturnsByRnc(companyRnc, companyCloudId, returns ?? []);
+    const result = await syncReturnsByRnc({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId }, returns ?? []);
     res.json(result);
   } catch (err) {
     next(err);

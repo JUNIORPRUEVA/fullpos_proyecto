@@ -10,13 +10,14 @@ const router = Router();
 // Sync desde POS (sin JWT)
 router.post('/sync/by-rnc', overrideKeyGuard, validate(syncQuotesByRncSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, quotes } = req.body;
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, quotes } = req.body;
     console.info('[cloud_sync] quotes.sync.by-rnc', {
       companyRnc: companyRnc ?? null,
       companyCloudId: companyCloudId ?? null,
+      companyTenantKey: companyTenantKey ?? null,
       count: Array.isArray(quotes) ? quotes.length : 0,
     });
-    const result = await syncQuotesByRnc(companyRnc, companyCloudId, quotes ?? []);
+    const result = await syncQuotesByRnc({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId }, quotes ?? []);
     res.json(result);
   } catch (err) {
     next(err);

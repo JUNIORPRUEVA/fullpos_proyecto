@@ -13,12 +13,16 @@ export const provisionOwnerSchema = z
   .object({
     companyRnc: z.string().min(3).optional(),
     companyCloudId: z.string().min(6).optional(),
+    companyTenantKey: z.string().min(6).optional(),
+    businessId: z.string().min(3).optional(),
+    deviceId: z.string().min(3).optional(),
+    terminalId: z.string().min(3).optional(),
     companyName: z.string().min(2, 'Nombre de empresa requerido').optional(),
     username: z.string().min(3, 'Usuario requerido'),
     password: z.string().min(6, 'Contrase\u00f1a m\u00ednima 6 caracteres'),
   })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
+    message: 'companyTenantKey, RNC o ID interno requerido',
     path: ['companyRnc'],
   });
 
@@ -26,13 +30,17 @@ export const provisionUserSchema = z
   .object({
     companyRnc: z.string().min(3).optional(),
     companyCloudId: z.string().min(6).optional(),
+    companyTenantKey: z.string().min(6).optional(),
+    businessId: z.string().min(3).optional(),
+    deviceId: z.string().min(3).optional(),
+    terminalId: z.string().min(3).optional(),
     companyName: z.string().min(2, 'Nombre de empresa requerido').optional(),
     username: z.string().min(3, 'Usuario requerido'),
     password: z.string().min(6, 'Contrase\u00f1a m\u00ednima 6 caracteres'),
     role: z.string().optional(),
   })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
+    message: 'companyTenantKey, RNC o ID interno requerido',
     path: ['companyRnc'],
   });
 
@@ -40,6 +48,10 @@ export const syncUsersSchema = z
   .object({
     companyRnc: z.string().min(3).optional(),
     companyCloudId: z.string().min(6).optional(),
+    companyTenantKey: z.string().min(6).optional(),
+    businessId: z.string().min(3).optional(),
+    deviceId: z.string().min(3).optional(),
+    terminalId: z.string().min(3).optional(),
     companyName: z.string().min(2).optional(),
     users: z
       .array(
@@ -54,8 +66,8 @@ export const syncUsersSchema = z
       .min(1)
       .max(500),
   })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
+    message: 'companyTenantKey, RNC o ID interno requerido',
     path: ['companyRnc'],
   });
 
@@ -63,9 +75,13 @@ export const usernameAvailableSchema = z
   .object({
     companyRnc: z.string().min(3).optional(),
     companyCloudId: z.string().min(6).optional(),
+    companyTenantKey: z.string().min(6).optional(),
+    businessId: z.string().min(3).optional(),
+    deviceId: z.string().min(3).optional(),
+    terminalId: z.string().min(3).optional(),
     username: z.string().min(3, 'Usuario requerido'),
   })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
+    message: 'companyTenantKey, RNC o ID interno requerido',
     path: ['companyRnc'],
   });

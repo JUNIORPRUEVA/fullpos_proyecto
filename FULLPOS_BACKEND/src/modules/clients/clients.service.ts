@@ -1,52 +1,5 @@
 import { prisma } from '../../config/prisma';
-
-function normalizeRnc(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
-  const rnc = companyRnc?.trim() ?? '';
-  const cloudId = companyCloudId?.trim() ?? '';
-  if (!rnc && !cloudId) {
-    throw { status: 400, message: 'RNC o ID interno requerido' };
-  }
-
-  let company = null as { id: number; rnc: string | null } | null;
-
-  if (cloudId) {
-    company = await prisma.company.findFirst({
-      where: { cloudCompanyId: cloudId },
-      select: { id: true, rnc: true },
-    });
-  }
-
-  if (!company && rnc) {
-    company = await prisma.company.findFirst({
-      where: { rnc },
-      select: { id: true, rnc: true },
-    });
-
-    if (!company) {
-      const normalized = normalizeRnc(rnc);
-      if (normalized.length > 0) {
-        const candidates = await prisma.company.findMany({
-          where: { rnc: { not: null } },
-          select: { id: true, rnc: true },
-        });
-        company =
-          candidates.find(
-            (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-          ) ?? null;
-      }
-    }
-  }
-
-  if (!company) {
-    throw { status: 404, message: 'Empresa no encontrada' };
-  }
-
-  return company.id;
-}
+import { CompanyIdentityLookup, resolveCompanyIdentityId } from '../companies/companyIdentity.service';
 
 export type SyncClientInput = {
   localId: number;
@@ -63,11 +16,10 @@ export type SyncClientInput = {
 };
 
 export async function syncClientsByRnc(
-  companyRnc: string | undefined,
-  companyCloudId: string | undefined,
+  identity: CompanyIdentityLookup,
   clients: SyncClientInput[],
 ) {
-  const companyId = await resolveCompanyId(companyRnc, companyCloudId);
+  const companyId = await resolveCompanyIdentityId(identity, 'clients.sync');
   if (!clients || clients.length === 0) {
     return { ok: true, upserted: 0, companyId };
   }

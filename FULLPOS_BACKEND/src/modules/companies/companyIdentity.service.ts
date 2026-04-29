@@ -14,6 +14,10 @@ export type CompanyIdentityInput = {
   source?: string;
 };
 
+export type CompanyIdentityLookup = Omit<CompanyIdentityInput, 'allowCreate' | 'source' | 'companyName'> & {
+  companyName?: string;
+};
+
 export type CompanyIdentityRecord = {
   id: number;
   name: string;
@@ -340,4 +344,17 @@ export async function resolveCompanyIdentity(params: CompanyIdentityInput): Prom
     requestedCompanyCloudId: companyCloudId || null,
     requestedTenantKey: tenantKey || null,
   });
+}
+
+export async function resolveCompanyIdentityId(
+  identity: CompanyIdentityLookup,
+  source: string,
+  allowCreate = false,
+) {
+  const company = await resolveCompanyIdentity({
+    ...identity,
+    source,
+    allowCreate,
+  });
+  return company.id;
 }

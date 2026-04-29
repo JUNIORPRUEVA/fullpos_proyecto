@@ -19,8 +19,12 @@ export const updateCompanyConfigByRncSchema = updateCompanyConfigSchema
   .extend({
     companyRnc: z.string().min(3).optional(),
     companyCloudId: z.string().min(6).optional(),
+    companyTenantKey: z.string().min(6).optional(),
+    businessId: z.string().min(3).optional(),
+    deviceId: z.string().min(3).optional(),
+    terminalId: z.string().min(3).optional(),
   })
-  .refine((data) => !!data.companyRnc || !!data.companyCloudId, {
-    message: 'RNC o ID interno requerido',
+  .refine((data) => !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
+    message: 'companyTenantKey, RNC o ID interno requerido',
     path: ['companyRnc'],
   });

@@ -9,13 +9,14 @@ const router = Router();
 
 router.post('/sync/by-rnc', overrideKeyGuard, validate(syncCategoriesByRncSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, categories } = req.body;
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, categories } = req.body;
     console.info('[cloud_sync] categories.sync.by-rnc', {
       companyRnc: companyRnc ?? null,
       companyCloudId: companyCloudId ?? null,
+      companyTenantKey: companyTenantKey ?? null,
       count: Array.isArray(categories) ? categories.length : 0,
     });
-    const result = await syncCategoriesByRnc(companyRnc, companyCloudId, categories ?? []);
+    const result = await syncCategoriesByRnc({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId }, categories ?? []);
     res.json(result);
   } catch (err) {
     next(err);

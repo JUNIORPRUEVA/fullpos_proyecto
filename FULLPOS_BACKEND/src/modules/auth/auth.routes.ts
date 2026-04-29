@@ -56,13 +56,14 @@ router.get('/me', authGuard, async (req, res, next) => {
 // Se protege con OVERRIDE_API_KEY si está configurada (x-override-key o x-cloud-key).
 router.post('/provision-owner', overrideKeyGuard, validate(provisionOwnerSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, companyName, username, password } = req.body;
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, companyName, username, password } = req.body;
     const result = await provisionOwnerByRnc(
       companyRnc,
       username,
       password,
       companyName,
       companyCloudId,
+      { companyTenantKey, businessId, deviceId, terminalId },
     );
     res.json(result);
   } catch (err) {
@@ -73,10 +74,14 @@ router.post('/provision-owner', overrideKeyGuard, validate(provisionOwnerSchema)
 // Aprovisiona/actualiza usuarios admin para Owner (por RNC o ID interno).
 router.post('/provision-user', overrideKeyGuard, validate(provisionUserSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, companyName, username, password } = req.body;
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, companyName, username, password } = req.body;
     const result = await provisionAdminUser({
       companyRnc,
       companyCloudId,
+      companyTenantKey,
+      businessId,
+      deviceId,
+      terminalId,
       companyName,
       username,
       password,
@@ -90,8 +95,8 @@ router.post('/provision-user', overrideKeyGuard, validate(provisionUserSchema), 
 // Sincroniza TODOS los usuarios a la nube (para FK/override), pero NO implica que puedan loguearse.
 router.post('/sync-users', overrideKeyGuard, validate(syncUsersSchema), async (req, res, next) => {
   try {
-    const { companyRnc, companyCloudId, companyName, users } = req.body;
-    const result = await syncUsers({ companyRnc, companyCloudId, companyName, users });
+    const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, companyName, users } = req.body;
+    const result = await syncUsers({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, companyName, users });
     if (typeof result.company?.id === 'number') {
       await emitCompanyDataChangeEvent({
         companyId: result.company.id,
@@ -112,8 +117,8 @@ router.post(
   validate(usernameAvailableSchema),
   async (req, res, next) => {
     try {
-      const { companyRnc, companyCloudId, username } = req.body;
-      const result = await usernameAvailable({ companyRnc, companyCloudId, username });
+      const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, username } = req.body;
+      const result = await usernameAvailable({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, username });
       res.json(result);
     } catch (err) {
       next(err);
