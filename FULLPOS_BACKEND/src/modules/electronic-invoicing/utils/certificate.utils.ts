@@ -11,6 +11,7 @@ export interface LoadedPkcs12Certificate {
   validFrom: Date;
   validTo: Date;
   chainPems: string[];
+  keyMatchesCertificate: boolean;
 }
 
 export interface CertificateSubjectAnalysis {
@@ -36,6 +37,97 @@ function attrsToText(attrs: forge.pki.CertificateField[]) {
 
 function bufferToBinary(buffer: Buffer) {
   return buffer.toString('binary');
+}
+
+function normalizeLocalKeyId(value: unknown) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    return forge.util.bytesToHex(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => Number(item).toString(16).padStart(2, '0')).join('');
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString('hex');
+  }
+  return String(value);
+}
+
+function isCaCertificate(cert: forge.pki.Certificate) {
+  const basicConstraints = cert.extensions?.find((extension) => extension.name === 'basicConstraints');
+  if (basicConstraints && (basicConstraints as any).cA === true) return true;
+  return attrsToText(cert.subject.attributes) === attrsToText(cert.issuer.attributes);
+}
+
+function keyMatchesCertificate(privateKey: forge.pki.PrivateKey, cert: forge.pki.Certificate) {
+  const certPublicKey = cert.publicKey as forge.pki.rsa.PublicKey;
+  const rsaPrivateKey = privateKey as forge.pki.rsa.PrivateKey;
+  return !!(
+    certPublicKey?.n &&
+    certPublicKey?.e &&
+    rsaPrivateKey?.n &&
+    rsaPrivateKey?.e &&
+    certPublicKey.n.equals(rsaPrivateKey.n) &&
+    certPublicKey.e.equals(rsaPrivateKey.e)
+  );
+}
+
+type CertBagEntry = {
+  cert: forge.pki.Certificate;
+  localKeyId: string | null;
+  friendlyName: string | null;
+  index: number;
+};
+
+type KeyBagEntry = {
+  key: forge.pki.rsa.PrivateKey;
+  localKeyId: string | null;
+  friendlyName: string | null;
+  index: number;
+};
+
+function getBagFriendlyName(bag: forge.pkcs12.Bag) {
+  const value = (bag as any).friendlyName;
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function selectSigningPair(certEntries: CertBagEntry[], keyEntries: KeyBagEntry[]) {
+  for (const keyEntry of keyEntries) {
+    const sameLocalKeyId = keyEntry.localKeyId
+      ? certEntries.filter((certEntry) => certEntry.localKeyId === keyEntry.localKeyId)
+      : [];
+    const localKeyMatch = sameLocalKeyId.find(
+      (certEntry) => !isCaCertificate(certEntry.cert) && keyMatchesCertificate(keyEntry.key, certEntry.cert),
+    );
+    if (localKeyMatch) {
+      return { certEntry: localKeyMatch, keyEntry, keyMatchesCertificate: true };
+    }
+  }
+
+  for (const keyEntry of keyEntries) {
+    const keyMatch = certEntries.find(
+      (certEntry) => !isCaCertificate(certEntry.cert) && keyMatchesCertificate(keyEntry.key, certEntry.cert),
+    );
+    if (keyMatch) {
+      return { certEntry: keyMatch, keyEntry, keyMatchesCertificate: true };
+    }
+  }
+
+  for (const keyEntry of keyEntries) {
+    const keyMatch = certEntries.find((certEntry) => keyMatchesCertificate(keyEntry.key, certEntry.cert));
+    if (keyMatch) {
+      return { certEntry: keyMatch, keyEntry, keyMatchesCertificate: true };
+    }
+  }
+
+  const fallbackCert = certEntries.find((certEntry) => !isCaCertificate(certEntry.cert)) ?? certEntries[0];
+  const fallbackKey = keyEntries[0];
+  if (!fallbackCert || !fallbackKey) return null;
+  return {
+    certEntry: fallbackCert,
+    keyEntry: fallbackKey,
+    keyMatchesCertificate: keyMatchesCertificate(fallbackKey.key, fallbackCert.cert),
+  };
 }
 
 export function resolveCertificateFilePath(filePath?: string | null, secretReference?: string | null) {
@@ -67,20 +159,35 @@ export function loadPkcs12CertificateFromBuffer(fileBuffer: Buffer, password: st
   const keyBagEntries = p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag] ?? [];
   const certBags = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag] ?? [];
 
-  const keyBags = [...shroudedBags, ...keyBagEntries];
+  const keyEntries: KeyBagEntry[] = [...shroudedBags, ...keyBagEntries].flatMap((bag, index) => {
+    if (!bag.key) return [];
+    return [{
+      key: bag.key as forge.pki.rsa.PrivateKey,
+      localKeyId: normalizeLocalKeyId((bag as any).localKeyId),
+      friendlyName: getBagFriendlyName(bag),
+      index,
+    }];
+  });
+  const certEntries: CertBagEntry[] = certBags
+    .map((bag, index) => ({
+      cert: bag.cert,
+      localKeyId: normalizeLocalKeyId((bag as any).localKeyId),
+      friendlyName: getBagFriendlyName(bag),
+      index,
+    }))
+    .filter((entry): entry is CertBagEntry => !!entry.cert);
 
-  const keyBag = keyBags[0];
-  const certBag = certBags[0];
-  if (!keyBag?.key || !certBag?.cert) {
+  const selected = selectSigningPair(certEntries, keyEntries);
+  if (!selected) {
     throw new Error('El PKCS12 no contiene clave privada y certificado utilizables');
   }
 
-  const cert = certBag.cert;
-  const privateKeyPem = forge.pki.privateKeyToPem(keyBag.key);
+  const cert = selected.certEntry.cert;
+  const privateKeyPem = forge.pki.privateKeyToPem(selected.keyEntry.key);
   const certPem = forge.pki.certificateToPem(cert);
-  const chainPems = certBags
-    .slice(1)
-    .map((bag) => (bag.cert ? forge.pki.certificateToPem(bag.cert) : null))
+  const chainPems = certEntries
+    .filter((entry) => entry.index !== selected.certEntry.index)
+    .map((entry) => forge.pki.certificateToPem(entry.cert))
     .filter((pem): pem is string => !!pem);
 
   return {
@@ -92,6 +199,7 @@ export function loadPkcs12CertificateFromBuffer(fileBuffer: Buffer, password: st
     validFrom: cert.validity.notBefore,
     validTo: cert.validity.notAfter,
     chainPems,
+    keyMatchesCertificate: selected.keyMatchesCertificate,
   };
 }
 

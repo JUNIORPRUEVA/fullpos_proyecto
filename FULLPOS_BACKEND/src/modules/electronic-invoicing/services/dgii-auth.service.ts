@@ -85,7 +85,7 @@ function classifyDgiiSeedValidationFailure(
   diagnostics: Partial<ValidateSeedMeta>,
 ) {
   const normalized = message.toLowerCase();
-  if (diagnostics.signedXmlHasIdAttributeOnRoot || (diagnostics.signatureReferenceUri ?? '') !== '') {
+  if (!diagnostics.signedXmlHasIdAttributeOnRoot || diagnostics.signatureReferenceUri !== '#SEMILLA') {
     return 'SEED_XML_SIGNATURE_STRUCTURE_MISMATCH';
   }
   if (
@@ -174,6 +174,7 @@ type ValidateSeedMeta = {
   canonicalizationAlgorithm: string | null;
   signatureAlgorithm: string | null;
   digestAlgorithm: string | null;
+  signedXmlRootId: string | null;
   signedXmlSize: number;
 };
 
@@ -535,6 +536,7 @@ export class DgiiAuthService {
           canonicalizationAlgorithm: signedXmlDiagnostics.canonicalizationAlgorithm,
           signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
           digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
+          signedXmlRootId: signedXmlDiagnostics.signedXmlRootId,
           signedXmlSize: validatedXml.signedXmlSize,
         } satisfies ValidateSeedMeta,
       };
@@ -773,6 +775,29 @@ export class DgiiAuthService {
     const signedXmlValidation = validateSignedSeedXmlForDgii(signedSeedXml);
     const signedXmlDiagnostics = this.signatureService.inspectSignedXml(signedXmlValidation.signedXml);
     const selfVerify = this.signatureService.verifySignedXml(signedXmlValidation.signedXml);
+    if (!selfVerify.valid) {
+      throw {
+        status: 502,
+        message: 'La semilla DGII firmada no pasó la verificación local XMLDSig',
+        errorCode: 'DGII_SEED_LOCAL_VERIFY_FAILED',
+        details: {
+          environment,
+          companyId,
+          companyRnc: companyIdentity?.rnc ?? null,
+          certificateAlias: certificate.alias,
+          selfVerifyValid: selfVerify.valid,
+          selfVerifyErrors: selfVerify.errors,
+          signedXmlRoot: signedXmlDiagnostics.signedXmlRoot,
+          signedXmlHasSignature: signedXmlDiagnostics.signedXmlHasSignature,
+          signedXmlHasIdAttributeOnRoot: signedXmlDiagnostics.signedXmlHasIdAttributeOnRoot,
+          signatureReferenceUri: signedXmlDiagnostics.signatureReferenceUri,
+          signedXmlRootId: signedXmlDiagnostics.signedXmlRootId,
+          canonicalizationAlgorithm: signedXmlDiagnostics.canonicalizationAlgorithm,
+          signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
+          digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
+        },
+      };
+    }
     console.info('[electronic-invoicing.dgii.auth] seed.signed', {
       requestId,
       companyId,
@@ -798,6 +823,7 @@ export class DgiiAuthService {
       canonicalizationAlgorithm: signedXmlDiagnostics.canonicalizationAlgorithm,
       signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
       digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
+      signedXmlRootId: signedXmlDiagnostics.signedXmlRootId,
     });
 
     let validated;
@@ -890,6 +916,7 @@ export class DgiiAuthService {
       signedXmlHasSignature: validated.meta.signedXmlHasSignature,
       signedXmlHasIdAttributeOnRoot: validated.meta.signedXmlHasIdAttributeOnRoot,
       signatureReferenceUri: validated.meta.signatureReferenceUri,
+      signedXmlRootId: validated.meta.signedXmlRootId,
       canonicalizationAlgorithm: validated.meta.canonicalizationAlgorithm,
       signatureAlgorithm: validated.meta.signatureAlgorithm,
       digestAlgorithm: validated.meta.digestAlgorithm,
@@ -1194,6 +1221,7 @@ export class DgiiAuthService {
               signedXmlHasSignature: result.meta.signedXmlHasSignature,
               signedXmlHasIdAttributeOnRoot: result.meta.signedXmlHasIdAttributeOnRoot,
               signatureReferenceUri: result.meta.signatureReferenceUri,
+              signedXmlRootId: result.meta.signedXmlRootId,
               canonicalizationAlgorithm: result.meta.canonicalizationAlgorithm,
               signatureAlgorithm: result.meta.signatureAlgorithm,
               digestAlgorithm: result.meta.digestAlgorithm,
@@ -1255,6 +1283,7 @@ export class DgiiAuthService {
         signedXmlHasSignature: (error as any)?.details?.signedXmlHasSignature ?? null,
         signedXmlHasIdAttributeOnRoot: (error as any)?.details?.signedXmlHasIdAttributeOnRoot ?? null,
         signatureReferenceUri: (error as any)?.details?.signatureReferenceUri ?? null,
+        signedXmlRootId: (error as any)?.details?.signedXmlRootId ?? null,
         canonicalizationAlgorithm: (error as any)?.details?.canonicalizationAlgorithm ?? null,
         signatureAlgorithm: (error as any)?.details?.signatureAlgorithm ?? null,
         digestAlgorithm: (error as any)?.details?.digestAlgorithm ?? null,
@@ -1322,6 +1351,7 @@ export class DgiiAuthService {
       signedXmlRoot?: string | null;
       signedXmlHasSignature?: boolean;
       signedXmlHasIdAttributeOnRoot?: boolean;
+      signedXmlRootId?: string | null;
       signatureReferenceUri?: string | null;
       canonicalizationAlgorithm?: string | null;
       signatureAlgorithm?: string | null;
@@ -1384,7 +1414,7 @@ export class DgiiAuthService {
         serialNumber: certificateDetails.loaded.serialNumber,
         validTo: certificateDetails.loaded.validTo.toISOString(),
         hasPrivateKey: !!certificateDetails.loaded.privateKeyPem,
-        keyMatchesCertificate: true,
+        keyMatchesCertificate: certificateDetails.loaded.keyMatchesCertificate,
         rncInCertificate: analysis.rncInCertificate,
         rncMatchesCompany: analysis.rncMatchesCompany,
         isNaturalPerson: analysis.isNaturalPerson,
@@ -1412,6 +1442,7 @@ export class DgiiAuthService {
       out.signedXmlRoot = tokenResult.meta?.signedXmlRoot ?? undefined;
       out.signedXmlHasSignature = tokenResult.meta?.signedXmlHasSignature ?? undefined;
       out.signedXmlHasIdAttributeOnRoot = tokenResult.meta?.signedXmlHasIdAttributeOnRoot ?? undefined;
+      out.signedXmlRootId = tokenResult.meta?.signedXmlRootId ?? undefined;
       out.signatureReferenceUri = tokenResult.meta?.signatureReferenceUri ?? undefined;
       out.canonicalizationAlgorithm = tokenResult.meta?.canonicalizationAlgorithm ?? undefined;
       out.signatureAlgorithm = tokenResult.meta?.signatureAlgorithm ?? undefined;
@@ -1441,6 +1472,7 @@ export class DgiiAuthService {
       out.signedXmlRoot = (details?.signedXmlRoot as string | null | undefined) ?? undefined;
       out.signedXmlHasSignature = (details?.signedXmlHasSignature as boolean | undefined) ?? undefined;
       out.signedXmlHasIdAttributeOnRoot = (details?.signedXmlHasIdAttributeOnRoot as boolean | undefined) ?? undefined;
+      out.signedXmlRootId = (details?.signedXmlRootId as string | null | undefined) ?? undefined;
       out.signatureReferenceUri = (details?.signatureReferenceUri as string | null | undefined) ?? undefined;
       out.canonicalizationAlgorithm = (details?.canonicalizationAlgorithm as string | null | undefined) ?? undefined;
       out.signatureAlgorithm = (details?.signatureAlgorithm as string | null | undefined) ?? undefined;

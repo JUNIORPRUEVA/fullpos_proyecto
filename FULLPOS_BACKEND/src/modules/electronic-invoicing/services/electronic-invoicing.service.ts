@@ -801,6 +801,7 @@ export class ElectronicInvoicingService {
 
     let certificate;
     let xmlSigned: string;
+    let xmlToSign = invoice.xmlUnsigned;
     let xmlHash: string;
     try {
       certificate = await this.getActiveCertificate(companyId);
@@ -821,9 +822,42 @@ export class ElectronicInvoicingService {
         certificateId: certificate.id,
         certificateAlias: certificate.alias,
         certificateValidTo: loaded.validTo.toISOString(),
+        keyMatchesCertificate: loaded.keyMatchesCertificate,
       });
 
-      xmlSigned = this.signatureService.signXml(invoice.xmlUnsigned, loaded.privateKeyPem, loaded.certPem);
+      xmlToSign = this.xmlBuilder.ensureFechaHoraFirma(invoice.xmlUnsigned, new Date());
+      xmlSigned = this.signatureService.signXml(xmlToSign, loaded.privateKeyPem, loaded.certPem);
+      const signatureDiagnostics = this.signatureService.inspectSignedXml(xmlSigned);
+      const selfVerify = this.signatureService.verifySignedXml(xmlSigned);
+      if (!selfVerify.valid) {
+        throw {
+          status: 502,
+          message: 'El e-CF firmado no pasó la verificación local XMLDSig',
+          errorCode: 'ECF_LOCAL_SIGNATURE_VERIFY_FAILED',
+          details: {
+            invoiceId: invoice.id,
+            ecf: invoice.ecf,
+            selfVerifyValid: selfVerify.valid,
+            selfVerifyErrors: selfVerify.errors,
+            ...signatureDiagnostics,
+          },
+        };
+      }
+      console.info('[electronic-invoicing.outbound] sign.xml_diagnostics', {
+        requestId,
+        companyId,
+        invoiceId: invoice.id,
+        ecf: invoice.ecf,
+        selfVerifyValid: selfVerify.valid,
+        signedXmlRoot: signatureDiagnostics.signedXmlRoot,
+        signedXmlHasSignature: signatureDiagnostics.signedXmlHasSignature,
+        signedXmlHasIdAttributeOnRoot: signatureDiagnostics.signedXmlHasIdAttributeOnRoot,
+        signedXmlRootId: signatureDiagnostics.signedXmlRootId,
+        signatureReferenceUri: signatureDiagnostics.signatureReferenceUri,
+        canonicalizationAlgorithm: signatureDiagnostics.canonicalizationAlgorithm,
+        signatureAlgorithm: signatureDiagnostics.signatureAlgorithm,
+        digestAlgorithm: signatureDiagnostics.digestAlgorithm,
+      });
       xmlHash = sha256Hex(xmlSigned);
     } catch (error: any) {
       const message = error?.message ?? 'No se pudo firmar el XML con el certificado activo';
@@ -845,6 +879,7 @@ export class ElectronicInvoicingService {
       username,
       {
         xmlSigned,
+        xmlUnsigned: xmlToSign,
         xmlHash,
         certificateId: certificate.id,
         signedAt: new Date(),

@@ -1,4 +1,4 @@
-import { DOMParser } from '@xmldom/xmldom';
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { SignedXml } from 'xml-crypto';
 import { certPemToBase64 } from '../utils/certificate.utils';
 import { extractEmbeddedCertificate } from '../utils/xml.utils';
@@ -11,12 +11,14 @@ export type SignedXmlDiagnostics = {
   canonicalizationAlgorithm: string | null;
   signatureAlgorithm: string | null;
   digestAlgorithm: string | null;
+  signedXmlRootId: string | null;
 };
 
 const SIGNATURE_ALGORITHM = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
 const CANONICALIZATION_ALGORITHM = 'http://www.w3.org/2001/10/xml-exc-c14n#';
 const DIGEST_ALGORITHM = 'http://www.w3.org/2001/04/xmlenc#sha256';
 const ENVELOPED_SIGNATURE_TRANSFORM = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature';
+const DGII_SEED_ROOT_ID = 'SEMILLA';
 
 export type SeedSignatureMode = {
   label: string;
@@ -84,7 +86,10 @@ export class DgiiSignatureService {
   }
 
   signSeedXml(xml: string, privateKeyPem: string, certPem: string) {
-    return this.signXmlInternal(xml, privateKeyPem, certPem, { emptyReferenceUri: true });
+    return this.signXmlInternal(xml, privateKeyPem, certPem, {
+      emptyReferenceUri: false,
+      rootIdValue: DGII_SEED_ROOT_ID,
+    });
   }
 
   signSeedXmlWithMode(
@@ -95,7 +100,8 @@ export class DgiiSignatureService {
     mode: SeedSignatureMode,
   ) {
     return this.signXmlInternal(xml, privateKeyPem, certPem, {
-      emptyReferenceUri: true,
+      emptyReferenceUri: false,
+      rootIdValue: DGII_SEED_ROOT_ID,
       signatureAlgorithm: mode.signatureAlgorithm,
       canonicalizationAlgorithm: mode.canonicalizationAlgorithm,
       digestAlgorithm: mode.digestAlgorithm,
@@ -111,6 +117,7 @@ export class DgiiSignatureService {
     const canonicalizationMethod = signature ? findFirstElementByLocalName(signature, 'CanonicalizationMethod') : null;
     const signatureMethod = signature ? findFirstElementByLocalName(signature, 'SignatureMethod') : null;
     const digestMethod = signature ? findFirstElementByLocalName(signature, 'DigestMethod') : null;
+    const rootId = root?.getAttribute('Id') ?? root?.getAttribute('ID') ?? root?.getAttribute('id') ?? null;
 
     return {
       signedXmlRoot: root?.localName || root?.nodeName || null,
@@ -120,6 +127,29 @@ export class DgiiSignatureService {
       canonicalizationAlgorithm: canonicalizationMethod?.getAttribute('Algorithm') ?? null,
       signatureAlgorithm: signatureMethod?.getAttribute('Algorithm') ?? null,
       digestAlgorithm: digestMethod?.getAttribute('Algorithm') ?? null,
+      signedXmlRootId: rootId,
+    };
+  }
+
+  private prepareXmlForSigning(xml: string, options: { rootIdValue?: string }) {
+    const normalizedXml = xml.replace(/^\uFEFF/, '');
+    const document = new DOMParser().parseFromString(normalizedXml, 'text/xml');
+    const root = document.documentElement;
+    const rootName = root?.localName || root?.nodeName;
+    if (!rootName) {
+      throw new Error('No se pudo determinar el nodo raíz del XML a firmar');
+    }
+    if (rootName.toLowerCase().includes('parsererror')) {
+      throw new Error('XML inválido: parsererror al intentar firmar');
+    }
+
+    if (options.rootIdValue && !root.hasAttribute('Id') && !root.hasAttribute('ID') && !root.hasAttribute('id')) {
+      root.setAttribute('Id', options.rootIdValue);
+    }
+
+    return {
+      xml: new XMLSerializer().serializeToString(document).replace(/^\uFEFF/, ''),
+      rootName,
     };
   }
 
@@ -133,34 +163,28 @@ export class DgiiSignatureService {
       canonicalizationAlgorithm?: string;
       digestAlgorithm?: string;
       keyInfoCertificates?: string[];
+      rootIdValue?: string;
     },
   ) {
-    const normalizedXml = xml.replace(/^\uFEFF/, '');
-    const document = new DOMParser().parseFromString(normalizedXml, 'text/xml');
-    const rootName = document.documentElement?.localName || document.documentElement?.nodeName;
-    if (!rootName) {
-      throw new Error('No se pudo determinar el nodo raíz del XML a firmar');
-    }
-    if (rootName.toLowerCase().includes('parsererror')) {
-      throw new Error('XML inválido: parsererror al intentar firmar');
-    }
+    const prepared = this.prepareXmlForSigning(xml, { rootIdValue: options.rootIdValue });
+    const normalizedXml = prepared.xml;
+    const rootName = prepared.rootName;
 
     const rootXpath = `/*[local-name()='${rootName.replace(/^.*:/, '')}']`;
-    const signature = new SignedXml();
     const signatureAlgorithm = options.signatureAlgorithm ?? SIGNATURE_ALGORITHM;
     const canonicalizationAlgorithm = options.canonicalizationAlgorithm ?? CANONICALIZATION_ALGORITHM;
     const digestAlgorithm = options.digestAlgorithm ?? DIGEST_ALGORITHM;
     const keyInfoCertificates = options.keyInfoCertificates ?? [certPem];
-    (signature as any).signatureAlgorithm = signatureAlgorithm;
-    (signature as any).canonicalizationAlgorithm = canonicalizationAlgorithm;
-    (signature as any).privateKey = privateKeyPem;
-    (signature as any).publicCert = certPem;
-    (signature as any).keyInfoProvider = {
-      getKeyInfo: () =>
+    const signature = new SignedXml({
+      privateKey: privateKeyPem,
+      publicCert: certPem,
+      signatureAlgorithm,
+      canonicalizationAlgorithm,
+      getKeyInfoContent: () =>
         `<X509Data>${keyInfoCertificates
           .map((certificate) => `<X509Certificate>${certPemToBase64(certificate)}</X509Certificate>`)
           .join('')}</X509Data>`,
-    };
+    });
 
     signature.addReference({
       xpath: rootXpath,

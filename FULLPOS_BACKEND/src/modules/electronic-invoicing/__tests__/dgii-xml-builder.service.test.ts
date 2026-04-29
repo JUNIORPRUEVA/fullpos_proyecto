@@ -33,12 +33,14 @@ test('DgiiXmlBuilderService builds deterministic e-CF XML', () => {
     subtotalAmount: 200,
     taxAmount: 36,
     totalAmount: 236,
+    signatureDate: new Date('2025-01-03T14:05:06.000Z'),
   });
 
   assert.match(xml, /<eNCF>E310000000001<\/eNCF>/);
   assert.match(xml, /<RNCEmisor>101010101<\/RNCEmisor>/);
   assert.match(xml, /<RazonSocialComprador>Cliente Fiscal SRL<\/RazonSocialComprador>/);
   assert.match(xml, /<ITBISTotal>36\.00<\/ITBISTotal>/);
+  assert.match(xml, /<FechaHoraFirma>03-01-2025 10:05:06<\/FechaHoraFirma>/);
 });
 
 test('DgiiXmlBuilderService builds consumer invoice XML for type 32 without buyer RNC', () => {
@@ -70,9 +72,20 @@ test('DgiiXmlBuilderService builds consumer invoice XML for type 32 without buye
     subtotalAmount: 50,
     taxAmount: 9,
     totalAmount: 59,
+    signatureDate: new Date('2025-01-03T14:05:06.000Z'),
   });
 
   assert.match(xml, /<TipoeCF>32<\/TipoeCF>/);
   assert.match(xml, /<RazonSocialComprador>Consumidor Final<\/RazonSocialComprador>/);
   assert.doesNotMatch(xml, /<RNCComprador>/);
+});
+
+test('DgiiXmlBuilderService updates FechaHoraFirma without adding a Signature', () => {
+  const service = new DgiiXmlBuilderService();
+  const xml = '<?xml version="1.0" encoding="UTF-8"?><eCF><Encabezado/><DetallesItems/><FechaHoraFirma>01-01-2025 00:00:00</FechaHoraFirma></eCF>';
+
+  const updated = service.ensureFechaHoraFirma(xml, new Date('2025-01-03T14:05:06.000Z'));
+
+  assert.match(updated, /<FechaHoraFirma>03-01-2025 10:05:06<\/FechaHoraFirma>/);
+  assert.doesNotMatch(updated, /<Signature/);
 });

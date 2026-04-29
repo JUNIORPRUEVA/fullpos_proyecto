@@ -1,9 +1,29 @@
 import { ElectronicInvoiceBuildInput } from '../types/electronic-invoice.types';
 import { formatMoney } from '../utils/validation.utils';
 import { create } from 'xmlbuilder2';
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 
 function formatDate(value: Date) {
   return value.toISOString().slice(0, 10);
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function formatDgiiSignatureDate(value: Date) {
+  const dominicanTime = new Date(value.getTime() - 4 * 60 * 60 * 1000);
+  return `${pad2(dominicanTime.getUTCDate())}-${pad2(dominicanTime.getUTCMonth() + 1)}-${dominicanTime.getUTCFullYear()} ${pad2(dominicanTime.getUTCHours())}:${pad2(dominicanTime.getUTCMinutes())}:${pad2(dominicanTime.getUTCSeconds())}`;
+}
+
+function findDirectChildByLocalName(root: any, localName: string) {
+  for (let i = 0; i < root.childNodes.length; i += 1) {
+    const node = root.childNodes[i] as any;
+    if (node.nodeType === 1 && (node.localName === localName || node.nodeName.split(':').pop() === localName)) {
+      return node;
+    }
+  }
+  return null;
 }
 
 export class DgiiXmlBuilderService {
@@ -62,6 +82,26 @@ export class DgiiXmlBuilderService {
       item.ele('ITBISItem').txt(formatMoney(line.taxAmount));
     }
 
+    root.ele('FechaHoraFirma').txt(formatDgiiSignatureDate(input.signatureDate ?? new Date()));
+
     return root.end({ prettyPrint: false });
+  }
+
+  ensureFechaHoraFirma(xml: string, signatureDate = new Date()) {
+    const document = new DOMParser().parseFromString(xml.replace(/^\uFEFF/, ''), 'text/xml');
+    const root = document.documentElement;
+    const rootName = root?.localName || root?.nodeName;
+    if (!rootName || rootName.toLowerCase().includes('parsererror')) {
+      throw new Error('XML e-CF inválido: no se pudo actualizar FechaHoraFirma');
+    }
+
+    let fechaHoraFirma: any = findDirectChildByLocalName(root, 'FechaHoraFirma');
+    if (!fechaHoraFirma) {
+      fechaHoraFirma = document.createElement('FechaHoraFirma');
+      root.appendChild(fechaHoraFirma);
+    }
+    fechaHoraFirma.textContent = formatDgiiSignatureDate(signatureDate);
+
+    return new XMLSerializer().serializeToString(document).replace(/^\uFEFF/, '');
   }
 }

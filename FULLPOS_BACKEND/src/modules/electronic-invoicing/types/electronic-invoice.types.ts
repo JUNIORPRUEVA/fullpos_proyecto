@@ -48,6 +48,7 @@ export interface ElectronicInvoiceBuildInput {
   taxAmount: number;
   totalAmount: number;
   reference?: ElectronicInvoiceReference | null;
+  signatureDate?: Date;
 }
 
 export interface ParsedInvoiceXmlMetadata {

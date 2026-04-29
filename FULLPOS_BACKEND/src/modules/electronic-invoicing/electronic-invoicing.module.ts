@@ -714,12 +714,13 @@ async function buildSafeDgiiAuthDiagnostic(input: {
 
   return {
     ok,
-    buildMarker: 'dgii-auth-debug-v2',
+    buildMarker: 'dgii-auth-debug-v3-seed-id-semilla',
     stage,
     requestId: input.requestId,
     signedXmlRoot: authDebug?.signedXmlRoot ?? authDebug?.rootElement ?? null,
     signedXmlHasSignature: authDebug?.signedXmlHasSignature ?? authDebug?.hasSignature ?? null,
     signedXmlHasIdAttributeOnRoot: authDebug?.signedXmlHasIdAttributeOnRoot ?? null,
+    signedXmlRootId: authDebug?.signedXmlRootId ?? null,
     signatureReferenceUri: authDebug?.signatureReferenceUri ?? null,
     canonicalizationAlgorithm: authDebug?.canonicalizationAlgorithm ?? null,
     signatureAlgorithm: authDebug?.signatureAlgorithm ?? null,
@@ -775,6 +776,7 @@ async function buildSafeDgiiAuthDiagnostic(input: {
       signedXmlRoot: authDebug?.signedXmlRoot ?? authDebug?.rootElement ?? null,
       signedXmlHasSignature: authDebug?.signedXmlHasSignature ?? authDebug?.hasSignature ?? null,
       signedXmlHasIdAttributeOnRoot: authDebug?.signedXmlHasIdAttributeOnRoot ?? null,
+      signedXmlRootId: authDebug?.signedXmlRootId ?? null,
       signatureReferenceUri: authDebug?.signatureReferenceUri ?? null,
       canonicalizationAlgorithm: authDebug?.canonicalizationAlgorithm ?? null,
       signatureAlgorithm: authDebug?.signatureAlgorithm ?? null,
