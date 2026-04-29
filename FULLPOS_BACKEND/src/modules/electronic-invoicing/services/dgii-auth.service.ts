@@ -1,7 +1,9 @@
 import crypto from 'crypto';
+import fs from 'fs';
 import jwt from 'jsonwebtoken';
+import path from 'path';
 import { PrismaClient } from '@prisma/client';
-import { DOMParser } from '@xmldom/xmldom';
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import env from '../../../config/env';
 import { DgiiSignatureService, SEED_SIGNATURE_MODES, SeedSignatureMode, SignedXmlDiagnostics } from './dgii-signature.service';
 import { ElectronicInvoicingAuditService } from './electronic-invoicing-audit.service';
@@ -161,6 +163,7 @@ type SeedRequestMeta = {
 };
 
 type ValidateSeedMeta = {
+  originalSeedRoot: string | null;
   validateUrl: string;
   requestContentType: string;
   payloadMode: 'multipart' | 'form-urlencoded' | 'raw-xml';
@@ -168,15 +171,48 @@ type ValidateSeedMeta = {
   httpStatus: number;
   responseContentType: string;
   rawTextSummary: string | null;
+  dgiiSafeResponse: string | null;
   signedXmlRoot: string | null;
   signedXmlHasSignature: boolean;
+  signedXmlHasBom: boolean;
+  signedXmlHasDeclaration: boolean;
   signedXmlHasIdAttributeOnRoot: boolean;
+  signedXmlHasRootIdAttribute: boolean;
   signatureReferenceUri: string | null;
+  signatureReferenceUriBeforeSanitize: string | null;
+  signatureReferenceUriAfterSanitize: string | null;
   canonicalizationAlgorithm: string | null;
   signatureAlgorithm: string | null;
   digestAlgorithm: string | null;
   signedXmlRootId: string | null;
+  rootIdBeforeSanitize: string | null;
+  rootIdAfterSanitize: string | null;
   signedXmlSize: number;
+  signedXmlSizeBeforeSanitize: number;
+  finalXmlSize: number;
+  finalXmlStartsWith: string;
+  finalXmlRootAfterSanitize: string | null;
+  xmlDeclarationBeforeSanitize: boolean;
+  xmlDeclarationAfterSanitize: boolean;
+};
+
+type SignedSeedSanitizerDiagnostics = {
+  originalSeedRoot: string | null;
+  signedXmlHasBomBeforeSanitize: boolean;
+  signedXmlHasBomAfterSanitize: boolean;
+  signedXmlHasDeclarationBeforeSanitize: boolean;
+  signedXmlHasDeclarationAfterSanitize: boolean;
+  signedXmlRootBeforeSanitize: string | null;
+  signedXmlRootAfterSanitize: string | null;
+  signedXmlHasRootIdAttributeBeforeSanitize: boolean;
+  signedXmlHasRootIdAttributeAfterSanitize: boolean;
+  rootIdBeforeSanitize: string | null;
+  rootIdAfterSanitize: string | null;
+  signatureReferenceUriBeforeSanitize: string | null;
+  signatureReferenceUriAfterSanitize: string | null;
+  signedXmlSizeBeforeSanitize: number;
+  finalXmlSize: number;
+  finalXmlStartsWith: string;
 };
 
 type ValidateSeedAttempt = {
@@ -230,18 +266,113 @@ function xmlEdgePreview(rawText: string, size = 120) {
   };
 }
 
-function formatXmlForLog(xml: string) {
-  const compact = xml.replace(/>\s+</g, '><').trim();
-  let formatted = '';
-  let depth = 0;
-  for (const part of compact.replace(/></g, '>\n<').split('\n')) {
-    const line = part.trim();
-    if (!line) continue;
-    if (/^<\//.test(line)) depth = Math.max(0, depth - 1);
-    formatted += `${'  '.repeat(depth)}${line}\n`;
-    if (/^<[^!?/][^>]*[^/]?>$/.test(line) && !/^<[^>]+>[^<]+<\//.test(line)) depth += 1;
+function hasUtf8Bom(value: string) {
+  return value.charCodeAt(0) === 0xfeff;
+}
+
+function hasXmlDeclaration(value: string) {
+  return /^\uFEFF?\s*<\?xml\s/i.test(value);
+}
+
+function xmlStartsWithPreview(value: string, size = 120) {
+  return value.slice(0, size).replace(/\s+/g, ' ').trim();
+}
+
+function findFirstElementByLocalName(node: any, localName: string): Element | null {
+  const current = node as Element;
+  if (current.nodeType === 1 && (current.localName === localName || current.nodeName.split(':').pop() === localName)) {
+    return current;
   }
-  return formatted.trim();
+
+  for (let i = 0; i < node.childNodes.length; i += 1) {
+    const found = findFirstElementByLocalName(node.childNodes[i], localName);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+function inspectSignedSeedBasics(xml: string) {
+  const document = new DOMParser().parseFromString(xml.replace(/^\uFEFF/, ''), 'text/xml');
+  const root = document.documentElement;
+  const reference = findFirstElementByLocalName(document, 'Reference');
+  return {
+    rootName: root?.localName || root?.nodeName || null,
+    hasRootIdAttribute: !!root?.hasAttribute('Id') || !!root?.hasAttribute('ID') || !!root?.hasAttribute('id'),
+    rootId: root?.getAttribute('Id') ?? root?.getAttribute('ID') ?? root?.getAttribute('id') ?? null,
+    signatureReferenceUri: reference?.getAttribute('URI') ?? null,
+  };
+}
+
+function sanitizeSignedSeedXmlForDgii(signedXml: string, originalSeedXml: string): { xml: string; diagnostics: SignedSeedSanitizerDiagnostics } {
+  const before = inspectSignedSeedBasics(signedXml);
+  const signedXmlSizeBeforeSanitize = signedXml.length;
+  const signedXmlHasBomBeforeSanitize = hasUtf8Bom(signedXml);
+  const signedXmlHasDeclarationBeforeSanitize = hasXmlDeclaration(signedXml);
+  let xml = signedXml
+    .replace(/^\uFEFF/, '')
+    .replace(/^\s*<\?xml[^>]*\?>\s*/i, '');
+
+  const document = new DOMParser().parseFromString(xml, 'text/xml');
+  const root = document.documentElement;
+  if (root?.localName !== 'SemillaModel' && root?.nodeName !== 'SemillaModel') {
+    throw {
+      status: 400,
+      message: 'La semilla firmada no conserva raíz SemillaModel después de sanitizar',
+      errorCode: 'DGII_SEED_SIGNED_XML_STRUCTURE_INVALID',
+      details: { rootName: root?.localName || root?.nodeName || null },
+    };
+  }
+
+  for (const attribute of ['Id', 'ID', 'id']) {
+    if (root.hasAttribute(attribute)) {
+      root.removeAttribute(attribute);
+    }
+  }
+
+  const reference = findFirstElementByLocalName(document, 'Reference');
+  const rootHasIdAfterRemoval = root.hasAttribute('Id') || root.hasAttribute('ID') || root.hasAttribute('id');
+  const referenceUri = reference?.getAttribute('URI') ?? null;
+  if (reference && !rootHasIdAfterRemoval && referenceUri?.startsWith('#')) {
+    reference.setAttribute('URI', '');
+  }
+
+  xml = new XMLSerializer().serializeToString(document)
+    .replace(/^\uFEFF/, '')
+    .replace(/^\s*<\?xml[^>]*\?>\s*/i, '')
+    .trim();
+  const after = inspectSignedSeedBasics(xml);
+
+  return {
+    xml,
+    diagnostics: {
+      originalSeedRoot: extractXmlRootName(originalSeedXml),
+      signedXmlHasBomBeforeSanitize,
+      signedXmlHasBomAfterSanitize: hasUtf8Bom(xml),
+      signedXmlHasDeclarationBeforeSanitize,
+      signedXmlHasDeclarationAfterSanitize: hasXmlDeclaration(xml),
+      signedXmlRootBeforeSanitize: before.rootName,
+      signedXmlRootAfterSanitize: after.rootName,
+      signedXmlHasRootIdAttributeBeforeSanitize: before.hasRootIdAttribute,
+      signedXmlHasRootIdAttributeAfterSanitize: after.hasRootIdAttribute,
+      rootIdBeforeSanitize: before.rootId,
+      rootIdAfterSanitize: after.rootId,
+      signatureReferenceUriBeforeSanitize: before.signatureReferenceUri,
+      signatureReferenceUriAfterSanitize: after.signatureReferenceUri,
+      signedXmlSizeBeforeSanitize,
+      finalXmlSize: xml.length,
+      finalXmlStartsWith: xmlStartsWithPreview(xml),
+    },
+  };
+}
+
+function saveSignedSeedXmlForDebug(xml: string) {
+  if (process.env.DGII_DEBUG_SAVE_SIGNED_SEED_XML !== 'true') return null;
+  const debugDir = path.resolve(process.cwd(), 'debug', 'dgii');
+  const filePath = path.join(debugDir, 'last-signed-seed.xml');
+  fs.mkdirSync(debugDir, { recursive: true });
+  fs.writeFileSync(filePath, xml, { encoding: 'utf8' });
+  return filePath;
 }
 
 function inspectDgiiSeedXsdStructure(xml: string) {
@@ -568,6 +699,7 @@ export class DgiiAuthService {
     payload: ValidateSeedAttempt,
     validatedXml: ReturnType<typeof validateSignedSeedXmlForDgii>,
     signedXmlDiagnostics: SignedXmlDiagnostics,
+    sanitizerDiagnostics?: SignedSeedSanitizerDiagnostics,
   ) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -586,12 +718,16 @@ export class DgiiAuthService {
 
       const { raw, rawText } = await parseDgiiResponse(response);
       const token = extractDgiiToken(raw, response);
+      const dgiiSafeResponse =
+        deepFindFirstString(raw, ['Mensaje', 'mensaje', 'Message', 'message', 'descripcion', 'Descripcion']) ||
+        summarizeRawText(rawText, 300);
       return {
         response,
         raw,
         rawText,
         token,
         meta: {
+          originalSeedRoot: sanitizerDiagnostics?.originalSeedRoot ?? null,
           validateUrl,
           requestContentType: payload.requestContentType,
           payloadMode: payload.payloadMode,
@@ -599,15 +735,29 @@ export class DgiiAuthService {
           httpStatus: response.status,
           responseContentType: response.headers.get('content-type') ?? '',
           rawTextSummary: summarizeRawText(rawText),
+          dgiiSafeResponse,
           signedXmlRoot: signedXmlDiagnostics.signedXmlRoot ?? validatedXml.signedXmlRoot,
           signedXmlHasSignature: signedXmlDiagnostics.signedXmlHasSignature,
+          signedXmlHasBom: sanitizerDiagnostics?.signedXmlHasBomAfterSanitize ?? hasUtf8Bom(validatedXml.signedXml),
+          signedXmlHasDeclaration: sanitizerDiagnostics?.signedXmlHasDeclarationAfterSanitize ?? hasXmlDeclaration(validatedXml.signedXml),
           signedXmlHasIdAttributeOnRoot: signedXmlDiagnostics.signedXmlHasIdAttributeOnRoot,
+          signedXmlHasRootIdAttribute: signedXmlDiagnostics.signedXmlHasIdAttributeOnRoot,
           signatureReferenceUri: signedXmlDiagnostics.signatureReferenceUri,
+          signatureReferenceUriBeforeSanitize: sanitizerDiagnostics?.signatureReferenceUriBeforeSanitize ?? signedXmlDiagnostics.signatureReferenceUri,
+          signatureReferenceUriAfterSanitize: sanitizerDiagnostics?.signatureReferenceUriAfterSanitize ?? signedXmlDiagnostics.signatureReferenceUri,
           canonicalizationAlgorithm: signedXmlDiagnostics.canonicalizationAlgorithm,
           signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
           digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
           signedXmlRootId: signedXmlDiagnostics.signedXmlRootId,
+          rootIdBeforeSanitize: sanitizerDiagnostics?.rootIdBeforeSanitize ?? signedXmlDiagnostics.signedXmlRootId,
+          rootIdAfterSanitize: sanitizerDiagnostics?.rootIdAfterSanitize ?? signedXmlDiagnostics.signedXmlRootId,
           signedXmlSize: validatedXml.signedXmlSize,
+          signedXmlSizeBeforeSanitize: sanitizerDiagnostics?.signedXmlSizeBeforeSanitize ?? validatedXml.signedXmlSize,
+          finalXmlSize: sanitizerDiagnostics?.finalXmlSize ?? validatedXml.signedXmlSize,
+          finalXmlStartsWith: sanitizerDiagnostics?.finalXmlStartsWith ?? xmlStartsWithPreview(validatedXml.signedXml),
+          finalXmlRootAfterSanitize: sanitizerDiagnostics?.signedXmlRootAfterSanitize ?? signedXmlDiagnostics.signedXmlRoot ?? validatedXml.signedXmlRoot,
+          xmlDeclarationBeforeSanitize: sanitizerDiagnostics?.signedXmlHasDeclarationBeforeSanitize ?? hasXmlDeclaration(validatedXml.signedXml),
+          xmlDeclarationAfterSanitize: sanitizerDiagnostics?.signedXmlHasDeclarationAfterSanitize ?? hasXmlDeclaration(validatedXml.signedXml),
         } satisfies ValidateSeedMeta,
       };
     } finally {
@@ -842,6 +992,8 @@ export class DgiiAuthService {
       loaded.chainPems.length,
     );
     const seedRootAfter = extractXmlRootName(signedSeedXml);
+    const sanitizedSignedSeed = sanitizeSignedSeedXmlForDgii(signedSeedXml, seedResponse.seedXml);
+    signedSeedXml = sanitizedSignedSeed.xml;
     const signedXmlValidation = validateSignedSeedXmlForDgii(signedSeedXml);
     const signedXmlDiagnostics = this.signatureService.inspectSignedXml(signedXmlValidation.signedXml);
     const selfVerify = this.signatureService.verifySignedXml(signedXmlValidation.signedXml);
@@ -894,21 +1046,28 @@ export class DgiiAuthService {
       signatureAlgorithm: signedXmlDiagnostics.signatureAlgorithm,
       digestAlgorithm: signedXmlDiagnostics.digestAlgorithm,
       signedXmlRootId: signedXmlDiagnostics.signedXmlRootId,
+      signedXmlHasBom: sanitizedSignedSeed.diagnostics.signedXmlHasBomAfterSanitize,
+      signedXmlHasDeclaration: sanitizedSignedSeed.diagnostics.signedXmlHasDeclarationAfterSanitize,
+      signedXmlHasRootIdAttribute: sanitizedSignedSeed.diagnostics.signedXmlHasRootIdAttributeAfterSanitize,
+      signatureReferenceUriBeforeSanitize: sanitizedSignedSeed.diagnostics.signatureReferenceUriBeforeSanitize,
+      signatureReferenceUriAfterSanitize: sanitizedSignedSeed.diagnostics.signatureReferenceUriAfterSanitize,
+      rootIdBeforeSanitize: sanitizedSignedSeed.diagnostics.rootIdBeforeSanitize,
+      rootIdAfterSanitize: sanitizedSignedSeed.diagnostics.rootIdAfterSanitize,
+      xmlDeclarationBeforeSanitize: sanitizedSignedSeed.diagnostics.signedXmlHasDeclarationBeforeSanitize,
+      xmlDeclarationAfterSanitize: sanitizedSignedSeed.diagnostics.signedXmlHasDeclarationAfterSanitize,
+      finalXmlSize: sanitizedSignedSeed.diagnostics.finalXmlSize,
+      finalXmlStartsWith: sanitizedSignedSeed.diagnostics.finalXmlStartsWith,
+      finalXmlRootAfterSanitize: sanitizedSignedSeed.diagnostics.signedXmlRootAfterSanitize,
     });
 
-    console.info('[electronic-invoicing.dgii.auth] seed.signed.raw_xml_before_send', {
+    const debugSavedPath = saveSignedSeedXmlForDebug(signedXmlValidation.signedXml);
+    console.info('[electronic-invoicing.dgii.auth] seed.signed.sanitize_diagnostics', {
       requestId,
       companyId,
       companyRnc: companyIdentity?.rnc ?? null,
-      signedSeedXml: signedXmlValidation.signedXml,
-    });
-    console.info(
-      `[electronic-invoicing.dgii.auth] seed.signed.formatted_xml_before_send\n${formatXmlForLog(signedXmlValidation.signedXml)}`,
-    );
-    console.info('[electronic-invoicing.dgii.auth] seed.signed.official_xsd_structure_check', {
-      requestId,
-      companyId,
-      companyRnc: companyIdentity?.rnc ?? null,
+      debugXmlSaved: !!debugSavedPath,
+      debugXmlPath: debugSavedPath,
+      diagnostics: sanitizedSignedSeed.diagnostics,
       structure: inspectDgiiSeedXsdStructure(signedXmlValidation.signedXml),
     });
 
@@ -921,6 +1080,7 @@ export class DgiiAuthService {
         config.userAgent,
         config.timeoutMs,
         signedXmlValidation.signedXml,
+        sanitizedSignedSeed.diagnostics,
       );
     } catch (error) {
       if ((error as any)?.errorCode === 'DGII_SEED_VALIDATE_BAD_REQUEST') {
@@ -1213,6 +1373,7 @@ export class DgiiAuthService {
     userAgent: string,
     timeoutMs: number,
     signedSeedXml: string,
+    sanitizerDiagnostics?: SignedSeedSanitizerDiagnostics,
   ): Promise<{ token: string; issuedAt: Date; expiresAt: Date; validatedAt: Date; meta: ValidateSeedMeta }> {
     const validatedXml = validateSignedSeedXmlForDgii(signedSeedXml);
     const signedXmlDiagnostics: SignedXmlDiagnostics = this.signatureService.inspectSignedXml(validatedXml.signedXml);
@@ -1246,6 +1407,7 @@ export class DgiiAuthService {
             attempt,
             validatedXml,
             signedXmlDiagnostics,
+            sanitizerDiagnostics,
           );
 
           console.info('[electronic-invoicing.dgii.auth] validate.attempt', {
@@ -1260,12 +1422,20 @@ export class DgiiAuthService {
             tokenFound: !!result.token,
             signedXmlRoot: result.meta.signedXmlRoot,
             signedXmlHasSignature: result.meta.signedXmlHasSignature,
+            signedXmlHasBom: result.meta.signedXmlHasBom,
+            signedXmlHasDeclaration: result.meta.signedXmlHasDeclaration,
             signedXmlHasIdAttributeOnRoot: result.meta.signedXmlHasIdAttributeOnRoot,
+            signedXmlHasRootIdAttribute: result.meta.signedXmlHasRootIdAttribute,
             signatureReferenceUri: result.meta.signatureReferenceUri,
+            signatureReferenceUriBeforeSanitize: result.meta.signatureReferenceUriBeforeSanitize,
+            signatureReferenceUriAfterSanitize: result.meta.signatureReferenceUriAfterSanitize,
             canonicalizationAlgorithm: result.meta.canonicalizationAlgorithm,
             signatureAlgorithm: result.meta.signatureAlgorithm,
             digestAlgorithm: result.meta.digestAlgorithm,
             signedXmlSize: result.meta.signedXmlSize,
+            finalXmlSize: result.meta.finalXmlSize,
+            finalXmlStartsWith: result.meta.finalXmlStartsWith,
+            finalXmlRootAfterSanitize: result.meta.finalXmlRootAfterSanitize,
             rawTextSummary: result.meta.rawTextSummary,
           });
 
@@ -1303,15 +1473,30 @@ export class DgiiAuthService {
               payloadMode: result.meta.payloadMode,
               fieldName: result.meta.fieldName,
               rawTextSummary: result.meta.rawTextSummary,
+              dgiiSafeResponse: result.meta.dgiiSafeResponse,
+              originalSeedRoot: result.meta.originalSeedRoot,
               signedXmlRoot: result.meta.signedXmlRoot,
               signedXmlHasSignature: result.meta.signedXmlHasSignature,
+              signedXmlHasBom: result.meta.signedXmlHasBom,
+              signedXmlHasDeclaration: result.meta.signedXmlHasDeclaration,
               signedXmlHasIdAttributeOnRoot: result.meta.signedXmlHasIdAttributeOnRoot,
+              signedXmlHasRootIdAttribute: result.meta.signedXmlHasRootIdAttribute,
               signatureReferenceUri: result.meta.signatureReferenceUri,
+              signatureReferenceUriBeforeSanitize: result.meta.signatureReferenceUriBeforeSanitize,
+              signatureReferenceUriAfterSanitize: result.meta.signatureReferenceUriAfterSanitize,
               signedXmlRootId: result.meta.signedXmlRootId,
+              rootIdBeforeSanitize: result.meta.rootIdBeforeSanitize,
+              rootIdAfterSanitize: result.meta.rootIdAfterSanitize,
               canonicalizationAlgorithm: result.meta.canonicalizationAlgorithm,
               signatureAlgorithm: result.meta.signatureAlgorithm,
               digestAlgorithm: result.meta.digestAlgorithm,
               signedXmlSize: result.meta.signedXmlSize,
+              signedXmlSizeBeforeSanitize: result.meta.signedXmlSizeBeforeSanitize,
+              finalXmlSize: result.meta.finalXmlSize,
+              finalXmlStartsWith: result.meta.finalXmlStartsWith,
+              finalXmlRootAfterSanitize: result.meta.finalXmlRootAfterSanitize,
+              xmlDeclarationBeforeSanitize: result.meta.xmlDeclarationBeforeSanitize,
+              xmlDeclarationAfterSanitize: result.meta.xmlDeclarationAfterSanitize,
               dgiiValidationDiagnosis: classifyDgiiSeedValidationFailure(responseMessage, result.meta),
             },
           };
@@ -1365,15 +1550,30 @@ export class DgiiAuthService {
         responseStatus: (error as any)?.details?.httpStatus ?? null,
         rawResponse: (error as any)?.details?.raw ?? null,
         rawTextSummary: (error as any)?.details?.rawTextSummary ?? null,
+        dgiiSafeResponse: (error as any)?.details?.dgiiSafeResponse ?? null,
+        originalSeedRoot: (error as any)?.details?.originalSeedRoot ?? null,
         signedXmlRoot: (error as any)?.details?.signedXmlRoot ?? null,
         signedXmlHasSignature: (error as any)?.details?.signedXmlHasSignature ?? null,
+        signedXmlHasBom: (error as any)?.details?.signedXmlHasBom ?? null,
+        signedXmlHasDeclaration: (error as any)?.details?.signedXmlHasDeclaration ?? null,
         signedXmlHasIdAttributeOnRoot: (error as any)?.details?.signedXmlHasIdAttributeOnRoot ?? null,
+        signedXmlHasRootIdAttribute: (error as any)?.details?.signedXmlHasRootIdAttribute ?? null,
         signatureReferenceUri: (error as any)?.details?.signatureReferenceUri ?? null,
+        signatureReferenceUriBeforeSanitize: (error as any)?.details?.signatureReferenceUriBeforeSanitize ?? null,
+        signatureReferenceUriAfterSanitize: (error as any)?.details?.signatureReferenceUriAfterSanitize ?? null,
         signedXmlRootId: (error as any)?.details?.signedXmlRootId ?? null,
+        rootIdBeforeSanitize: (error as any)?.details?.rootIdBeforeSanitize ?? null,
+        rootIdAfterSanitize: (error as any)?.details?.rootIdAfterSanitize ?? null,
         canonicalizationAlgorithm: (error as any)?.details?.canonicalizationAlgorithm ?? null,
         signatureAlgorithm: (error as any)?.details?.signatureAlgorithm ?? null,
         digestAlgorithm: (error as any)?.details?.digestAlgorithm ?? null,
         signedXmlSize: (error as any)?.details?.signedXmlSize ?? null,
+        signedXmlSizeBeforeSanitize: (error as any)?.details?.signedXmlSizeBeforeSanitize ?? null,
+        finalXmlSize: (error as any)?.details?.finalXmlSize ?? null,
+        finalXmlStartsWith: (error as any)?.details?.finalXmlStartsWith ?? null,
+        finalXmlRootAfterSanitize: (error as any)?.details?.finalXmlRootAfterSanitize ?? null,
+        xmlDeclarationBeforeSanitize: (error as any)?.details?.xmlDeclarationBeforeSanitize ?? null,
+        xmlDeclarationAfterSanitize: (error as any)?.details?.xmlDeclarationAfterSanitize ?? null,
         errorCode: (error as any)?.errorCode ?? 'DGII_TOKEN_MISSING',
         errorMessage: (error as any)?.message ?? 'DGII no devolvió token válido',
       });
@@ -1432,13 +1632,29 @@ export class DgiiAuthService {
       validateFieldName?: ValidateSeedMeta['fieldName'];
       validateContentType?: string;
       validateRawResponse?: unknown;
+      dgiiSafeResponse?: string | null;
+      dgiiHttpStatus?: number | null;
       dgiiValidationDiagnosis?: string | null;
       signerContext?: Record<string, unknown>;
+      originalSeedRoot?: string | null;
       signedXmlRoot?: string | null;
       signedXmlHasSignature?: boolean;
+      signedXmlHasBom?: boolean | null;
+      signedXmlHasDeclaration?: boolean | null;
       signedXmlHasIdAttributeOnRoot?: boolean;
+      signedXmlHasRootIdAttribute?: boolean | null;
       signedXmlRootId?: string | null;
       signatureReferenceUri?: string | null;
+      signatureReferenceUriBeforeSanitize?: string | null;
+      signatureReferenceUriAfterSanitize?: string | null;
+      rootIdBeforeSanitize?: string | null;
+      rootIdAfterSanitize?: string | null;
+      signedXmlSizeBeforeSanitize?: number | null;
+      finalXmlSize?: number | null;
+      finalXmlStartsWith?: string | null;
+      finalXmlRootAfterSanitize?: string | null;
+      xmlDeclarationBeforeSanitize?: boolean | null;
+      xmlDeclarationAfterSanitize?: boolean | null;
       canonicalizationAlgorithm?: string | null;
       signatureAlgorithm?: string | null;
       digestAlgorithm?: string | null;
@@ -1533,11 +1749,27 @@ export class DgiiAuthService {
       out.tokenFound = !!tokenResult.token;
       out.tokenSource = tokenResult.source;
       out.httpStatus = 200;
+      out.dgiiHttpStatus = tokenResult.meta?.httpStatus ?? 200;
+      out.dgiiSafeResponse = tokenResult.meta?.dgiiSafeResponse ?? null;
+      out.originalSeedRoot = tokenResult.meta?.originalSeedRoot ?? undefined;
       out.signedXmlRoot = tokenResult.meta?.signedXmlRoot ?? undefined;
       out.signedXmlHasSignature = tokenResult.meta?.signedXmlHasSignature ?? undefined;
+      out.signedXmlHasBom = tokenResult.meta?.signedXmlHasBom ?? undefined;
+      out.signedXmlHasDeclaration = tokenResult.meta?.signedXmlHasDeclaration ?? undefined;
       out.signedXmlHasIdAttributeOnRoot = tokenResult.meta?.signedXmlHasIdAttributeOnRoot ?? undefined;
+      out.signedXmlHasRootIdAttribute = tokenResult.meta?.signedXmlHasRootIdAttribute ?? undefined;
       out.signedXmlRootId = tokenResult.meta?.signedXmlRootId ?? undefined;
       out.signatureReferenceUri = tokenResult.meta?.signatureReferenceUri ?? undefined;
+      out.signatureReferenceUriBeforeSanitize = tokenResult.meta?.signatureReferenceUriBeforeSanitize ?? undefined;
+      out.signatureReferenceUriAfterSanitize = tokenResult.meta?.signatureReferenceUriAfterSanitize ?? undefined;
+      out.rootIdBeforeSanitize = tokenResult.meta?.rootIdBeforeSanitize ?? undefined;
+      out.rootIdAfterSanitize = tokenResult.meta?.rootIdAfterSanitize ?? undefined;
+      out.signedXmlSizeBeforeSanitize = tokenResult.meta?.signedXmlSizeBeforeSanitize ?? undefined;
+      out.finalXmlSize = tokenResult.meta?.finalXmlSize ?? undefined;
+      out.finalXmlStartsWith = tokenResult.meta?.finalXmlStartsWith ?? undefined;
+      out.finalXmlRootAfterSanitize = tokenResult.meta?.finalXmlRootAfterSanitize ?? undefined;
+      out.xmlDeclarationBeforeSanitize = tokenResult.meta?.xmlDeclarationBeforeSanitize ?? undefined;
+      out.xmlDeclarationAfterSanitize = tokenResult.meta?.xmlDeclarationAfterSanitize ?? undefined;
       out.canonicalizationAlgorithm = tokenResult.meta?.canonicalizationAlgorithm ?? undefined;
       out.signatureAlgorithm = tokenResult.meta?.signatureAlgorithm ?? undefined;
       out.digestAlgorithm = tokenResult.meta?.digestAlgorithm ?? undefined;
@@ -1561,17 +1793,33 @@ export class DgiiAuthService {
       out.errorCode = (error as any)?.errorCode ?? 'DGII_AUTH_DEBUG_FAILED';
       out.errorMessage = (error as any)?.message ?? 'Error desconocido en autenticación DGII';
       out.httpStatus = (error as any)?.status ?? (typeof details?.httpStatus === 'number' ? (details.httpStatus as number) : undefined);
+      out.dgiiHttpStatus = (typeof details?.httpStatus === 'number' ? (details.httpStatus as number) : null);
+      out.dgiiSafeResponse = (details?.dgiiSafeResponse as string | null | undefined) ?? null;
       out.payloadMode = (details?.payloadMode as ValidateSeedMeta['payloadMode'] | undefined) ?? undefined;
       out.rootElement = (details?.signedXmlRoot as string | null | undefined) ?? undefined;
       out.hasSignature = (details?.signedXmlHasSignature as boolean | undefined) ?? undefined;
       out.signedXmlSize = (details?.signedXmlSize as number | undefined) ?? undefined;
       out.validateFieldName = (details?.fieldName as ValidateSeedMeta['fieldName'] | undefined) ?? undefined;
       out.validateContentType = (details?.requestContentType as string | undefined) ?? undefined;
+      out.originalSeedRoot = (details?.originalSeedRoot as string | null | undefined) ?? undefined;
       out.signedXmlRoot = (details?.signedXmlRoot as string | null | undefined) ?? undefined;
       out.signedXmlHasSignature = (details?.signedXmlHasSignature as boolean | undefined) ?? undefined;
+      out.signedXmlHasBom = (details?.signedXmlHasBom as boolean | undefined) ?? undefined;
+      out.signedXmlHasDeclaration = (details?.signedXmlHasDeclaration as boolean | undefined) ?? undefined;
       out.signedXmlHasIdAttributeOnRoot = (details?.signedXmlHasIdAttributeOnRoot as boolean | undefined) ?? undefined;
+      out.signedXmlHasRootIdAttribute = (details?.signedXmlHasRootIdAttribute as boolean | undefined) ?? undefined;
       out.signedXmlRootId = (details?.signedXmlRootId as string | null | undefined) ?? undefined;
       out.signatureReferenceUri = (details?.signatureReferenceUri as string | null | undefined) ?? undefined;
+      out.signatureReferenceUriBeforeSanitize = (details?.signatureReferenceUriBeforeSanitize as string | null | undefined) ?? undefined;
+      out.signatureReferenceUriAfterSanitize = (details?.signatureReferenceUriAfterSanitize as string | null | undefined) ?? undefined;
+      out.rootIdBeforeSanitize = (details?.rootIdBeforeSanitize as string | null | undefined) ?? undefined;
+      out.rootIdAfterSanitize = (details?.rootIdAfterSanitize as string | null | undefined) ?? undefined;
+      out.signedXmlSizeBeforeSanitize = (details?.signedXmlSizeBeforeSanitize as number | undefined) ?? undefined;
+      out.finalXmlSize = (details?.finalXmlSize as number | undefined) ?? undefined;
+      out.finalXmlStartsWith = (details?.finalXmlStartsWith as string | undefined) ?? undefined;
+      out.finalXmlRootAfterSanitize = (details?.finalXmlRootAfterSanitize as string | null | undefined) ?? undefined;
+      out.xmlDeclarationBeforeSanitize = (details?.xmlDeclarationBeforeSanitize as boolean | undefined) ?? undefined;
+      out.xmlDeclarationAfterSanitize = (details?.xmlDeclarationAfterSanitize as boolean | undefined) ?? undefined;
       out.canonicalizationAlgorithm = (details?.canonicalizationAlgorithm as string | null | undefined) ?? undefined;
       out.signatureAlgorithm = (details?.signatureAlgorithm as string | null | undefined) ?? undefined;
       out.digestAlgorithm = (details?.digestAlgorithm as string | null | undefined) ?? undefined;
