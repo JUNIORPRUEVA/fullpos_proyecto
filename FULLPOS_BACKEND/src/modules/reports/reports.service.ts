@@ -18,10 +18,6 @@ const REPORT_SALE_STATUSES = [
   'PARTIAL_REFUND',
 ] as const;
 
-function normalizeRnc(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
 const reportSaleInclude = {
   items: {
     include: {
@@ -48,47 +44,9 @@ type ReportSaleRow = Prisma.SaleGetPayload<{
   include: typeof reportSaleInclude;
 }>;
 
-async function resolveRelatedCompanyIds(companyId: number) {
-  const company = await prisma.company.findUnique({
-    where: { id: companyId },
-    select: { id: true, rnc: true, cloudCompanyId: true },
-  });
-  if (!company) return [companyId];
-
-  const ids = new Set<number>([company.id]);
-  const normalizedRnc = normalizeRnc(company.rnc ?? '');
-
-  if (normalizedRnc.length > 0) {
-    const candidates = await prisma.company.findMany({
-      where: { rnc: { not: null } },
-      select: { id: true, rnc: true, cloudCompanyId: true },
-    });
-    for (const candidate of candidates) {
-      if (candidate.rnc != null && normalizeRnc(candidate.rnc) === normalizedRnc) {
-        ids.add(candidate.id);
-      }
-    }
-  }
-
-  if (ids.size > 1) {
-    console.warn('[reports.resolveRelatedCompanyIds] related_companies_included', {
-      requestedCompanyId: companyId,
-      companyRnc: company.rnc ?? null,
-      companyCloudId: company.cloudCompanyId ?? null,
-      companyIds: Array.from(ids),
-    });
-  }
-
-  return Array.from(ids);
-}
-
-function companyFilter(companyIds: number[]): Prisma.IntFilter | number {
-  return companyIds.length === 1 ? companyIds[0] : { in: companyIds };
-}
-
-function getReportSalesWhere(companyIds: number[], fromDate: Date, toDate: Date): Prisma.SaleWhereInput {
+function getReportSalesWhere(companyId: number, fromDate: Date, toDate: Date): Prisma.SaleWhereInput {
   return {
-    companyId: companyFilter(companyIds),
+    companyId,
     kind: { in: [...REPORT_SALE_KINDS] },
     status: { in: [...REPORT_SALE_STATUSES] },
     deletedAt: null,
@@ -97,12 +55,12 @@ function getReportSalesWhere(companyIds: number[], fromDate: Date, toDate: Date)
 }
 
 function getReportExpensesWhere(
-  companyIds: number[],
+  companyId: number,
   fromDate: Date,
   toDate: Date,
 ): Prisma.CashMovementWhereInput {
   return {
-    companyId: companyFilter(companyIds),
+    companyId,
     type: 'out',
     movementType: 'expense',
     affectsProfit: true,
@@ -110,11 +68,11 @@ function getReportExpensesWhere(
   };
 }
 
-function getReportReturnsWhere(companyIds: number[], fromDate: Date, toDate: Date): Prisma.ReturnWhereInput {
+function getReportReturnsWhere(companyId: number, fromDate: Date, toDate: Date): Prisma.ReturnWhereInput {
   return {
-    companyId: companyFilter(companyIds),
+    companyId,
     returnSale: {
-      companyId: companyFilter(companyIds),
+      companyId,
       kind: 'return',
       status: { in: [...REPORT_SALE_STATUSES] },
       deletedAt: null,
@@ -151,9 +109,9 @@ function calculateReturnCost(row: {
   }, 0);
 }
 
-async function listReportSales(companyIds: number[], fromDate: Date, toDate: Date) {
+async function listReportSales(companyId: number, fromDate: Date, toDate: Date) {
   const rows: ReportSaleRow[] = await prisma.sale.findMany({
-    where: getReportSalesWhere(companyIds, fromDate, toDate),
+    where: getReportSalesWhere(companyId, fromDate, toDate),
     include: reportSaleInclude,
     orderBy: { createdAt: 'desc' },
   });
@@ -184,9 +142,9 @@ async function listReportSales(companyIds: number[], fromDate: Date, toDate: Dat
   });
 }
 
-async function listReportReturns(companyIds: number[], fromDate: Date, toDate: Date) {
+async function listReportReturns(companyId: number, fromDate: Date, toDate: Date) {
   const rows = await prisma.return.findMany({
-    where: getReportReturnsWhere(companyIds, fromDate, toDate),
+    where: getReportReturnsWhere(companyId, fromDate, toDate),
     include: {
       returnSale: { select: { id: true, total: true, createdAt: true } },
       items: {
@@ -216,9 +174,9 @@ async function listReportReturns(companyIds: number[], fromDate: Date, toDate: D
   });
 }
 
-async function listReportExpenses(companyIds: number[], fromDate: Date, toDate: Date) {
+async function listReportExpenses(companyId: number, fromDate: Date, toDate: Date) {
   const rows = await prisma.cashMovement.findMany({
-    where: getReportExpensesWhere(companyIds, fromDate, toDate),
+    where: getReportExpensesWhere(companyId, fromDate, toDate),
     select: {
       id: true,
       amount: true,
@@ -257,11 +215,10 @@ function buildSalesByDay(sales: Array<{ createdAt: Date; total: number }>) {
 export async function getReportData(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
-  const companyIds = await resolveRelatedCompanyIds(companyId);
 
   const [sales, returns] = await Promise.all([
-    listReportSales(companyIds, fromDate, toDate),
-    listReportReturns(companyIds, fromDate, toDate),
+    listReportSales(companyId, fromDate, toDate),
+    listReportReturns(companyId, fromDate, toDate),
   ]);
 
   const grossSales = sales.reduce((sum, sale) => sum + sale.total, 0);
@@ -321,8 +278,6 @@ function calculateDeferredTotalDue(sale: {
 export async function getReportsStatus(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
-  const companyIds = await resolveRelatedCompanyIds(companyId);
-  const companyIdWhere = companyFilter(companyIds);
 
   const [company, salesCount, cashClosingsCount, cashMovementsCount, expensesCount, quotesCount, lastSale, lastCashClosing, lastCashMovement, lastExpense, lastQuote] =
     await Promise.all([
@@ -332,7 +287,7 @@ export async function getReportsStatus(companyId: number, from: string, to: stri
       }),
       prisma.sale.count({
         where: {
-          companyId: companyIdWhere,
+          companyId,
           kind: { in: ['invoice', 'sale'] },
           status: { in: [...REPORT_SALE_STATUSES] },
           deletedAt: null,
@@ -340,39 +295,39 @@ export async function getReportsStatus(companyId: number, from: string, to: stri
         },
       }),
       prisma.cashSession.count({
-        where: { companyId: companyIdWhere, status: 'CLOSED', closedAt: { gte: fromDate, lte: toDate } },
+        where: { companyId, status: 'CLOSED', closedAt: { gte: fromDate, lte: toDate } },
       }),
       prisma.cashMovement.count({
-        where: { companyId: companyIdWhere, createdAt: { gte: fromDate, lte: toDate } },
+        where: { companyId, createdAt: { gte: fromDate, lte: toDate } },
       }),
       prisma.expense.count({
-        where: { companyId: companyIdWhere, incurredAt: { gte: fromDate, lte: toDate } },
+        where: { companyId, incurredAt: { gte: fromDate, lte: toDate } },
       }),
       prisma.quote.count({
-        where: { companyId: companyIdWhere, createdAt: { gte: fromDate, lte: toDate } },
+        where: { companyId, createdAt: { gte: fromDate, lte: toDate } },
       }),
       prisma.sale.findFirst({
-        where: { companyId: companyIdWhere, status: { not: 'cancelled' } },
+        where: { companyId, status: { not: 'cancelled' } },
         select: { createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.cashSession.findFirst({
-        where: { companyId: companyIdWhere, status: 'CLOSED' },
+        where: { companyId, status: 'CLOSED' },
         select: { closedAt: true },
         orderBy: { closedAt: 'desc' },
       }),
       prisma.cashMovement.findFirst({
-        where: { companyId: companyIdWhere },
+        where: { companyId },
         select: { createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.expense.findFirst({
-        where: { companyId: companyIdWhere },
+        where: { companyId },
         select: { incurredAt: true },
         orderBy: { incurredAt: 'desc' },
       }),
       prisma.quote.findFirst({
-        where: { companyId: companyIdWhere },
+        where: { companyId },
         select: { createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
@@ -435,10 +390,9 @@ export async function getSalesList(
 ) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
-  const companyIds = await resolveRelatedCompanyIds(companyId);
   const { skip, take } = buildPagination(page, pageSize);
 
-  const allSales = await listReportSales(companyIds, fromDate, toDate);
+  const allSales = await listReportSales(companyId, fromDate, toDate);
   const totalCount = allSales.length;
   const data = allSales.slice(skip, skip + take);
 
@@ -451,11 +405,10 @@ export async function getSalesList(
 }
 
 export async function getSaleDetail(companyId: number, saleId: number) {
-  const companyIds = await resolveRelatedCompanyIds(companyId);
   const sale = await prisma.sale.findFirst({
     where: {
       id: saleId,
-      companyId: companyFilter(companyIds),
+      companyId,
       kind: { in: ['invoice', 'sale'] },
     },
     include: {
