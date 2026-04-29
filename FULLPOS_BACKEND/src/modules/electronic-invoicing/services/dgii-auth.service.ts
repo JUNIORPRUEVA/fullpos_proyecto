@@ -840,6 +840,10 @@ export class DgiiAuthService {
         (error as any).message = buildUserFacingSeedValidationMessage(rawMessage);
         (error as any).details = {
           ...((error as any)?.details ?? {}),
+          selfVerifyValid: selfVerify.valid,
+          certificateSubject: loaded.subject,
+          certificateIssuer: loaded.issuer,
+          certificateSerialNumber: loaded.serialNumber,
           certSubjectShort: certificateAnalysis.certSubjectShort,
           certIssuer: loaded.issuer,
           certSerialNumber: loaded.serialNumber,
@@ -1323,6 +1327,10 @@ export class DgiiAuthService {
       signatureAlgorithm?: string | null;
       digestAlgorithm?: string | null;
       validatePayloadMode?: ValidateSeedMeta['payloadMode'];
+      selfVerifyValid?: boolean | null;
+      certificateSubject?: string | null;
+      certificateIssuer?: string | null;
+      certificateSerialNumber?: string | null;
       certificateDiagnostics?: {
         subject: string;
         certSubjectShort: string;
@@ -1411,6 +1419,10 @@ export class DgiiAuthService {
       out.validatePayloadMode = tokenResult.meta?.payloadMode ?? undefined;
       out.validateFieldName = tokenResult.meta?.fieldName ?? undefined;
       out.validateContentType = tokenResult.meta?.requestContentType ?? undefined;
+      out.selfVerifyValid = true;
+      out.certificateSubject = out.certificateDiagnostics?.subject ?? undefined;
+      out.certificateIssuer = out.certificateDiagnostics?.issuer ?? undefined;
+      out.certificateSerialNumber = out.certificateDiagnostics?.serialNumber ?? undefined;
       if (input.diagnosticMatrix) {
         out.diagnosticMatrix = await this.runSeedDiagnosticMatrix(company.id, company.rnc ?? null, environment, requestId);
       }
@@ -1434,6 +1446,10 @@ export class DgiiAuthService {
       out.signatureAlgorithm = (details?.signatureAlgorithm as string | null | undefined) ?? undefined;
       out.digestAlgorithm = (details?.digestAlgorithm as string | null | undefined) ?? undefined;
       out.validatePayloadMode = (details?.payloadMode as ValidateSeedMeta['payloadMode'] | undefined) ?? undefined;
+      out.selfVerifyValid = (details?.selfVerifyValid as boolean | undefined) ?? out.certificateDiagnostics?.localSignatureVerify ?? undefined;
+      out.certificateSubject = (details?.certificateSubject as string | undefined) ?? out.certificateDiagnostics?.subject ?? undefined;
+      out.certificateIssuer = (details?.certificateIssuer as string | undefined) ?? (details?.certIssuer as string | undefined) ?? out.certificateDiagnostics?.issuer ?? undefined;
+      out.certificateSerialNumber = (details?.certificateSerialNumber as string | undefined) ?? (details?.certSerialNumber as string | undefined) ?? out.certificateDiagnostics?.serialNumber ?? undefined;
       out.validateRawResponse = details?.raw ?? details?.rawTextSummary ?? null;
       out.dgiiValidationDiagnosis = (details?.dgiiValidationDiagnosis as string | null | undefined) ?? undefined;
       out.signerContext = (details?.signerContext as Record<string, unknown> | undefined) ?? undefined;
