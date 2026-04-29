@@ -18,10 +18,6 @@ const REPORT_SALE_STATUSES = [
   'PARTIAL_REFUND',
 ] as const;
 
-function normalizeRnc(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
 const reportSaleInclude = {
   items: {
     include: {
@@ -216,70 +212,6 @@ function buildSalesByDay(sales: Array<{ createdAt: Date; total: number }>) {
   }));
 }
 
-async function logEmptyReportDiagnostics(companyId: number, fromDate: Date, toDate: Date) {
-  try {
-    const company = await prisma.company.findUnique({
-      where: { id: companyId },
-      select: { id: true, name: true, rnc: true, cloudCompanyId: true },
-    });
-    if (!company) return;
-
-    const normalizedRnc = normalizeRnc(company.rnc ?? '');
-    const candidates = normalizedRnc.length > 0
-      ? await prisma.company.findMany({
-          where: { rnc: { not: null } },
-          select: { id: true, name: true, rnc: true, cloudCompanyId: true },
-          orderBy: { id: 'asc' },
-        })
-      : [company];
-    const relatedCompanies = candidates.filter(
-      (item) => item.id === company.id || (item.rnc != null && normalizeRnc(item.rnc) === normalizedRnc),
-    );
-
-    const diagnostics = await Promise.all(
-      relatedCompanies.map(async (item) => {
-        const [products, salesInRange, salesAllTime] = await Promise.all([
-          prisma.product.count({ where: { companyId: item.id, isDemo: false, deletedAt: null } }),
-          prisma.sale.count({ where: getReportSalesWhere(item.id, fromDate, toDate) }),
-          prisma.sale.count({
-            where: {
-              companyId: item.id,
-              kind: { in: [...REPORT_SALE_KINDS] },
-              status: { in: [...REPORT_SALE_STATUSES] },
-              deletedAt: null,
-            },
-          }),
-        ]);
-        return {
-          companyId: item.id,
-          name: item.name,
-          rnc: item.rnc,
-          cloudCompanyId: item.cloudCompanyId,
-          products,
-          salesInRange,
-          salesAllTime,
-        };
-      }),
-    );
-
-    console.warn('[reports.data.empty_diagnostics]', {
-      requestedCompanyId: company.id,
-      requestedCompanyRnc: company.rnc,
-      requestedCompanyCloudId: company.cloudCompanyId,
-      from: fromDate.toISOString(),
-      to: toDate.toISOString(),
-      relatedCompanies: diagnostics,
-      hint:
-        'If products are in one company but sales are in another duplicate RNC company, move report data to the product company with tools/move_report_data_to_product_company.js.',
-    });
-  } catch (error: any) {
-    console.warn('[reports.data.empty_diagnostics_failed]', {
-      companyId,
-      message: error?.message ?? String(error),
-    });
-  }
-}
-
 export async function getReportData(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
@@ -288,10 +220,6 @@ export async function getReportData(companyId: number, from: string, to: string)
     listReportSales(companyId, fromDate, toDate),
     listReportReturns(companyId, fromDate, toDate),
   ]);
-
-  if (sales.length === 0 && returns.length === 0) {
-    await logEmptyReportDiagnostics(companyId, fromDate, toDate);
-  }
 
   const grossSales = sales.reduce((sum, sale) => sum + sale.total, 0);
   const refundedSales = returns.reduce((sum, row) => sum + row.total, 0);
