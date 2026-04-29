@@ -112,15 +112,16 @@ export async function login(identifier: string, password: string) {
     identifierLength: normalizedIdentifier.length,
   });
 
-  const user = await prisma.user.findFirst({
+  const candidates = await prisma.user.findMany({
     where: {
       isActive: true,
       OR: [{ username: normalizedIdentifier }, { email: normalizedIdentifier.toLowerCase() }],
     },
     include: { company: true },
+    orderBy: { id: 'asc' },
   });
 
-  if (!user || !user.company || !user.company.isActive) {
+  if (candidates.length === 0) {
     console.warn('[auth.login] failed', {
       reason: 'user_or_company_not_found',
       identifierType,
@@ -128,48 +129,77 @@ export async function login(identifier: string, password: string) {
     throw { status: 401, message: loginFailureMessage(), errorCode: 'AUTH_INVALID_CREDENTIALS' };
   }
 
-  // Cloud Owner app: bloquear login de cajeros/usuarios no admin.
-  if (!isCloudRoleAllowed(user.role)) {
+  const roleAllowedCandidates = candidates.filter(
+    (candidate) => candidate.company?.isActive && isCloudRoleAllowed(candidate.role),
+  );
+
+  if (roleAllowedCandidates.length === 0) {
+    const first = candidates[0];
     console.warn('[auth.login] failed', {
       reason: 'role_not_allowed',
-      userId: user.id,
-      companyId: user.companyId,
-      role: user.role,
+      userId: first?.id ?? null,
+      companyId: first?.companyId ?? null,
+      role: first?.role ?? null,
     });
     throw {
       status: 403,
       message: 'Acceso denegado (solo administradores)',
       errorCode: 'AUTH_ROLE_NOT_ALLOWED',
-      details: { role: user.role, userId: user.id, companyId: user.companyId },
+      details: { role: first?.role ?? null, userId: first?.id ?? null, companyId: first?.companyId ?? null },
     };
   }
 
-  let passwordMatches = false;
-  try {
-    passwordMatches = await verifyPassword(password, user.password);
-  } catch {
-    // Legacy DB: password stored in plain text (or invalid hash). If it matches,
-    // allow login and upgrade to bcrypt.
-    if (user.password === password) {
-      passwordMatches = true;
-      const hashed = await hashPassword(password);
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { password: hashed },
-      });
-    } else {
-      passwordMatches = false;
+  const matchingUsers = [] as typeof roleAllowedCandidates;
+  for (const candidate of roleAllowedCandidates) {
+    let passwordMatches = false;
+    try {
+      passwordMatches = await verifyPassword(password, candidate.password);
+    } catch {
+      // Legacy DB: password stored in plain text (or invalid hash). If it matches,
+      // allow login and upgrade to bcrypt.
+      if (candidate.password === password) {
+        passwordMatches = true;
+        const hashed = await hashPassword(password);
+        await prisma.user.update({
+          where: { id: candidate.id },
+          data: { password: hashed },
+        });
+      }
     }
+    if (passwordMatches) matchingUsers.push(candidate);
   }
-  if (!passwordMatches) {
+
+  if (matchingUsers.length === 0) {
     console.warn('[auth.login] failed', {
       reason: 'password_mismatch_or_cloud_password_not_provisioned',
-      userId: user.id,
-      companyId: user.companyId,
-      role: user.role,
+      candidateCount: roleAllowedCandidates.length,
+      candidateCompanyIds: roleAllowedCandidates.map((candidate) => candidate.companyId),
     });
     throw { status: 401, message: loginFailureMessage(), errorCode: 'AUTH_INVALID_CREDENTIALS' };
   }
+
+  if (matchingUsers.length > 1) {
+    console.warn('[auth.login] failed', {
+      reason: 'ambiguous_credentials_multiple_companies',
+      identifierType,
+      matchingUsers: matchingUsers.map((candidate) => ({
+        userId: candidate.id,
+        companyId: candidate.companyId,
+        username: candidate.username,
+        companyName: candidate.company?.name ?? null,
+        companyRnc: candidate.company?.rnc ?? null,
+        companyCloudId: candidate.company?.cloudCompanyId ?? null,
+      })),
+    });
+    throw {
+      status: 409,
+      message:
+        'Ese usuario existe en varias empresas con la misma contraseña. Cambia el usuario de nube para que sea único o corrige la empresa del usuario en el backend.',
+      errorCode: 'AUTH_AMBIGUOUS_COMPANY',
+    };
+  }
+
+  const user = matchingUsers[0];
 
   const payload = buildJwtPayload(user);
   const tokens = await generateTokenPair(payload);

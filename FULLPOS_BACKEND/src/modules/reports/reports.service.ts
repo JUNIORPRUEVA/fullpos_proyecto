@@ -3,7 +3,6 @@ import { prisma } from '../../config/prisma';
 import { parseRange, ensureRangeWithinDays } from '../../utils/date';
 import { formatInTimeZone } from 'date-fns-tz';
 import { buildPagination } from '../../utils/pagination';
-import { resolveProductDataCompanyId } from '../companies/companyScope.service';
 
 const MAX_RANGE_DAYS = 365;
 const REPORTS_TIMEZONE = process.env.REPORTS_TIMEZONE || 'America/Santo_Domingo';
@@ -284,15 +283,14 @@ async function logEmptyReportDiagnostics(companyId: number, fromDate: Date, toDa
 export async function getReportData(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
-  const reportCompanyId = await resolveProductDataCompanyId(companyId, 'reports.data');
 
   const [sales, returns] = await Promise.all([
-    listReportSales(reportCompanyId, fromDate, toDate),
-    listReportReturns(reportCompanyId, fromDate, toDate),
+    listReportSales(companyId, fromDate, toDate),
+    listReportReturns(companyId, fromDate, toDate),
   ]);
 
   if (sales.length === 0 && returns.length === 0) {
-    await logEmptyReportDiagnostics(reportCompanyId, fromDate, toDate);
+    await logEmptyReportDiagnostics(companyId, fromDate, toDate);
   }
 
   const grossSales = sales.reduce((sum, sale) => sum + sale.total, 0);
@@ -352,17 +350,16 @@ function calculateDeferredTotalDue(sale: {
 export async function getReportsStatus(companyId: number, from: string, to: string) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
-  const reportCompanyId = await resolveProductDataCompanyId(companyId, 'reports.status');
 
   const [company, salesCount, cashClosingsCount, cashMovementsCount, expensesCount, quotesCount, lastSale, lastCashClosing, lastCashMovement, lastExpense, lastQuote] =
     await Promise.all([
       prisma.company.findUnique({
-        where: { id: reportCompanyId },
+        where: { id: companyId },
         select: { id: true, name: true, rnc: true, cloudCompanyId: true },
       }),
       prisma.sale.count({
         where: {
-          companyId: reportCompanyId,
+          companyId,
           kind: { in: ['invoice', 'sale'] },
           status: { in: [...REPORT_SALE_STATUSES] },
           deletedAt: null,
@@ -370,46 +367,46 @@ export async function getReportsStatus(companyId: number, from: string, to: stri
         },
       }),
       prisma.cashSession.count({
-        where: { companyId: reportCompanyId, status: 'CLOSED', closedAt: { gte: fromDate, lte: toDate } },
+        where: { companyId, status: 'CLOSED', closedAt: { gte: fromDate, lte: toDate } },
       }),
       prisma.cashMovement.count({
-        where: { companyId: reportCompanyId, createdAt: { gte: fromDate, lte: toDate } },
+        where: { companyId, createdAt: { gte: fromDate, lte: toDate } },
       }),
       prisma.expense.count({
-        where: { companyId: reportCompanyId, incurredAt: { gte: fromDate, lte: toDate } },
+        where: { companyId, incurredAt: { gte: fromDate, lte: toDate } },
       }),
       prisma.quote.count({
-        where: { companyId: reportCompanyId, createdAt: { gte: fromDate, lte: toDate } },
+        where: { companyId, createdAt: { gte: fromDate, lte: toDate } },
       }),
       prisma.sale.findFirst({
-        where: { companyId: reportCompanyId, status: { not: 'cancelled' } },
+        where: { companyId, status: { not: 'cancelled' } },
         select: { createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.cashSession.findFirst({
-        where: { companyId: reportCompanyId, status: 'CLOSED' },
+        where: { companyId, status: 'CLOSED' },
         select: { closedAt: true },
         orderBy: { closedAt: 'desc' },
       }),
       prisma.cashMovement.findFirst({
-        where: { companyId: reportCompanyId },
+        where: { companyId },
         select: { createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
       prisma.expense.findFirst({
-        where: { companyId: reportCompanyId },
+        where: { companyId },
         select: { incurredAt: true },
         orderBy: { incurredAt: 'desc' },
       }),
       prisma.quote.findFirst({
-        where: { companyId: reportCompanyId },
+        where: { companyId },
         select: { createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
 
   return {
-    company: company ?? { id: reportCompanyId, name: 'Empresa', rnc: null, cloudCompanyId: null },
+    company: company ?? { id: companyId, name: 'Empresa', rnc: null, cloudCompanyId: null },
     range: { from: fromDate, to: toDate },
     counts: {
       sales: salesCount,
@@ -465,10 +462,9 @@ export async function getSalesList(
 ) {
   const { fromDate, toDate } = parseRange(from, to);
   ensureRangeWithinDays(fromDate, toDate, MAX_RANGE_DAYS);
-  const reportCompanyId = await resolveProductDataCompanyId(companyId, 'reports.sales.list');
   const { skip, take } = buildPagination(page, pageSize);
 
-  const allSales = await listReportSales(reportCompanyId, fromDate, toDate);
+  const allSales = await listReportSales(companyId, fromDate, toDate);
   const totalCount = allSales.length;
   const data = allSales.slice(skip, skip + take);
 
@@ -481,11 +477,10 @@ export async function getSalesList(
 }
 
 export async function getSaleDetail(companyId: number, saleId: number) {
-  const reportCompanyId = await resolveProductDataCompanyId(companyId, 'reports.sales.detail');
   const sale = await prisma.sale.findFirst({
     where: {
       id: saleId,
-      companyId: reportCompanyId,
+      companyId,
       kind: { in: ['invoice', 'sale'] },
     },
     include: {
