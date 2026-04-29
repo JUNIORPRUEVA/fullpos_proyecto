@@ -28,6 +28,23 @@ function compact(obj) {
   return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined && value !== null && value !== ''));
 }
 
+const REPORT_SALE_KINDS = ['invoice', 'sale'];
+const REPORT_SALE_STATUSES = ['completed', 'COMPLETED', 'paid', 'PAID', 'partial_refund', 'PARTIAL_REFUND'];
+
+function startOfLocalDay(value) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 0, 0, 0, 0);
+}
+
+function endOfLocalDay(value) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate(), 23, 59, 59, 999);
+}
+
+function daysAgoStart(days) {
+  const today = startOfLocalDay(new Date());
+  today.setDate(today.getDate() - days);
+  return today;
+}
+
 async function findCompanies() {
   const companyId = process.env.COMPANY_ID ? Number(process.env.COMPANY_ID) : null;
   const tenantKey = String(process.env.COMPANY_TENANT_KEY || '').trim().toLowerCase();
@@ -196,6 +213,70 @@ async function sampleRecent(companyId) {
   return { sales, products, users, terminals };
 }
 
+async function reportEligibility(companyId) {
+  const now = new Date();
+  const todayStart = startOfLocalDay(now);
+  const todayEnd = endOfLocalDay(now);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const last365Start = daysAgoStart(364);
+
+  const reportWhere = {
+    companyId,
+    kind: { in: REPORT_SALE_KINDS },
+    status: { in: REPORT_SALE_STATUSES },
+    deletedAt: null,
+  };
+
+  const [
+    byStatus,
+    byKind,
+    byDeletedAt,
+    createdRange,
+    eligibleTotal,
+    eligibleToday,
+    eligibleCurrentMonth,
+    eligibleLast365Days,
+    latestEligibleSales,
+  ] = await Promise.all([
+    prisma.sale.groupBy({ by: ['status'], where: { companyId }, _count: { _all: true }, orderBy: { _count: { status: 'desc' } } }),
+    prisma.sale.groupBy({ by: ['kind'], where: { companyId }, _count: { _all: true }, orderBy: { _count: { kind: 'desc' } } }),
+    prisma.sale.groupBy({ by: ['deletedAt'], where: { companyId }, _count: { _all: true }, orderBy: { _count: { deletedAt: 'desc' } } }),
+    prisma.sale.aggregate({ where: { companyId }, _min: { createdAt: true }, _max: { createdAt: true } }),
+    prisma.sale.count({ where: reportWhere }),
+    prisma.sale.count({ where: { ...reportWhere, createdAt: { gte: todayStart, lte: todayEnd } } }),
+    prisma.sale.count({ where: { ...reportWhere, createdAt: { gte: monthStart, lte: todayEnd } } }),
+    prisma.sale.count({ where: { ...reportWhere, createdAt: { gte: last365Start, lte: todayEnd } } }),
+    prisma.sale.findMany({
+      where: reportWhere,
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { id: true, localCode: true, total: true, kind: true, status: true, createdAt: true, deletedAt: true },
+    }),
+  ]);
+
+  return {
+    reportFilters: {
+      kinds: REPORT_SALE_KINDS,
+      statuses: REPORT_SALE_STATUSES,
+      deletedAt: null,
+    },
+    ranges: {
+      today: { from: todayStart, to: todayEnd },
+      currentMonth: { from: monthStart, to: todayEnd },
+      last365Days: { from: last365Start, to: todayEnd },
+    },
+    saleDistribution: { byStatus, byKind, byDeletedAt },
+    createdRange,
+    eligibleCounts: {
+      total: eligibleTotal,
+      today: eligibleToday,
+      currentMonth: eligibleCurrentMonth,
+      last365Days: eligibleLast365Days,
+    },
+    latestEligibleSales,
+  };
+}
+
 async function main() {
   const companies = await findCompanies();
   const report = {
@@ -226,6 +307,7 @@ async function main() {
         updatedAt: company.updatedAt,
       },
       counts: await countCompanyData(company.id),
+      reportEligibility: await reportEligibility(company.id),
       sampleRecent: await sampleRecent(company.id),
     });
   }

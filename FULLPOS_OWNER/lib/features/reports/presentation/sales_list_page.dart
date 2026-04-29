@@ -43,7 +43,7 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
     _to = widget.initialTo ?? now;
-    _from = widget.initialFrom ?? todayStart;
+    _from = widget.initialFrom ?? todayStart.subtract(const Duration(days: 364));
     WidgetsBinding.instance.addObserver(this);
     _load(page: 1, showLoading: true);
     _saleRealtimeSubscription = ref

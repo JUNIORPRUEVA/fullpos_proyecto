@@ -19,27 +19,13 @@ class ReportsRepository {
   );
 
   Future<ReportData> getReportData(DateFilter filter) async {
-    return _guard(
-      () async {
-        final res = await _dio.get(
-          '/api/reports/data',
-          queryParameters: {'from': filter.fromQuery, 'to': filter.toQuery},
-        );
-        return ReportData.fromJson(res.data as Map<String, dynamic>);
-      },
-      fallback: ReportData(
-        sales: const <SaleRow>[],
-        expenses: const <ReportExpenseRow>[],
-        salesByDay: const <SalesByDay>[],
-        totalSales: 0,
-        totalCost: 0,
-        grossProfit: 0,
-        totalExpenses: 0,
-        profit: 0,
-        salesCount: 0,
-        averageTicket: 0,
-      ),
-    );
+    return _guard(() async {
+      final res = await _dio.get(
+        '/api/reports/data',
+        queryParameters: {'from': filter.fromQuery, 'to': filter.toQuery},
+      );
+      return ReportData.fromJson(res.data as Map<String, dynamic>);
+    });
   }
 
   Future<SalesSummary> salesSummary(String from, String to) async {

@@ -50,7 +50,7 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     WidgetsBinding.instance.addObserver(this);
     final today = _dateOnly(DateTime.now());
     _from = _dateOnly(
-      widget.initialFrom ?? today.subtract(const Duration(days: 6)),
+      widget.initialFrom ?? today.subtract(const Duration(days: 364)),
     );
     _to = _dateOnly(widget.initialTo ?? today);
     _saleRealtimeSubscription = ref

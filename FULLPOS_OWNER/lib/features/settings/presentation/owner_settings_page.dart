@@ -459,10 +459,13 @@ class _ThemeModeTile extends StatelessWidget {
                 ],
               ),
             ),
-            Radio<bool>(
-              value: true,
-              groupValue: selected,
-              onChanged: (_) => onTap(),
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: selected
+                  ? scheme.primary
+                  : scheme.onSurface.withAlpha((0.54 * 255).round()),
             ),
           ],
         ),

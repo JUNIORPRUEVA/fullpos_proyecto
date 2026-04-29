@@ -185,10 +185,11 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
         ),
       );
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isSyncing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isSyncing = false;
+        });
+      }
     }
   }
 
@@ -512,26 +513,26 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
               ),
             ),
             const PopupMenuDivider(height: 1),
-            PopupMenuItem<_SessionMenuAction>(
+            const PopupMenuItem<_SessionMenuAction>(
               value: _SessionMenuAction.profile,
               height: 48,
-              child: const _SessionActionTile(
+              child: _SessionActionTile(
                 title: 'Perfil',
                 icon: Icons.account_circle_outlined,
               ),
             ),
-            PopupMenuItem<_SessionMenuAction>(
+            const PopupMenuItem<_SessionMenuAction>(
               value: _SessionMenuAction.settings,
               height: 48,
-              child: const _SessionActionTile(
+              child: _SessionActionTile(
                 title: 'Configuracion',
                 icon: Icons.settings_outlined,
               ),
             ),
-            PopupMenuItem<_SessionMenuAction>(
+            const PopupMenuItem<_SessionMenuAction>(
               value: _SessionMenuAction.logout,
               height: 48,
-              child: const _SessionActionTile(
+              child: _SessionActionTile(
                 title: 'Cerrar sesión',
                 icon: Icons.logout_rounded,
                 destructive: true,
@@ -1069,7 +1070,7 @@ class _AppBarActionIcon extends StatelessWidget {
             child: Container(
               width: 7,
               height: 7,
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppColors.success,
                 shape: BoxShape.circle,
               ),

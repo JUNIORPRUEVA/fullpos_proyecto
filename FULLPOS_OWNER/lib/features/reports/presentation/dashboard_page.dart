@@ -42,7 +42,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
       now.year,
       now.month,
       now.day,
-    ).subtract(const Duration(days: 29));
+    ).subtract(const Duration(days: 364));
     _to = now;
     WidgetsBinding.instance.addObserver(this);
     _load(showLoading: true);
