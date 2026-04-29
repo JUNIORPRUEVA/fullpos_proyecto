@@ -2,9 +2,11 @@ import crypto from 'crypto';
 import http from 'http';
 import jwt from 'jsonwebtoken';
 import { Category, Product } from '@prisma/client';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
 import { Server } from 'socket.io';
 import env, { corsOrigins } from '../config/env';
-import { prisma } from '../config/prisma';
+import { resolveCompanyIdentity } from '../modules/companies/companyIdentity.service';
 import { JwtUser } from '../modules/auth/auth.types';
 
 type ProductEventType =
@@ -41,46 +43,38 @@ function companyRoom(companyId: number) {
   return `company:${companyId}`;
 }
 
-function normalizeRnc(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
 async function resolveCompanyIdForSocket(params: {
   companyRnc?: string;
   companyCloudId?: string;
+  companyTenantKey?: string;
+  businessId?: string;
+  deviceId?: string;
+  terminalId?: string;
 }) {
-  const cloudId = params.companyCloudId?.trim() ?? '';
-  const rnc = params.companyRnc?.trim() ?? '';
+  const company = await resolveCompanyIdentity({
+    ...params,
+    source: 'realtime.socket',
+  });
+  return company.id;
+}
 
-  if (cloudId) {
-    const company = await prisma.company.findFirst({
-      where: { cloudCompanyId: cloudId },
-      select: { id: true },
-    });
-    if (company) return company.id;
-  }
+async function attachRedisAdapter(io: Server) {
+  const redisUrl = env.REDIS_URL?.trim();
+  if (!redisUrl) return;
 
-  if (rnc) {
-    const exact = await prisma.company.findFirst({
-      where: { rnc },
-      select: { id: true, rnc: true },
-    });
-    if (exact) return exact.id;
+  const pubClient = new Redis(redisUrl, { lazyConnect: true });
+  const subClient = pubClient.duplicate();
 
-    const normalized = normalizeRnc(rnc);
-    if (normalized) {
-      const companies = await prisma.company.findMany({
-        where: { rnc: { not: null } },
-        select: { id: true, rnc: true },
-      });
-      const match = companies.find(
-        (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-      );
-      if (match) return match.id;
-    }
-  }
+  pubClient.on('error', (error) => {
+    console.warn('[realtime.redis] pub_error', { message: error.message });
+  });
+  subClient.on('error', (error) => {
+    console.warn('[realtime.redis] sub_error', { message: error.message });
+  });
 
-  return null;
+  await Promise.all([pubClient.connect(), subClient.connect()]);
+  io.adapter(createAdapter(pubClient, subClient));
+  console.info('[realtime.redis] adapter_attached');
 }
 
 function serializeProduct(product: Product) {
@@ -127,6 +121,10 @@ export function attachRealtimeGateway(server: http.Server) {
     transports: ['websocket', 'polling'],
   });
 
+  attachRedisAdapter(ioInstance).catch((error) => {
+    console.warn('[realtime.redis] adapter_failed', { message: error?.message ?? String(error) });
+  });
+
   ioInstance.use(async (socket, next) => {
     try {
       const authToken =
@@ -156,6 +154,22 @@ export function attachRealtimeGateway(server: http.Server) {
       }
 
       const companyId = await resolveCompanyIdForSocket({
+        companyTenantKey:
+          typeof socket.handshake.auth?.companyTenantKey === 'string'
+            ? socket.handshake.auth.companyTenantKey
+            : undefined,
+        businessId:
+          typeof socket.handshake.auth?.businessId === 'string'
+            ? socket.handshake.auth.businessId
+            : undefined,
+        deviceId:
+          typeof socket.handshake.auth?.deviceId === 'string'
+            ? socket.handshake.auth.deviceId
+            : undefined,
+        terminalId:
+          typeof socket.handshake.auth?.terminalId === 'string'
+            ? socket.handshake.auth.terminalId
+            : undefined,
         companyCloudId:
           typeof socket.handshake.auth?.companyCloudId === 'string'
             ? socket.handshake.auth.companyCloudId

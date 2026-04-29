@@ -642,9 +642,18 @@ export async function syncProductsByRnc(
   },
   products: SyncProductInput[],
   deletedProducts?: string[],
+  mirrorProducts = true,
 ) {
   const company = await resolveCompany(identity);
   const events: Array<{ type: ReturnType<typeof productEventTypeFromOperation>; product: Product }> = [];
+  const now = new Date();
+  const activeCodes = Array.from(
+    new Set(
+      products
+        .map((item) => item.code.trim())
+        .filter((code) => code.length > 0),
+    ),
+  );
 
   for (const item of products) {
     const result = await persistSyncOperation(company.id, {
@@ -697,6 +706,32 @@ export async function syncProductsByRnc(
     }
   }
 
+  let mirrorDeleted = 0;
+  if (mirrorProducts) {
+    const extraProducts = await prisma.product.findMany({
+      where: {
+        companyId: company.id,
+        isDemo: false,
+        deletedAt: null,
+        ...(activeCodes.length > 0 ? { code: { notIn: activeCodes } } : {}),
+      },
+    });
+    for (const extra of extraProducts) {
+      const deleted = await prisma.product.update({
+        where: { id: extra.id },
+        data: {
+          deletedAt: now,
+          isActive: false,
+          version: { increment: 1 },
+          lastModifiedBy: 'legacy_full_sync_mirror',
+          lastClientMutationId: null,
+        },
+      });
+      mirrorDeleted++;
+      events.push({ type: 'product.deleted', product: deleted });
+    }
+  }
+
   for (const event of events) {
     await emitProductEvent({ companyId: company.id, type: event.type, product: event.product });
   }
@@ -705,6 +740,7 @@ export async function syncProductsByRnc(
     ok: true,
     upserted: products.length,
     deleted: uniqueDeletedCodes.length,
+    mirrorDeleted,
     companyId: company.id,
   };
 }

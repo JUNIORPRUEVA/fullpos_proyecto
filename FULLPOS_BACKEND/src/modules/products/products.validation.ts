@@ -296,6 +296,7 @@ export const syncProductsByRncSchema = z
       .max(2000)
       .default([]),
     deletedProducts: z.array(z.string().trim().min(1)).max(2000).default([]),
+    mirrorProducts: z.coerce.boolean().default(true),
   })
   .refine((data) => data.companyId != null || !!data.companyRnc || !!data.companyCloudId || !!data.companyTenantKey, {
     message: 'companyTenantKey, companyId, RNC o companyCloudId requerido',

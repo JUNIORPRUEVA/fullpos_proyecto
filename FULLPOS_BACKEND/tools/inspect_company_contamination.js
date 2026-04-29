@@ -12,6 +12,8 @@
     $env:OUTPUT_JSON="contamination-report.json";
 */
 
+require('dotenv').config();
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { PrismaClient } = require('@prisma/client');
