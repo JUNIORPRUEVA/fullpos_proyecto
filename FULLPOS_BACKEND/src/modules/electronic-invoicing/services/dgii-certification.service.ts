@@ -137,7 +137,7 @@ function serializeCase(item: any) {
     xsdFileUsed: typeof validation.xsdFileUsed === 'string' ? validation.xsdFileUsed : null,
     rawXmllintOutput: typeof validation.rawXmllintOutput === 'string'
       ? validation.rawXmllintOutput
-      : (xsdError.trim().isNotEmpty ? xsdError : null),
+      : (xsdError.trim().length > 0 ? xsdError : null),
     validationErrors,
     validationWarnings,
   };
