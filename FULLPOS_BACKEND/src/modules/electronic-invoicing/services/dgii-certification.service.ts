@@ -5,6 +5,7 @@ import env, { normalizeDgiiEnvironmentAlias } from '../../../config/env';
 import { ElectronicInvoicingMapperService } from './electronic-invoicing-mapper.service';
 import { normalizeRnc } from '../utils/validation.utils';
 import { DgiiCertificationXmlBuilderService } from './dgii-certification-xml-builder.service';
+import { DgiiCertificationRfceXmlBuilderService } from './dgii-certification-rfce-xml-builder.service';
 import { DgiiSignatureService } from './dgii-signature.service';
 import { DgiiSubmissionService } from './dgii-submission.service';
 import { DgiiResultService } from './dgii-result.service';
@@ -116,6 +117,7 @@ export class DgiiCertificationService {
     private readonly resultService: DgiiResultService,
     private readonly directory: DgiiDirectoryService,
     private readonly xmlValidationService: DgiiCertificationXmlValidationService,
+    private readonly rfceXmlBuilder: DgiiCertificationRfceXmlBuilderService,
   ) {}
 
   async resolveCompany(companyRnc?: string | null, companyCloudId?: string | null, requestId?: string) {
@@ -382,6 +384,58 @@ export class DgiiCertificationService {
     return 'XSD_NOT_AVAILABLE';
   }
 
+  async buildDiagnostics() {
+    const migrationWarning = 'La migración de certificación DGII no está aplicada en la base de datos real.';
+    const prismaModel = Prisma.dmmf.datamodel.models.find((model) => model.name === 'DgiiCertificationCase');
+    const prismaFieldNames = new Set((prismaModel?.fields ?? []).map((field) => field.name));
+    const requiredPrismaFields = [
+      'xmlGenerated',
+      'xmlSigned',
+      'signedAt',
+      'sentAt',
+      'resultCheckedAt',
+      'dgiiStatusCode',
+      'dgiiStatusMessage',
+      'rejectionCode',
+      'rejectionMessage',
+      'xmlValidationStatus',
+      'xmlValidationJson',
+      'xmlValidatedAt',
+    ];
+    const prismaClientHasNewFields = requiredPrismaFields.every((field) => prismaFieldNames.has(field));
+    let databaseHasNewFields: boolean | null = null;
+    let databaseCheckError: string | null = null;
+    try {
+      const rows = await this.prisma.$queryRawUnsafe<Array<{ column_name: string }>>(
+        `SELECT column_name FROM information_schema.columns WHERE table_name = 'DgiiCertificationCase' AND column_name = ANY($1)`,
+        requiredPrismaFields,
+      );
+      const dbFields = new Set(rows.map((row) => row.column_name));
+      databaseHasNewFields = requiredPrismaFields.every((field) => dbFields.has(field));
+    } catch (error) {
+      databaseCheckError = error instanceof Error ? error.message : 'No se pudo verificar la base de datos real';
+    }
+
+    const xsd = this.xmlValidationService.diagnostics();
+    const rfceGenerationAvailable = true;
+    const pendingMigrationWarning = databaseHasNewFields === false ? migrationWarning : null;
+
+    return {
+      prismaClientHasNewFields,
+      databaseHasNewFields,
+      pendingMigrationWarning,
+      migrationWarning: pendingMigrationWarning,
+      databaseCheckError,
+      xsdDirectoryExists: xsd.xsdDirectoryExists,
+      xsdFilesFound: xsd.xsdFilesFound,
+      xsdFiles: xsd.xsdFiles,
+      xsdValidationEngineAvailable: xsd.xsdValidationEngineAvailable,
+      xsdValidationEngine: xsd.xsdValidationEngine,
+      rfceGenerationAvailable,
+      canSubmitToDgii: false,
+    };
+  }
+
   private certificationStatusFromSubmit(result: Awaited<ReturnType<DgiiSubmissionService['submit']>>) {
     if (result.normalizedStatus === 'rejected') return 'REJECTED';
     if (result.normalizedStatus === 'accepted') return 'SENT';
@@ -443,7 +497,7 @@ export class DgiiCertificationService {
 
     try {
       const result = item.sheetName === 'RFCE'
-        ? this.xmlBuilder.buildRfceXmlFromCertificationCase(item)
+        ? this.rfceXmlBuilder.buildXmlFromCertificationCase(item)
         : this.xmlBuilder.buildEcfXmlFromCertificationCase(item);
       if (result.errors.length > 0) {
         throw {
@@ -543,6 +597,19 @@ export class DgiiCertificationService {
       },
     });
     return validation;
+  }
+
+  async validateCaseXsd(companyId: number, id: number) {
+    const validation = await this.validateCaseXml(companyId, id);
+    return {
+      xsdValidated: validation.xsdValidated,
+      valid: validation.xsdValidated && validation.valid,
+      xsdFileUsed: validation.xsdFileUsed ?? null,
+      errors: validation.errors,
+      warnings: validation.xsdValidated
+        ? validation.warnings
+        : [...validation.warnings, 'XSD_NOT_AVAILABLE'],
+    };
   }
 
   async getGeneratedXml(companyId: number, id: number) {

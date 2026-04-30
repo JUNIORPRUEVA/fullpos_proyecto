@@ -91,6 +91,10 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
   };
 
   return {
+    diagnostics: async (_req: Request, res: Response) => {
+      res.json(await service.buildDiagnostics());
+    },
+
     importExcel: async (req: Request, res: Response) => {
       const file = requestFile(req)!;
       const locators = req.body as typeof certificationLocatorSchema['_output'];
@@ -153,6 +157,12 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
       res.json(await service.validateCaseXml(company.id, params.id));
+    },
+
+    validateCaseXsd: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      res.json(await service.validateCaseXsd(company.id, params.id));
     },
 
     generateBatchXml: async (req: Request, res: Response) => {

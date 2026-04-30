@@ -22,6 +22,7 @@ import { ElectronicInvoicingService } from './services/electronic-invoicing.serv
 import { DgiiCertificationService } from './services/dgii-certification.service';
 import { DgiiCertificationXmlBuilderService } from './services/dgii-certification-xml-builder.service';
 import { DgiiCertificationXmlValidationService } from './services/dgii-certification-xml-validation.service';
+import { DgiiCertificationRfceXmlBuilderService } from './services/dgii-certification-rfce-xml-builder.service';
 import {
   auditTimelineParamsSchema,
   configQuerySchema,
@@ -71,6 +72,7 @@ const receptionService = new InboundReceptionService(prisma, authService, mapper
 const approvalService = new InboundApprovalService(prisma, authService, mapper, audit);
 const certificationXmlBuilder = new DgiiCertificationXmlBuilderService();
 const certificationXmlValidation = new DgiiCertificationXmlValidationService();
+const certificationRfceXmlBuilder = new DgiiCertificationRfceXmlBuilderService();
 const certificationService = new DgiiCertificationService(
   prisma,
   mapper,
@@ -80,6 +82,7 @@ const certificationService = new DgiiCertificationService(
   resultService,
   directory,
   certificationXmlValidation,
+  certificationRfceXmlBuilder,
 );
 const electronicInvoicingService = new ElectronicInvoicingService(
   prisma,
@@ -461,12 +464,35 @@ const posDebugDgiiAuthByRncSchema = posLocatorsBaseSchema
 
 export const posElectronicInvoicingRouter = Router();
 
+setTimeout(() => {
+  certificationService.buildDiagnostics()
+    .then((diagnostics) => {
+      if (diagnostics.pendingMigrationWarning) {
+        console.warn(`[electronic-invoicing.certification] ${diagnostics.pendingMigrationWarning}`, {
+          databaseHasNewFields: diagnostics.databaseHasNewFields,
+          databaseCheckError: diagnostics.databaseCheckError,
+        });
+      }
+    })
+    .catch((error) => {
+      console.warn('[electronic-invoicing.certification] No se pudo verificar la migracion DGII de certificacion', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+}, 0);
+
 posElectronicInvoicingRouter.post(
   '/certification/import-excel',
   overrideKeyGuard,
   uploadDgiiCertificationExcel,
   validateDgiiCertificationExcelUpload,
   asyncHandler(certificationController.importExcel),
+);
+
+posElectronicInvoicingRouter.get(
+  '/certification/diagnostics',
+  overrideKeyGuard,
+  asyncHandler(certificationController.diagnostics),
 );
 
 posElectronicInvoicingRouter.get(
@@ -538,6 +564,14 @@ posElectronicInvoicingRouter.post(
   validate(certificationCaseParamsSchema, 'params'),
   validate(certificationLocatorSchema),
   asyncHandler(certificationController.validateCaseXml),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/validate-xsd',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.validateCaseXsd),
 );
 
 posElectronicInvoicingRouter.post(
