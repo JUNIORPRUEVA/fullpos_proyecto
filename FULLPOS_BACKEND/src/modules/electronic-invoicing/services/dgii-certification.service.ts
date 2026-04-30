@@ -425,6 +425,50 @@ export class DgiiCertificationService {
     };
   }
 
+  private buildIssuerFallback(item: any) {
+    const companyConfig = item.company?.config ?? null;
+    return {
+      rnc: item.company?.rnc ?? null,
+      legalName: item.company?.name ?? null,
+      businessName: item.company?.name ?? null,
+      tradeName: null,
+      address: companyConfig?.address ?? null,
+      municipality: companyConfig?.city ?? null,
+      province: null,
+      email: companyConfig?.email ?? null,
+      website: companyConfig?.website ?? null,
+    };
+  }
+
+  private buildXmlGenerationFailureDetails(item: any, details: any) {
+    const missingFields = Array.isArray(details?.missingFields)
+      ? details.missingFields.map((value: unknown) => String(value))
+      : [];
+    const humanReadableMessage = details?.humanReadableMessage?.toString() ??
+      (missingFields.length > 0
+        ? `Faltan campos obligatorios: ${missingFields.join(', ')}`
+        : (details?.message?.toString() ?? 'No se pudo generar XML para el caso de certificacion'));
+    const rawRowJson = item.rawRowJson && typeof item.rawRowJson === 'object' && !Array.isArray(item.rawRowJson)
+      ? item.rawRowJson as Record<string, unknown>
+      : {};
+    return {
+      type: 'XML_GENERATION_REQUIRED_FIELDS',
+      caseId: item.id,
+      eNCF: item.encf ?? null,
+      tipoEcf: item.tipoEcf ?? null,
+      sheetName: item.sheetName ?? null,
+      missingFields,
+      extractedFields: details?.extractedFields ?? {},
+      fallbackFieldsUsed: details?.fallbackFieldsUsed ?? {},
+      rawRowKeys: Array.isArray(details?.rawRowKeys) ? details.rawRowKeys : Object.keys(rawRowJson),
+      rawRowJsonSummary: Object.fromEntries(Object.entries(rawRowJson).slice(0, 25)),
+      warnings: Array.isArray(details?.warnings) ? details.warnings : [],
+      errors: Array.isArray(details?.errors) ? details.errors : [],
+      sourceFieldsUsed: details?.sourceFieldsUsed ?? {},
+      humanReadableMessage,
+    };
+  }
+
   private async detectCertificationDbFields() {
     const tableName = 'DgiiCertificationCase';
     const prismaModel = Prisma.dmmf.datamodel.models.find((model) => model.name === 'DgiiCertificationCase');
@@ -580,6 +624,7 @@ export class DgiiCertificationService {
   async generateXmlForCase(companyId: number, id: number, requestId?: string) {
     const item = await this.prisma.dgiiCertificationCase.findFirst({
       where: { id, companyId },
+      include: { company: { include: { config: true } } },
     });
     if (!item) {
       throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
@@ -589,13 +634,17 @@ export class DgiiCertificationService {
     try {
       const result = item.sheetName === 'RFCE'
         ? this.rfceXmlBuilder.buildXmlFromCertificationCase(item)
-        : this.xmlBuilder.buildEcfXmlFromCertificationCase(item);
+        : this.xmlBuilder.buildEcfXmlFromCertificationCase({
+            rawRowJson: item.rawRowJson,
+            issuerFallback: this.buildIssuerFallback(item),
+          });
       if (result.errors.length > 0) {
+        const details = this.buildXmlGenerationFailureDetails(item, result);
         throw {
           status: 409,
-          message: result.errors.join('; '),
+          message: details.humanReadableMessage,
           errorCode: 'DGII_CERTIFICATION_XML_REQUIRED_FIELDS_MISSING',
-          details: { errors: result.errors, warnings: result.warnings, sourceFieldsUsed: result.sourceFieldsUsed },
+          details,
         };
       }
       const validation = this.xmlValidationService.validate(result.xml);
@@ -628,19 +677,37 @@ export class DgiiCertificationService {
         tipoEcf: item.tipoEcf,
         xmlLength: result.xml.length,
         warnings: result.warnings,
+        extractedFields: result.extractedFields,
+        fallbackFieldsUsed: result.fallbackFieldsUsed,
+        missingFields: result.missingFields,
         validation,
         sourceFieldsUsed: result.sourceFieldsUsed,
       });
 
-      return { case: serializeCase(updated), xmlGenerated: result.xml, warnings: result.warnings, validation, sourceFieldsUsed: result.sourceFieldsUsed };
+      return {
+        case: serializeCase(updated),
+        xmlGenerated: result.xml,
+        warnings: result.warnings,
+        validation,
+        sourceFieldsUsed: result.sourceFieldsUsed,
+        extractedFields: result.extractedFields,
+        fallbackFieldsUsed: result.fallbackFieldsUsed,
+        rawRowKeys: result.rawRowKeys,
+      };
     } catch (error) {
       const message = (error as any)?.message ?? 'No se pudo generar XML para el caso de certificacion';
       const errorCode = (error as any)?.errorCode ?? 'DGII_CERTIFICATION_XML_GENERATION_FAILED';
+      const details = (error as any)?.details
+        ? this.buildXmlGenerationFailureDetails(item, (error as any).details)
+        : this.buildXmlGenerationFailureDetails(item, { humanReadableMessage: message });
       await this.prisma.dgiiCertificationCase.update({
         where: { id: item.id },
         data: {
           status: 'ERROR',
-          errorMessage: message,
+          errorMessage: details.humanReadableMessage,
+          xmlValidationStatus: 'XML_INVALID',
+          xmlValidationJson: details as unknown as Prisma.InputJsonObject,
+          xmlValidatedAt: new Date(),
         },
       });
       console.error('[electronic-invoicing.certification] xml.generate_error', {
@@ -652,14 +719,18 @@ export class DgiiCertificationService {
         encf: item.encf,
         tipoEcf: item.tipoEcf,
         errorCode,
-        message,
-        details: (error as any)?.details ?? null,
+        message: details.humanReadableMessage,
+        extractedFields: details.extractedFields,
+        fallbackFieldsUsed: details.fallbackFieldsUsed,
+        missingFields: details.missingFields,
+        rawRowKeys: details.rawRowKeys,
+        details,
       });
       throw {
         status: (error as any)?.status ?? 409,
-        message,
+        message: details.humanReadableMessage,
         errorCode,
-        details: (error as any)?.details ?? null,
+        details,
       };
     }
   }
@@ -739,7 +810,18 @@ export class DgiiCertificationService {
       orderBy: [{ sheetName: 'asc' }, { rowNumber: 'asc' }],
       select: { id: true },
     });
-    const errors: Array<{ caseId: number; message: string; errorCode: string }> = [];
+    const errors: Array<{
+      caseId: number;
+      eNCF?: string | null;
+      tipoEcf?: string | null;
+      sheetName?: string | null;
+      message: string;
+      errorCode: string;
+      missingFields?: string[];
+      extractedFields?: Record<string, unknown>;
+      rawRowKeys?: string[];
+      humanReadableMessage?: string;
+    }> = [];
     let generated = 0;
 
     for (const item of cases) {
@@ -747,10 +829,18 @@ export class DgiiCertificationService {
         await this.generateXmlForCase(companyId, item.id, requestId);
         generated += 1;
       } catch (error) {
+        const details = (error as any)?.details ?? {};
         errors.push({
           caseId: item.id,
-          message: (error as any)?.message ?? 'No se pudo generar XML',
+          eNCF: details.eNCF ?? null,
+          tipoEcf: details.tipoEcf ?? null,
+          sheetName: details.sheetName ?? null,
+          message: details.humanReadableMessage ?? (error as any)?.message ?? 'No se pudo generar XML',
           errorCode: (error as any)?.errorCode ?? 'DGII_CERTIFICATION_XML_GENERATION_FAILED',
+          missingFields: Array.isArray(details.missingFields) ? details.missingFields : [],
+          extractedFields: details.extractedFields ?? {},
+          rawRowKeys: Array.isArray(details.rawRowKeys) ? details.rawRowKeys : [],
+          humanReadableMessage: details.humanReadableMessage ?? (error as any)?.message ?? 'No se pudo generar XML',
         });
       }
     }

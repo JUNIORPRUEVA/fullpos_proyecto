@@ -41,8 +41,11 @@ function caseRow(input: { rawRowJson: unknown }) {
 class RowReader {
   private readonly entries: Array<{ normalizedKey: string; originalKey: string; value: unknown }>;
   readonly sourceFieldsUsed: Record<string, string> = {};
+  readonly extractedFields: Record<string, string> = {};
+  readonly rawRowKeys: string[];
 
   constructor(row: RawRow) {
+    this.rawRowKeys = Object.keys(row);
     this.entries = Object.entries(row).map(([originalKey, value]) => ({
       normalizedKey: normalizeHeader(originalKey),
       originalKey,
@@ -55,7 +58,10 @@ class RowReader {
     const found = this.entries.find((entry) => normalizedAliases.includes(entry.normalizedKey));
     if (!found) return null;
     const value = normalizeValue(found.value);
-    if (value != null) this.sourceFieldsUsed[canonicalName] = found.originalKey;
+    if (value != null) {
+      this.sourceFieldsUsed[canonicalName] = found.originalKey;
+      this.extractedFields[canonicalName] = value;
+    }
     return value;
   }
 }
@@ -182,7 +188,12 @@ export class DgiiCertificationRfceXmlBuilderService {
       return {
         xml: '',
         warnings,
-        errors: [`Missing required DGII RFCE fields: ${missing.join(', ')}`],
+        errors: [`Faltan campos obligatorios RFCE: ${missing.join(', ')}`],
+        missingFields: missing,
+        extractedFields: reader.extractedFields,
+        fallbackFieldsUsed: {},
+        rawRowKeys: reader.rawRowKeys,
+        humanReadableMessage: `Faltan campos obligatorios RFCE: ${missing.join(', ')}`,
         sourceFieldsUsed: reader.sourceFieldsUsed,
       };
     }
@@ -208,6 +219,11 @@ export class DgiiCertificationRfceXmlBuilderService {
       xml: xmlLines.join('\n'),
       warnings,
       errors: [],
+      missingFields: [],
+      extractedFields: reader.extractedFields,
+      fallbackFieldsUsed: {},
+      rawRowKeys: reader.rawRowKeys,
+      humanReadableMessage: null,
       sourceFieldsUsed: reader.sourceFieldsUsed,
     };
   }

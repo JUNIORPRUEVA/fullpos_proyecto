@@ -1,9 +1,26 @@
 type RawRow = Record<string, unknown>;
 
+export type CertificationIssuerFallback = {
+  rnc?: string | null;
+  legalName?: string | null;
+  businessName?: string | null;
+  tradeName?: string | null;
+  address?: string | null;
+  municipality?: string | null;
+  province?: string | null;
+  email?: string | null;
+  website?: string | null;
+};
+
 export type CertificationXmlBuildResult = {
   xml: string;
   warnings: string[];
   errors: string[];
+  missingFields: string[];
+  extractedFields: Record<string, string>;
+  fallbackFieldsUsed: Record<string, string>;
+  rawRowKeys: string[];
+  humanReadableMessage: string | null;
   sourceFieldsUsed: Record<string, string>;
 };
 
@@ -46,8 +63,11 @@ function caseRow(input: { rawRowJson: unknown }) {
 class RowReader {
   private readonly normalizedEntries: Array<{ normalizedKey: string; originalKey: string; value: unknown }>;
   readonly sourceFieldsUsed: Record<string, string> = {};
+  readonly extractedFields: Record<string, string> = {};
+  readonly rawRowKeys: string[];
 
   constructor(row: RawRow) {
+    this.rawRowKeys = Object.keys(row);
     this.normalizedEntries = Object.entries(row).map(([originalKey, value]) => ({
       normalizedKey: normalizeHeader(originalKey),
       originalKey,
@@ -60,7 +80,10 @@ class RowReader {
     const found = this.normalizedEntries.find((entry) => normalizedAliases.includes(entry.normalizedKey));
     if (!found) return null;
     const value = normalizeValue(found.value);
-    if (value != null) this.sourceFieldsUsed[canonicalName] = found.originalKey;
+    if (value != null) {
+      this.sourceFieldsUsed[canonicalName] = found.originalKey;
+      this.extractedFields[canonicalName] = value;
+    }
     return value;
   }
 }
@@ -121,16 +144,39 @@ function readField(reader: RowReader, canonicalName: string, aliases: string[], 
   return transform ? transform(raw) : raw;
 }
 
-function buildFields(reader: RowReader, specs: FieldSpec[], indent: string) {
+function buildFields(
+  reader: RowReader,
+  specs: FieldSpec[],
+  indent: string,
+  fallbackValues?: Record<string, { value: string | null; source: string }>,
+) {
   const lines: string[] = [];
+  const values: Record<string, string> = {};
+  const fallbackFieldsUsed: Record<string, string> = {};
   for (const spec of specs) {
-    addTag(lines, indent, spec.tag, readField(reader, spec.tag, spec.aliases, spec.transform));
+    let value = readField(reader, spec.tag, spec.aliases, spec.transform);
+    const fallback = fallbackValues?.[spec.tag];
+    if (value == null && fallback?.value) {
+      value = spec.transform ? spec.transform(fallback.value) : fallback.value;
+      if (value) {
+        reader.sourceFieldsUsed[spec.tag] = fallback.source;
+        reader.extractedFields[spec.tag] = value;
+        fallbackFieldsUsed[spec.tag] = fallback.source;
+      }
+    }
+    if (value != null) values[spec.tag] = value;
+    addTag(lines, indent, spec.tag, value);
   }
-  return lines;
+  return { lines, values, fallbackFieldsUsed };
 }
 
 function buildMissingMessage(missing: string[]) {
-  return `Missing required DGII fields: ${missing.join(', ')}`;
+  return `Faltan campos obligatorios: ${missing.join(', ')}`;
+}
+
+function todayDominicanDate(value = new Date()) {
+  const dominicanTime = new Date(value.getTime() - 4 * 60 * 60 * 1000);
+  return `${dominicanTime.getUTCFullYear()}-${pad2(dominicanTime.getUTCMonth() + 1)}-${pad2(dominicanTime.getUTCDate())}`;
 }
 
 const ID_DOC_FIELDS: FieldSpec[] = [
@@ -203,40 +249,73 @@ const ITEM_FIELDS: FieldSpec[] = [
   { tag: 'MontoItem', aliases: ['montoItem', 'monto item', 'totalLinea', 'total linea'], transform: moneyText },
 ];
 
-const REQUIRED_BY_TYPE: Record<string, string[]> = {
-  '31': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'RNCComprador', 'RazonSocialComprador', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '32': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '33': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '34': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'RNCComprador', 'RazonSocialComprador', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '41': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '43': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '44': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '45': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '46': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
-  '47': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
-};
+const GENERATION_MINIMUM_FIELDS = ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal'];
+const BUYER_REQUIRED_BY_TYPE = new Set(['31', '34']);
 
 export class DgiiCertificationXmlBuilderService {
-  buildEcfXmlFromCertificationCase(input: { rawRowJson: unknown }): CertificationXmlBuildResult {
+  buildEcfXmlFromCertificationCase(input: { rawRowJson: unknown; issuerFallback?: CertificationIssuerFallback | null }): CertificationXmlBuildResult {
     const row = caseRow(input);
     const reader = new RowReader(row);
     const warnings: string[] = [];
     const errors: string[] = [];
+    const issuerFallback = input.issuerFallback ?? null;
+    const emisorFallbacks: Record<string, { value: string | null; source: string }> = {
+      RNCEmisor: { value: issuerFallback?.rnc ?? null, source: 'company.rnc' },
+      RazonSocialEmisor: { value: issuerFallback?.legalName ?? issuerFallback?.businessName ?? null, source: 'company.name' },
+      NombreComercial: { value: issuerFallback?.tradeName ?? null, source: 'company.tradeName' },
+      DireccionEmisor: { value: issuerFallback?.address ?? null, source: 'company.config.address' },
+      Municipio: { value: issuerFallback?.municipality ?? null, source: 'company.config.city' },
+      Provincia: { value: issuerFallback?.province ?? null, source: 'company.config.province' },
+      CorreoEmisor: { value: issuerFallback?.email ?? null, source: 'company.config.email' },
+      WebSite: { value: issuerFallback?.website ?? null, source: 'company.config.website' },
+      FechaEmision: { value: todayDominicanDate(), source: 'certification.currentDate' },
+    };
 
-    const idDocLines = buildFields(reader, ID_DOC_FIELDS, '      ');
-    const emisorLines = buildFields(reader, EMISOR_FIELDS, '      ');
-    const compradorLines = buildFields(reader, COMPRADOR_FIELDS, '      ');
-    const totalesLines = buildFields(reader, TOTALES_FIELDS, '      ');
-    const itemLines = buildFields(reader, ITEM_FIELDS, '      ');
+    const idDoc = buildFields(reader, ID_DOC_FIELDS, '      ');
+    const emisor = buildFields(reader, EMISOR_FIELDS, '      ', emisorFallbacks);
+    const comprador = buildFields(reader, COMPRADOR_FIELDS, '      ');
+    const totales = buildFields(reader, TOTALES_FIELDS, '      ');
+    const item = buildFields(reader, ITEM_FIELDS, '      ');
 
+    const fallbackFieldsUsed = {
+      ...idDoc.fallbackFieldsUsed,
+      ...emisor.fallbackFieldsUsed,
+      ...comprador.fallbackFieldsUsed,
+      ...totales.fallbackFieldsUsed,
+      ...item.fallbackFieldsUsed,
+    };
+    if (fallbackFieldsUsed.FechaEmision === 'certification.currentDate') {
+      warnings.push('FechaEmision fallback used for certification because workbook row does not include issue date.');
+    }
+
+    const itemLines = [...item.lines];
+    const montoTotalText = totales.values.MontoTotal ?? readField(reader, 'MontoTotal', ['montoTotal', 'Monto Total', 'Total', 'TotalFactura'], moneyText);
     if (!itemLines.some((line) => line.includes('<NumeroLinea>'))) {
       itemLines.unshift('      <NumeroLinea>1</NumeroLinea>');
     }
+    if (!item.values.NombreItem && montoTotalText) {
+      itemLines.push('      <NombreItem>Servicio de prueba DGII</NombreItem>');
+      itemLines.push('      <CantidadItem>1</CantidadItem>');
+      itemLines.push(`      <PrecioUnitarioItem>${xmlEscape(montoTotalText)}</PrecioUnitarioItem>`);
+      itemLines.push(`      <MontoItem>${xmlEscape(montoTotalText)}</MontoItem>`);
+      reader.extractedFields.NombreItem = 'Servicio de prueba DGII';
+      reader.extractedFields.CantidadItem = '1';
+      reader.extractedFields.PrecioUnitarioItem = montoTotalText;
+      reader.extractedFields.MontoItem = montoTotalText;
+      fallbackFieldsUsed.NombreItem = 'certification.itemFallback';
+      fallbackFieldsUsed.CantidadItem = 'certification.itemFallback';
+      fallbackFieldsUsed.PrecioUnitarioItem = 'certification.itemFallback';
+      fallbackFieldsUsed.MontoItem = 'certification.itemFallback';
+      warnings.push('Item fallback used for certification because workbook row does not include item detail.');
+    }
 
-    const tipoEcf = readField(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
-    const requiredFields = REQUIRED_BY_TYPE[tipoEcf ?? ''] ?? REQUIRED_BY_TYPE['31'];
+    const tipoEcf = idDoc.values.TipoeCF ?? readField(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
+    const requiredFields = [
+      ...GENERATION_MINIMUM_FIELDS,
+      ...(BUYER_REQUIRED_BY_TYPE.has(tipoEcf ?? '') ? ['RNCComprador', 'RazonSocialComprador'] : []),
+    ];
     const presentTags = new Set(
-      [...idDocLines, ...emisorLines, ...compradorLines, ...totalesLines, ...itemLines]
+      [...idDoc.lines, ...emisor.lines, ...comprador.lines, ...totales.lines, ...itemLines]
         .map((line) => line.match(/<([A-Za-z0-9]+)>/)?.[1])
         .filter((value): value is string => !!value),
     );
@@ -245,10 +324,10 @@ export class DgiiCertificationXmlBuilderService {
       errors.push(buildMissingMessage(missing));
     }
 
-    const montoTotal = parsePositiveMoney(readField(reader, 'MontoTotal', ['montoTotal', 'Monto Total', 'Total', 'TotalFactura']));
-    const montoItem = parsePositiveMoney(readField(reader, 'MontoItem', ['montoItem', 'monto item', 'totalLinea', 'total linea']));
-    const totalItbis = parseMoney(readField(reader, 'TotalITBIS', ['totalITBIS', 'Total ITBIS', 'itbisTotal'])) ?? 0;
-    const descuento = parseMoney(readField(reader, 'DescuentoMonto', ['descuentoMonto', 'descuento monto', 'descuento'])) ?? 0;
+    const montoTotal = parsePositiveMoney(montoTotalText);
+    const montoItem = parsePositiveMoney(reader.extractedFields.MontoItem ?? item.values.MontoItem ?? readField(reader, 'MontoItem', ['montoItem', 'monto item', 'totalLinea', 'total linea']));
+    const totalItbis = parseMoney(totales.values.TotalITBIS ?? readField(reader, 'TotalITBIS', ['totalITBIS', 'Total ITBIS', 'itbisTotal'])) ?? 0;
+    const descuento = parseMoney(item.values.DescuentoMonto ?? readField(reader, 'DescuentoMonto', ['descuentoMonto', 'descuento monto', 'descuento'])) ?? 0;
     if (montoTotal != null && montoItem != null) {
       const calculated = Math.round((montoItem + totalItbis - descuento) * 100) / 100;
       if (Math.abs(calculated - montoTotal) > 0.01) {
@@ -257,17 +336,27 @@ export class DgiiCertificationXmlBuilderService {
     }
 
     if (errors.length > 0) {
-      return { xml: '', warnings, errors, sourceFieldsUsed: reader.sourceFieldsUsed };
+      return {
+        xml: '',
+        warnings,
+        errors,
+        missingFields: missing,
+        extractedFields: reader.extractedFields,
+        fallbackFieldsUsed,
+        rawRowKeys: reader.rawRowKeys,
+        humanReadableMessage: buildMissingMessage(missing),
+        sourceFieldsUsed: reader.sourceFieldsUsed,
+      };
     }
 
     const xmlLines = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<eCF>',
       '  <Encabezado>',
-      ...section('IdDoc', idDocLines, '    '),
-      ...section('Emisor', emisorLines, '    '),
-      ...section('Comprador', compradorLines, '    '),
-      ...section('Totales', totalesLines, '    '),
+      ...section('IdDoc', idDoc.lines, '    '),
+      ...section('Emisor', emisor.lines, '    '),
+      ...section('Comprador', comprador.lines, '    '),
+      ...section('Totales', totales.lines, '    '),
       '  </Encabezado>',
       '  <DetallesItems>',
       '    <Item>',
@@ -282,6 +371,11 @@ export class DgiiCertificationXmlBuilderService {
       xml: xmlLines.join('\n'),
       warnings,
       errors,
+      missingFields: [],
+      extractedFields: reader.extractedFields,
+      fallbackFieldsUsed,
+      rawRowKeys: reader.rawRowKeys,
+      humanReadableMessage: null,
       sourceFieldsUsed: reader.sourceFieldsUsed,
     };
   }
@@ -296,6 +390,8 @@ export class DgiiCertificationXmlBuilderService {
       details: {
         encf: readField(reader, 'eNCF', ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante']),
         tipoEcf: readField(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']),
+        rawRowKeys: reader.rawRowKeys,
+        extractedFields: reader.extractedFields,
       },
     };
   }
