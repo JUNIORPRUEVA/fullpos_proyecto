@@ -486,6 +486,10 @@ export class DgiiCertificationService {
     return deepFindFirstString(raw, ['Mensaje', 'mensaje', 'Descripcion', 'descripcion', 'Message', 'message', 'Detalle', 'detalle']) ?? fallback ?? null;
   }
 
+  private certificationDgiiSubmissionEnabled() {
+    return false;
+  }
+
   async generateXmlForCase(companyId: number, id: number, requestId?: string) {
     const item = await this.prisma.dgiiCertificationCase.findFirst({
       where: { id, companyId },
@@ -827,6 +831,13 @@ export class DgiiCertificationService {
   }
 
   async sendCase(companyId: number, id: number, requestId?: string) {
+    if (!this.certificationDgiiSubmissionEnabled()) {
+      throw {
+        status: 409,
+        message: 'El envío DGII de certificación está deshabilitado en esta fase.',
+        errorCode: 'DGII_CERTIFICATION_SUBMISSION_DISABLED',
+      };
+    }
     const item = await this.prisma.dgiiCertificationCase.findFirst({ where: { id, companyId } });
     if (!item) {
       throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
