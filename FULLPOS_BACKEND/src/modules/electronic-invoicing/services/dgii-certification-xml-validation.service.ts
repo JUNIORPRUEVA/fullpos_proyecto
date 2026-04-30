@@ -17,6 +17,14 @@ export type DgiiCertificationXmlValidationResult = {
   xsdValidationEngineAvailable: boolean;
 };
 
+type XsdEngine = {
+  available: boolean;
+  command: string | null;
+  name: string | null;
+  versionOutput?: string;
+  error?: string;
+};
+
 function findParserErrors(node: any, out: string[] = []) {
   if (!node) return out;
   const name = String(node.nodeName ?? node.localName ?? '').toLowerCase();
@@ -30,6 +38,8 @@ function findParserErrors(node: any, out: string[] = []) {
 }
 
 export class DgiiCertificationXmlValidationService {
+  private xmllintWarningLogged = false;
+
   constructor(
     private readonly xsdDirectory = path.resolve(process.cwd(), 'resources', 'dgii', 'xsd'),
   ) {}
@@ -44,6 +54,7 @@ export class DgiiCertificationXmlValidationService {
       xsdFilesFound: xsdFiles.length,
       xsdValidationEngineAvailable: engine.available,
       xsdValidationEngine: engine.name,
+      xsdValidationEngineCommand: engine.command,
     };
   }
 
@@ -79,11 +90,12 @@ export class DgiiCertificationXmlValidationService {
     if (xsdFiles.length === 0) {
       warnings.push('DGII XSD files not found. Place official XSD files in resources/dgii/xsd.');
     } else if (!engine.available) {
-      warnings.push('DGII XSD files found, but no runtime XSD validation engine is available.');
+      this.logXmllintUnavailable(engine);
+      warnings.push('xmllint not installed. XSD validation disabled.');
     } else if (wellFormed) {
       const selectedXsd = this.selectXsdFile(xml, xsdFiles);
       xsdFileUsed = selectedXsd;
-      const result = this.validateWithXmllint(xml, selectedXsd);
+      const result = this.validateWithXmllint(xml, selectedXsd, engine.command!);
       xsdValidated = true;
       xsdValid = result.valid;
       errors.push(...result.errors);
@@ -95,7 +107,9 @@ export class DgiiCertificationXmlValidationService {
     return {
       wellFormed,
       xsdValidated,
-      valid: xsdValidated ? xsdValid && errors.length === 0 : wellFormed && errors.length === 0,
+      valid: xsdFiles.length > 0
+        ? xsdValidated && xsdValid && errors.length === 0
+        : wellFormed && errors.length === 0,
       canSign: wellFormed && errors.length === 0,
       errors,
       warnings,
@@ -122,29 +136,78 @@ export class DgiiCertificationXmlValidationService {
   }
 
   private detectXsdEngine() {
-    const result = spawnSync('xmllint', ['--version'], { encoding: 'utf8' });
+    const candidates = [
+      process.env.XMLLINT_PATH?.trim(),
+      'xmllint',
+      process.platform === 'win32' ? 'xmllint.exe' : undefined,
+    ].filter((value): value is string => !!value);
+
+    let lastError: string | undefined;
+    for (const command of candidates) {
+      const result = spawnSync(command, ['--version'], {
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+      if (!result.error && result.status === 0) {
+        return {
+          available: true,
+          command,
+          name: 'xmllint',
+          versionOutput: output,
+        } satisfies XsdEngine;
+      }
+      lastError = result.error?.message || output || `xmllint exited with status ${result.status}`;
+    }
+
     return {
-      available: !result.error && result.status === 0,
-      name: !result.error && result.status === 0 ? 'xmllint' : null,
-    };
+      available: false,
+      command: null,
+      name: null,
+      error: lastError,
+    } satisfies XsdEngine;
   }
 
   private selectXsdFile(xml: string, xsdFiles: string[]) {
     const document = new DOMParser().parseFromString(xml.replace(/^\uFEFF/, ''), 'text/xml');
     const rootName = String(document.documentElement?.nodeName ?? '').replace(/^[^:]+:/, '').toLowerCase();
-    const preferred = xsdFiles.find((fileName) => fileName.toLowerCase().includes(rootName));
+    const tipoEcf = Array.from(document.getElementsByTagName('*'))
+      .find((node: any) => String(node.localName ?? node.nodeName).replace(/^[^:]+:/, '').toLowerCase() === 'tipoecf')
+      ?.textContent?.trim();
+    const normalizedFiles = xsdFiles.map((fileName) => ({
+      fileName,
+      normalized: fileName.toLowerCase(),
+    }));
+    const preferred = rootName === 'rfce'
+      ? normalizedFiles.find((entry) =>
+          entry.normalized.includes('rfce') && (!tipoEcf || entry.normalized.includes(tipoEcf.toLowerCase())),
+        )?.fileName
+      : tipoEcf
+        ? normalizedFiles.find((entry) =>
+            entry.normalized.includes('e-cf') && entry.normalized.includes(tipoEcf.toLowerCase()),
+          )?.fileName
+        : normalizedFiles.find((entry) => entry.normalized.includes(rootName))?.fileName;
     return path.join(this.xsdDirectory, preferred ?? xsdFiles[0]);
   }
 
-  private validateWithXmllint(xml: string, xsdPath: string) {
+  private validateWithXmllint(xml: string, xsdPath: string, xmllintCommand: string) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fullpos-dgii-xsd-'));
     const xmlPath = path.join(tmpDir, 'document.xml');
     try {
       fs.writeFileSync(xmlPath, xml, 'utf8');
-      const result = spawnSync('xmllint', ['--noout', '--schema', xsdPath, xmlPath], {
+      const result = spawnSync(xmllintCommand, ['--noout', '--schema', xsdPath, xmlPath], {
         encoding: 'utf8',
+        windowsHide: true,
       });
       const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+      console.debug('[electronic-invoicing.certification.xsd] xmllint.validation', {
+        xsdFileUsed: xsdPath,
+        xmlPath,
+        command: xmllintCommand,
+        exitStatus: result.status,
+        error: result.error?.message ?? null,
+        rawOutput: output,
+      });
       if (result.status === 0 && !result.error) {
         return { valid: true, errors: [], warnings: output ? [output] : [] };
       }
@@ -160,5 +223,16 @@ export class DgiiCertificationXmlValidationService {
         // Best-effort cleanup only.
       }
     }
+  }
+
+  private logXmllintUnavailable(engine: XsdEngine) {
+    if (this.xmllintWarningLogged) return;
+    this.xmllintWarningLogged = true;
+    console.warn('xmllint not installed. XSD validation disabled.', {
+      platform: process.platform,
+      checkedCommand: process.env.XMLLINT_PATH?.trim() || 'xmllint',
+      error: engine.error ?? null,
+      xsdDirectory: this.xsdDirectory,
+    });
   }
 }

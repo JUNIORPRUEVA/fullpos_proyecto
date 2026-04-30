@@ -13,6 +13,7 @@ import { DgiiDirectoryService } from './dgii-directory.service';
 import { DgiiCertificationXmlValidationService } from './dgii-certification-xml-validation.service';
 import { DgiiEnvironment } from '../types/dgii.types';
 import {
+  analyzeCertificateForDgii,
   assertCertificateIsCurrentlyValid,
   loadPkcs12Certificate,
   loadPkcs12CertificateFromBuffer,
@@ -43,6 +44,20 @@ type CertificationCaseFilters = {
 
 const REQUIRED_SHEETS: CertificationSheetName[] = ['ECF', 'RFCE'];
 const FINAL_CERTIFICATION_STATUSES = new Set(['ACCEPTED', 'ACCEPTED_CONDITIONAL', 'REJECTED']);
+const CERTIFICATION_DB_FIELDS = [
+  'xmlGenerated',
+  'xmlSigned',
+  'signedAt',
+  'sentAt',
+  'resultCheckedAt',
+  'dgiiStatusCode',
+  'dgiiStatusMessage',
+  'rejectionCode',
+  'rejectionMessage',
+  'xmlValidationStatus',
+  'xmlValidationJson',
+  'xmlValidatedAt',
+];
 
 function normalizeHeader(value: unknown) {
   return String(value ?? '')
@@ -105,6 +120,18 @@ function serializeCase(item: any) {
     ...item,
     montoTotal: item.montoTotal == null ? null : Number(item.montoTotal),
   };
+}
+
+function maskUrl(value?: string | null) {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    const visiblePath = pathParts.length > 0 ? `/${pathParts[pathParts.length - 1]}` : '';
+    return `${url.protocol}//${url.host}/...${visiblePath}`;
+  } catch {
+    return value.length <= 18 ? '***' : `${value.slice(0, 12)}...${value.slice(-6)}`;
+  }
 }
 
 export class DgiiCertificationService {
@@ -384,55 +411,82 @@ export class DgiiCertificationService {
     return 'XSD_NOT_AVAILABLE';
   }
 
-  async buildDiagnostics() {
-    const migrationWarning = 'La migración de certificación DGII no está aplicada en la base de datos real.';
+  private async detectCertificationDbFields() {
     const prismaModel = Prisma.dmmf.datamodel.models.find((model) => model.name === 'DgiiCertificationCase');
     const prismaFieldNames = new Set((prismaModel?.fields ?? []).map((field) => field.name));
-    const requiredPrismaFields = [
-      'xmlGenerated',
-      'xmlSigned',
-      'signedAt',
-      'sentAt',
-      'resultCheckedAt',
-      'dgiiStatusCode',
-      'dgiiStatusMessage',
-      'rejectionCode',
-      'rejectionMessage',
-      'xmlValidationStatus',
-      'xmlValidationJson',
-      'xmlValidatedAt',
-    ];
-    const prismaClientHasNewFields = requiredPrismaFields.every((field) => prismaFieldNames.has(field));
+    const prismaClientHasNewFields = CERTIFICATION_DB_FIELDS.every((field) => prismaFieldNames.has(field));
     let databaseHasNewFields: boolean | null = null;
     let databaseCheckError: string | null = null;
     try {
       const rows = await this.prisma.$queryRawUnsafe<Array<{ column_name: string }>>(
         `SELECT column_name FROM information_schema.columns WHERE table_name = 'DgiiCertificationCase' AND column_name = ANY($1)`,
-        requiredPrismaFields,
+        CERTIFICATION_DB_FIELDS,
       );
       const dbFields = new Set(rows.map((row) => row.column_name));
-      databaseHasNewFields = requiredPrismaFields.every((field) => dbFields.has(field));
+      databaseHasNewFields = CERTIFICATION_DB_FIELDS.every((field) => dbFields.has(field));
     } catch (error) {
       databaseCheckError = error instanceof Error ? error.message : 'No se pudo verificar la base de datos real';
     }
+    return { prismaClientHasNewFields, databaseHasNewFields, databaseCheckError };
+  }
+
+  private async hasActiveCertificationCertificate() {
+    try {
+      const certificate = await this.prisma.electronicCertificate.findFirst({
+        where: { status: 'ACTIVE' },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true, validFrom: true, validTo: true },
+      });
+      const now = Date.now();
+      return !!certificate && certificate.validFrom.getTime() <= now && certificate.validTo.getTime() >= now;
+    } catch {
+      return false;
+    }
+  }
+
+  async buildDiagnostics() {
+    const migrationWarning = 'La migración de certificación DGII no está aplicada en la base de datos real.';
+    const db = await this.detectCertificationDbFields();
 
     const xsd = this.xmlValidationService.diagnostics();
     const rfceGenerationAvailable = true;
-    const pendingMigrationWarning = databaseHasNewFields === false ? migrationWarning : null;
+    const ecfGenerationAvailable = true;
+    const pendingMigrationWarning = db.databaseHasNewFields === false ? migrationWarning : null;
+    let dgiiEndpointConfigExists = false;
+    let dgiiAuthConfigExists = false;
+    try {
+      const config = this.directory.getEnvironmentConfig(env.DGII_DEFAULT_ENVIRONMENT as DgiiEnvironment);
+      dgiiEndpointConfigExists = !!(config.recepcionEcfUrl || config.submitUrl) && !!config.recepcionFcUrl;
+      dgiiAuthConfigExists = !!(config.authSeedUrl && config.authValidateUrl);
+    } catch {
+      dgiiEndpointConfigExists = false;
+    }
+    const activeCertificateExists = await this.hasActiveCertificationCertificate();
 
     return {
-      prismaClientHasNewFields,
-      databaseHasNewFields,
+      prismaClientHasNewFields: db.prismaClientHasNewFields,
+      databaseHasNewFields: db.databaseHasNewFields,
       pendingMigrationWarning,
       migrationWarning: pendingMigrationWarning,
-      databaseCheckError,
+      databaseCheckError: db.databaseCheckError,
       xsdDirectoryExists: xsd.xsdDirectoryExists,
       xsdFilesFound: xsd.xsdFilesFound,
       xsdFiles: xsd.xsdFiles,
       xsdValidationEngineAvailable: xsd.xsdValidationEngineAvailable,
       xsdValidationEngine: xsd.xsdValidationEngine,
+      ecfGenerationAvailable,
       rfceGenerationAvailable,
-      canSubmitToDgii: false,
+      dgiiEndpointConfigExists,
+      dgiiAuthConfigExists,
+      activeCertificateExists,
+      canSubmitToDgii: db.databaseHasNewFields === true &&
+        xsd.xsdFilesFound > 0 &&
+        xsd.xsdValidationEngineAvailable &&
+        ecfGenerationAvailable &&
+        rfceGenerationAvailable &&
+        dgiiEndpointConfigExists &&
+        dgiiAuthConfigExists &&
+        activeCertificateExists,
     };
   }
 
@@ -484,10 +538,6 @@ export class DgiiCertificationService {
 
   private extractRejectionMessage(raw: unknown, fallback?: string) {
     return deepFindFirstString(raw, ['Mensaje', 'mensaje', 'Descripcion', 'descripcion', 'Message', 'message', 'Detalle', 'detalle']) ?? fallback ?? null;
-  }
-
-  private certificationDgiiSubmissionEnabled() {
-    return false;
   }
 
   async generateXmlForCase(companyId: number, id: number, requestId?: string) {
@@ -831,11 +881,13 @@ export class DgiiCertificationService {
   }
 
   async sendCase(companyId: number, id: number, requestId?: string) {
-    if (!this.certificationDgiiSubmissionEnabled()) {
+    const preflight = await this.preflightCase(companyId, id);
+    if (!preflight.canSend) {
       throw {
         status: 409,
-        message: 'El envío DGII de certificación está deshabilitado en esta fase.',
-        errorCode: 'DGII_CERTIFICATION_SUBMISSION_DISABLED',
+        message: 'El preflight DGII no permite enviar este caso.',
+        errorCode: 'DGII_CERTIFICATION_PREFLIGHT_BLOCKED',
+        details: preflight,
       };
     }
     const item = await this.prisma.dgiiCertificationCase.findFirst({ where: { id, companyId } });
@@ -989,6 +1041,150 @@ export class DgiiCertificationService {
     }
 
     return { total: cases.length, queried, accepted, rejected, conditional, processing, failed: errors.length, errors };
+  }
+
+  private signatureStructureIsValid(xmlSigned: string) {
+    const diagnostics = this.signatureService.inspectSignedXml(xmlSigned);
+    const localVerification = this.signatureService.verifySignedXml(xmlSigned);
+    const structureValid =
+      diagnostics.signedXmlHasSignature &&
+      diagnostics.signedXmlHasSignedInfo &&
+      diagnostics.signedXmlHasX509Certificate &&
+      diagnostics.signatureReferenceUri === '' &&
+      diagnostics.canonicalizationAlgorithm === 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315' &&
+      diagnostics.signatureAlgorithm === 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256' &&
+      diagnostics.digestAlgorithm === 'http://www.w3.org/2001/04/xmlenc#sha256';
+    return {
+      valid: structureValid && localVerification.valid,
+      diagnostics,
+      localVerification,
+    };
+  }
+
+  async preflightCase(companyId: number, id: number) {
+    const blockers: string[] = [];
+    const warnings: string[] = [];
+    const db = await this.detectCertificationDbFields();
+    if (db.databaseHasNewFields !== true) blockers.push('DB_MIGRATION_NOT_APPLIED');
+
+    const item = await this.prisma.dgiiCertificationCase.findFirst({
+      where: { id, companyId },
+      include: {
+        company: {
+          select: { id: true, rnc: true, name: true },
+        },
+      },
+    });
+    if (!item) {
+      throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
+    }
+
+    if (FINAL_CERTIFICATION_STATUSES.has(item.status)) blockers.push('CASE_ALREADY_FINAL');
+    if (!item.xmlGenerated?.trim()) blockers.push('XML_GENERATED_MISSING');
+
+    let xmlValidationStatus = item.xmlValidationStatus ?? 'NOT_VALIDATED';
+    let validation: ReturnType<DgiiCertificationXmlValidationService['validate']> | null = null;
+    if (item.xmlGenerated?.trim()) {
+      validation = this.xmlValidationService.validate(item.xmlGenerated);
+      xmlValidationStatus = this.validationStatus(validation);
+      if (!validation.wellFormed) blockers.push('XML_NOT_WELL_FORMED');
+      if (validation.xsdFiles.length === 0) blockers.push('XSD_FILES_MISSING');
+      else if (!validation.xsdValidationEngineAvailable) blockers.push('XSD_ENGINE_MISSING');
+      else if (!validation.xsdValidated || !validation.valid) blockers.push('XSD_VALIDATION_FAILED');
+      warnings.push(...validation.warnings);
+      await this.prisma.dgiiCertificationCase.update({
+        where: { id: item.id },
+        data: {
+          xmlValidationStatus,
+          xmlValidationJson: validation as unknown as Prisma.InputJsonObject,
+          xmlValidatedAt: new Date(),
+        },
+      }).catch(() => undefined);
+    }
+
+    if (!item.xmlSigned?.trim()) blockers.push('SIGNED_XML_MISSING');
+    let signatureStatus = 'MISSING';
+    if (item.xmlSigned?.trim()) {
+      const signature = this.signatureStructureIsValid(item.xmlSigned);
+      signatureStatus = signature.valid ? 'VALID' : 'INVALID';
+      if (!signature.valid) blockers.push('SIGNATURE_INVALID');
+      warnings.push(...signature.localVerification.errors);
+    }
+
+    const environment = await this.getEnvironment(companyId);
+    let endpointType: 'Recepcion' | 'RecepcionFC' | null = null;
+    let endpointUrl: string | null = null;
+    let endpointUrlMasked: string | null = null;
+    try {
+      const config = this.directory.getEnvironmentConfig(environment);
+      endpointType = item.sheetName.toUpperCase() === 'RFCE' ? 'RecepcionFC' : 'Recepcion';
+      endpointUrl = endpointType === 'RecepcionFC' ? config.recepcionFcUrl ?? null : (config.recepcionEcfUrl || config.submitUrl);
+      endpointUrlMasked = maskUrl(endpointUrl);
+      if (!endpointUrl) blockers.push(endpointType === 'RecepcionFC' ? 'RFCE_ENDPOINT_MISSING' : 'ECF_ENDPOINT_MISSING');
+      if (!config.authSeedUrl || !config.authValidateUrl) blockers.push('DGII_AUTH_CONFIG_MISSING');
+    } catch (error) {
+      blockers.push('DGII_ENDPOINT_CONFIG_MISSING');
+      warnings.push((error as any)?.message ?? 'Configuracion DGII no disponible');
+    }
+
+    let certificateStatus = 'MISSING';
+    try {
+      const { loaded } = await this.loadActiveCertificate(companyId);
+      const analysis = analyzeCertificateForDgii(
+        loaded.subject,
+        loaded.issuer,
+        item.company.rnc ?? null,
+        loaded.chainPems.length,
+      );
+      certificateStatus = 'VALID';
+      if (!loaded.keyMatchesCertificate) {
+        certificateStatus = 'INVALID';
+        blockers.push('CERTIFICATE_KEY_MISMATCH');
+      }
+      if (analysis.rncInCertificate && !analysis.rncMatchesCompany) {
+        blockers.push('CERTIFICATE_RNC_MISMATCH');
+      }
+      if (!analysis.rncInCertificate) warnings.push('CERTIFICATE_RNC_NOT_DETECTABLE');
+    } catch (error) {
+      certificateStatus = 'INVALID';
+      blockers.push('ACTIVE_CERTIFICATE_MISSING_OR_INVALID');
+      warnings.push((error as any)?.message ?? 'Certificado activo no disponible');
+    }
+
+    return {
+      caseId: item.id,
+      sheetName: item.sheetName,
+      encf: item.encf,
+      status: item.status,
+      canSend: blockers.length === 0,
+      blockers: [...new Set(blockers)],
+      warnings: [...new Set(warnings)],
+      endpointType,
+      endpointUrlMasked,
+      certificateStatus,
+      xmlValidationStatus,
+      signatureStatus,
+    };
+  }
+
+  async preflightBatch(companyId: number, batchId: number) {
+    await this.getBatch(companyId, batchId);
+    const cases = await this.prisma.dgiiCertificationCase.findMany({
+      where: { companyId, batchId },
+      orderBy: [{ sheetName: 'asc' }, { rowNumber: 'asc' }],
+      select: { id: true },
+    });
+    const results = [];
+    for (const item of cases) {
+      results.push(await this.preflightCase(companyId, item.id));
+    }
+    return {
+      total: results.length,
+      readyToSend: results.filter((item) => item.canSend).length,
+      blocked: results.filter((item) => !item.canSend).length,
+      warnings: [...new Set(results.flatMap((item) => item.warnings))],
+      cases: results,
+    };
   }
 
   async getBatchSummary(companyId: number, batchId: number) {

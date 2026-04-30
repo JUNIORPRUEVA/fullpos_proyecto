@@ -575,11 +575,27 @@ posElectronicInvoicingRouter.post(
 );
 
 posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/preflight',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.preflightCase),
+);
+
+posElectronicInvoicingRouter.post(
   '/certification/batches/:id/generate-xml',
   overrideKeyGuard,
   validate(certificationBatchParamsSchema, 'params'),
   validate(certificationLocatorSchema),
   asyncHandler(certificationController.generateBatchXml),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/preflight',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.preflightBatch),
 );
 
 posElectronicInvoicingRouter.post(

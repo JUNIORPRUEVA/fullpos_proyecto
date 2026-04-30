@@ -165,10 +165,22 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
       res.json(await service.validateCaseXsd(company.id, params.id));
     },
 
+    preflightCase: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      res.json(await service.preflightCase(company.id, params.id));
+    },
+
     generateBatchXml: async (req: Request, res: Response) => {
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
       res.json(await service.generateXmlForBatch(company.id, params.id, req.requestId));
+    },
+
+    preflightBatch: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      res.json(await service.preflightBatch(company.id, params.id));
     },
 
     signCase: async (req: Request, res: Response) => {
