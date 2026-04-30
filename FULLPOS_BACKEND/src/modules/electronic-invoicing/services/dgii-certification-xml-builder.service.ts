@@ -110,13 +110,15 @@ function parsePositiveMoney(value: string | null) {
 
 function parseDate(value: string | null) {
   if (!value) return null;
-  const normalized = value
-    .trim()
-    .replace(/^(\d{2})\/(\d{2})\/(\d{4})$/, '$3-$2-$1')
-    .replace(/^(\d{2})-(\d{2})-(\d{4})$/, '$3-$2-$1');
+  const text = value.trim();
+  const dominicanMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dominicanMatch) {
+    return `${pad2(Number(dominicanMatch[1]))}-${pad2(Number(dominicanMatch[2]))}-${dominicanMatch[3]}`;
+  }
+  const normalized = text.replace(/^(\d{4})-(\d{2})-(\d{2}).*$/, '$1-$2-$3');
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString().slice(0, 10);
+  return `${pad2(parsed.getUTCDate())}-${pad2(parsed.getUTCMonth() + 1)}-${parsed.getUTCFullYear()}`;
 }
 
 function pad2(value: number) {
@@ -176,7 +178,7 @@ function buildMissingMessage(missing: string[]) {
 
 function todayDominicanDate(value = new Date()) {
   const dominicanTime = new Date(value.getTime() - 4 * 60 * 60 * 1000);
-  return `${dominicanTime.getUTCFullYear()}-${pad2(dominicanTime.getUTCMonth() + 1)}-${pad2(dominicanTime.getUTCDate())}`;
+  return `${pad2(dominicanTime.getUTCDate())}-${pad2(dominicanTime.getUTCMonth() + 1)}-${dominicanTime.getUTCFullYear()}`;
 }
 
 const ID_DOC_FIELDS: FieldSpec[] = [
@@ -251,6 +253,8 @@ const ITEM_FIELDS: FieldSpec[] = [
 
 const GENERATION_MINIMUM_FIELDS = ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal'];
 const BUYER_REQUIRED_BY_TYPE = new Set(['31', '34']);
+const ECF_XSD_ROOT_ELEMENT = 'ECF';
+const ECF_VERSION = '1.0';
 
 export class DgiiCertificationXmlBuilderService {
   buildEcfXmlFromCertificationCase(input: { rawRowJson: unknown; issuerFallback?: CertificationIssuerFallback | null }): CertificationXmlBuildResult {
@@ -351,8 +355,9 @@ export class DgiiCertificationXmlBuilderService {
 
     const xmlLines = [
       '<?xml version="1.0" encoding="UTF-8"?>',
-      '<eCF>',
+      `<${ECF_XSD_ROOT_ELEMENT}>`,
       '  <Encabezado>',
+      `    <Version>${ECF_VERSION}</Version>`,
       ...section('IdDoc', idDoc.lines, '    '),
       ...section('Emisor', emisor.lines, '    '),
       ...section('Comprador', comprador.lines, '    '),
@@ -364,7 +369,7 @@ export class DgiiCertificationXmlBuilderService {
       '    </Item>',
       '  </DetallesItems>',
       `  <FechaHoraFirma>${xmlEscape(dominicanTimestamp())}</FechaHoraFirma>`,
-      '</eCF>',
+      `</${ECF_XSD_ROOT_ELEMENT}>`,
     ];
 
     return {
