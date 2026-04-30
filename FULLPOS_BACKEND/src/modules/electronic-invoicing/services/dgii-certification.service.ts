@@ -412,22 +412,43 @@ export class DgiiCertificationService {
   }
 
   private async detectCertificationDbFields() {
+    const tableName = 'DgiiCertificationCase';
     const prismaModel = Prisma.dmmf.datamodel.models.find((model) => model.name === 'DgiiCertificationCase');
     const prismaFieldNames = new Set((prismaModel?.fields ?? []).map((field) => field.name));
     const prismaClientHasNewFields = CERTIFICATION_DB_FIELDS.every((field) => prismaFieldNames.has(field));
     let databaseHasNewFields: boolean | null = null;
     let databaseCheckError: string | null = null;
+    let dbColumnsFound: string[] = [];
+    let missingDbColumns: string[] = [...CERTIFICATION_DB_FIELDS];
     try {
-      const rows = await this.prisma.$queryRawUnsafe<Array<{ column_name: string }>>(
-        `SELECT column_name FROM information_schema.columns WHERE table_name = 'DgiiCertificationCase' AND column_name = ANY($1)`,
-        CERTIFICATION_DB_FIELDS,
+      const rows = await this.prisma.$queryRawUnsafe<Array<{ table_schema: string; column_name: string }>>(
+        `SELECT table_schema, column_name
+           FROM information_schema.columns
+          WHERE table_name = $1
+          ORDER BY table_schema, ordinal_position`,
+        tableName,
       );
-      const dbFields = new Set(rows.map((row) => row.column_name));
+      dbColumnsFound = [...new Set(rows.map((row) => row.column_name))];
+      const dbFields = new Set(dbColumnsFound);
+      missingDbColumns = CERTIFICATION_DB_FIELDS.filter((field) => !dbFields.has(field));
       databaseHasNewFields = CERTIFICATION_DB_FIELDS.every((field) => dbFields.has(field));
+      console.info('[electronic-invoicing.certification] database.migration_column_check', {
+        tableNameChecked: tableName,
+        tableSchemasFound: [...new Set(rows.map((row) => row.table_schema))],
+        columnsFound: dbColumnsFound,
+        requiredColumns: CERTIFICATION_DB_FIELDS,
+        missingColumns: missingDbColumns,
+        databaseHasNewFields,
+      });
     } catch (error) {
       databaseCheckError = error instanceof Error ? error.message : 'No se pudo verificar la base de datos real';
+      console.warn('[electronic-invoicing.certification] database.migration_column_check_failed', {
+        tableNameChecked: tableName,
+        requiredColumns: CERTIFICATION_DB_FIELDS,
+        error: databaseCheckError,
+      });
     }
-    return { prismaClientHasNewFields, databaseHasNewFields, databaseCheckError };
+    return { prismaClientHasNewFields, databaseHasNewFields, databaseCheckError, dbColumnsFound, missingDbColumns };
   }
 
   private async hasActiveCertificationCertificate() {
@@ -469,6 +490,8 @@ export class DgiiCertificationService {
       pendingMigrationWarning,
       migrationWarning: pendingMigrationWarning,
       databaseCheckError: db.databaseCheckError,
+      databaseColumnsFound: db.dbColumnsFound,
+      missingDatabaseColumns: db.missingDbColumns,
       xsdDirectoryExists: xsd.xsdDirectoryExists,
       xsdFilesFound: xsd.xsdFilesFound,
       xsdFiles: xsd.xsdFiles,

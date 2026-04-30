@@ -1,0 +1,13 @@
+-- Repair drift where the previous certification submission migration was marked
+-- applied but the real database is still missing one or more columns.
+ALTER TABLE "DgiiCertificationCase"
+  ADD COLUMN IF NOT EXISTS "signedAt" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "sentAt" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "resultCheckedAt" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "dgiiStatusCode" TEXT,
+  ADD COLUMN IF NOT EXISTS "dgiiStatusMessage" TEXT,
+  ADD COLUMN IF NOT EXISTS "rejectionCode" TEXT,
+  ADD COLUMN IF NOT EXISTS "rejectionMessage" TEXT,
+  ADD COLUMN IF NOT EXISTS "xmlValidationStatus" TEXT DEFAULT 'NOT_VALIDATED',
+  ADD COLUMN IF NOT EXISTS "xmlValidationJson" JSONB,
+  ADD COLUMN IF NOT EXISTS "xmlValidatedAt" TIMESTAMP(3);

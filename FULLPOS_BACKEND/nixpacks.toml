@@ -3,7 +3,8 @@
 
 [phases.setup]
 # Match your EasyPanel Node version; 18 is a safe default.
-nixPkgs = ["nodejs_18", "openssl"]
+# libxml2 provides xmllint for DGII XSD validation when EasyPanel uses Nixpacks.
+nixPkgs = ["nodejs_18", "openssl", "libxml2"]
 
 [phases.install]
 cmds = [
