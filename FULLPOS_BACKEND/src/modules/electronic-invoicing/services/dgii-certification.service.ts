@@ -119,9 +119,27 @@ function parseMoney(value: unknown) {
 }
 
 function serializeCase(item: any) {
+  const validation = item.xmlValidationJson && typeof item.xmlValidationJson === 'object' && !Array.isArray(item.xmlValidationJson)
+    ? item.xmlValidationJson as Record<string, unknown>
+    : {};
+  const validationErrors = Array.isArray(validation.errors)
+    ? validation.errors.map((value) => String(value))
+    : [];
+  const validationWarnings = Array.isArray(validation.warnings)
+    ? validation.warnings.map((value) => String(value))
+    : [];
+  const xsdError = typeof validation.xsdError === 'string'
+    ? validation.xsdError
+    : validationErrors.join('\n');
   return {
     ...item,
     montoTotal: item.montoTotal == null ? null : Number(item.montoTotal),
+    xsdFileUsed: typeof validation.xsdFileUsed === 'string' ? validation.xsdFileUsed : null,
+    rawXmllintOutput: typeof validation.rawXmllintOutput === 'string'
+      ? validation.rawXmllintOutput
+      : (xsdError.trim().isNotEmpty ? xsdError : null),
+    validationErrors,
+    validationWarnings,
   };
 }
 

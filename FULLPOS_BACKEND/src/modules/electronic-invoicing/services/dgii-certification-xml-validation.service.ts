@@ -16,6 +16,7 @@ export type DgiiCertificationXmlValidationResult = {
   xsdFileUsed?: string | null;
   xsdValidationEngineAvailable: boolean;
   xsdError?: string | null;
+  rawXmllintOutput?: string | null;
 };
 
 type XsdEngine = {
@@ -121,6 +122,7 @@ export class DgiiCertificationXmlValidationService {
       xsdFileUsed,
       xsdValidationEngineAvailable: engine.available,
       xsdError,
+      rawXmllintOutput: xsdError,
     };
   }
 
