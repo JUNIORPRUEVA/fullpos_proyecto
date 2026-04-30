@@ -226,6 +226,13 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
       res.json(await service.resetCase(company.id, params.id, body.force, req.requestId));
     },
 
+    resetBatch: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      const body = req.body as typeof certificationResetSchema['_output'];
+      res.json(await service.resetBatch(company.id, params.id, body.force, req.requestId));
+    },
+
     getBatchSummary: async (req: Request, res: Response) => {
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];

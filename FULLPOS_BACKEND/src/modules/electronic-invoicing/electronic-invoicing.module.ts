@@ -654,6 +654,14 @@ posElectronicInvoicingRouter.post(
   asyncHandler(certificationController.resetCase),
 );
 
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/reset',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationResetSchema),
+  asyncHandler(certificationController.resetBatch),
+);
+
 posElectronicInvoicingRouter.delete(
   '/certification/batches/:id',
   overrideKeyGuard,

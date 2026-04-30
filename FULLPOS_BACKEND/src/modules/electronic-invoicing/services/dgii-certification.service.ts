@@ -1440,6 +1440,78 @@ export class DgiiCertificationService {
     return { case: serializeCase(updated), fromStatus: item.status, force };
   }
 
+  async resetBatch(companyId: number, batchId: number, force = false, requestId?: string) {
+    await this.getBatch(companyId, batchId);
+    const finalStatuses = ['ACCEPTED', 'ACCEPTED_CONDITIONAL', 'REJECTED'];
+    const cases = await this.prisma.dgiiCertificationCase.findMany({
+      where: { companyId, batchId },
+      select: { id: true, status: true },
+    });
+    const blockedFinal = force
+      ? 0
+      : cases.filter((item) => finalStatuses.includes(item.status)).length;
+    const resettableIds = cases
+      .filter((item) => force || !finalStatuses.includes(item.status))
+      .map((item) => item.id);
+
+    if (resettableIds.length === 0) {
+      return {
+        batchId,
+        total: cases.length,
+        reset: 0,
+        blockedFinal,
+        force,
+      };
+    }
+
+    const updated = await this.prisma.dgiiCertificationCase.updateMany({
+      where: {
+        companyId,
+        batchId,
+        id: { in: resettableIds },
+      },
+      data: {
+        status: 'IMPORTED',
+        xmlGenerated: null,
+        xmlSigned: null,
+        trackId: null,
+        dgiiRawResponseJson: Prisma.JsonNull,
+        signedAt: null,
+        sentAt: null,
+        resultCheckedAt: null,
+        dgiiStatusCode: null,
+        dgiiStatusMessage: null,
+        rejectionCode: null,
+        rejectionMessage: null,
+        xmlValidationStatus: 'NOT_VALIDATED',
+        xmlValidationJson: Prisma.JsonNull,
+        xmlValidatedAt: null,
+        xsdValidated: false,
+        xsdValid: false,
+        xsdError: null,
+        errorMessage: null,
+      },
+    });
+
+    console.warn('[electronic-invoicing.certification] batch.reset', {
+      requestId: requestId ?? null,
+      companyId,
+      batchId,
+      total: cases.length,
+      reset: updated.count,
+      blockedFinal,
+      force,
+    });
+
+    return {
+      batchId,
+      total: cases.length,
+      reset: updated.count,
+      blockedFinal,
+      force,
+    };
+  }
+
   async deleteBatch(companyId: number, id: number) {
     await this.getBatch(companyId, id);
     await this.prisma.dgiiCertificationBatch.delete({ where: { id } });
