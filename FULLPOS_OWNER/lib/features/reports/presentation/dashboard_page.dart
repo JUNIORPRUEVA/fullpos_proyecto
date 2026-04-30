@@ -9,11 +9,15 @@ import 'package:intl/intl.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/accounting_format.dart';
+import '../../auth/data/auth_repository.dart';
 import '../data/report_data.dart';
 import '../data/report_models.dart';
 import '../data/report_realtime_projection.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
+
+const _maxReportRangeDays = 365;
+const _maxReportRangeOffsetDays = _maxReportRangeDays - 1;
 
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
@@ -42,7 +46,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
       now.year,
       now.month,
       now.day,
-    ).subtract(const Duration(days: 364));
+    ).subtract(const Duration(days: _maxReportRangeOffsetDays));
     _to = now;
     WidgetsBinding.instance.addObserver(this);
     _load(showLoading: true);
@@ -102,7 +106,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           salesCount: 0,
           averageTicket: 0,
         ),
-        onError: () => warnings.add('No se pudo cargar el reporte unificado.'),
+        onError: (error) => warnings.add(_friendlyLoadError(error)),
       );
 
       if (!mounted) return;
@@ -156,12 +160,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
   Future<T> _safeLoad<T>({
     required Future<T> Function() loader,
     required T fallback,
-    required VoidCallback onError,
+    required void Function(Object error) onError,
   }) async {
     try {
       return await loader();
-    } catch (_) {
-      onError();
+    } catch (error) {
+      onError(error);
       return fallback;
     }
   }
@@ -176,6 +180,15 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
 
   String _formatReportAmount(num value) {
     return 'RD\$ ${formatAccountingAmount(value)}';
+  }
+
+  String _friendlyLoadError(Object error) {
+    final raw = error.toString().replaceFirst('Exception: ', '').trim();
+    if (raw.toLowerCase().contains('range cannot exceed')) {
+      return 'El rango no puede exceder $_maxReportRangeDays días.';
+    }
+    if (raw.isEmpty) return 'No se pudo cargar el reporte.';
+    return 'No se pudo cargar el reporte: $raw';
   }
 
   Future<void> _showMetricPreview(
@@ -253,7 +266,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     _updateRange(start, now);
   }
 
-  void _applyPresetRange(_ReportRangeOption option) {
+  Future<void> _applyPresetRange(_ReportRangeOption option) async {
     final now = DateTime.now();
     switch (option) {
       case _ReportRangeOption.today:
@@ -273,8 +286,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
       case _ReportRangeOption.fortnight:
         _applyQuickRange(15);
         return;
+      case _ReportRangeOption.year:
+        _applyQuickRange(_maxReportRangeDays);
+        return;
       case _ReportRangeOption.custom:
-        _openCustomRangeSheet();
+        await _openCustomRangeSheet();
         return;
     }
   }
@@ -299,6 +315,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     if (_isSameDate(toDay, today) &&
         fromDay == today.subtract(const Duration(days: 14))) {
       return _ReportRangeOption.fortnight;
+    }
+    if (_isSameDate(toDay, today) &&
+        fromDay ==
+            today.subtract(const Duration(days: _maxReportRangeOffsetDays))) {
+      return _ReportRangeOption.year;
     }
     return _ReportRangeOption.custom;
   }
@@ -345,7 +366,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     );
 
     if (selected == null || !mounted) return;
-    _applyPresetRange(selected);
+    await _applyPresetRange(selected);
   }
 
   String _rangeOptionLabel(
@@ -362,14 +383,28 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
         return 'Semana';
       case _ReportRangeOption.fortnight:
         return 'Quincena';
+      case _ReportRangeOption.year:
+        return '365 días';
       case _ReportRangeOption.custom:
-        return '${DateFormat('dd MMM').format(from)} - ${DateFormat('dd MMM').format(to)}';
+        return _formatDashboardRange(from, to);
     }
   }
 
   Future<void> _openCustomRangeSheet() async {
-    var localFrom = DateTime(_from.year, _from.month, _from.day);
-    var localTo = DateTime(_to.year, _to.month, _to.day);
+    final today = _dateOnly(DateTime.now());
+    final firstAllowedDate = today.subtract(
+      const Duration(days: _maxReportRangeOffsetDays),
+    );
+    final lastAllowedDate = today;
+    var localFrom = _clampDate(
+      _dateOnly(_from),
+      firstAllowedDate,
+      lastAllowedDate,
+    );
+    var localTo = _clampDate(_dateOnly(_to), firstAllowedDate, lastAllowedDate);
+    if (localFrom.isAfter(localTo)) {
+      localFrom = localTo;
+    }
 
     final picked = await showGeneralDialog<DateTimeRange>(
       context: context,
@@ -381,12 +416,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
         return StatefulBuilder(
           builder: (context, setSheetState) {
             Future<void> pickDate({required bool isStart}) async {
-              final initial = isStart ? localFrom : localTo;
+              final firstDate = isStart ? firstAllowedDate : localFrom;
+              final lastDate = isStart ? localTo : lastAllowedDate;
+              final initial = _clampDate(
+                isStart ? localFrom : localTo,
+                firstDate,
+                lastDate,
+              );
               final selected = await showDatePicker(
                 context: context,
                 initialDate: initial,
-                firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                lastDate: DateTime.now().add(const Duration(days: 1)),
+                firstDate: firstDate,
+                lastDate: lastDate,
               );
               if (selected == null) return;
               setSheetState(() {
@@ -423,6 +464,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                   case _CustomPreset.currentMonth:
                     localTo = DateTime(now.year, now.month, now.day);
                     localFrom = DateTime(now.year, now.month, 1);
+                    return;
+                  case _CustomPreset.last365Days:
+                    localTo = DateTime(now.year, now.month, now.day);
+                    localFrom = localTo.subtract(
+                      const Duration(days: _maxReportRangeOffsetDays),
+                    );
                     return;
                 }
               });
@@ -478,9 +525,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                                 Expanded(
                                   child: _DateMiniCard(
                                     label: 'Desde',
-                                    value: DateFormat(
-                                      'dd MMM',
-                                    ).format(localFrom),
+                                    value: _formatDashboardDate(localFrom),
                                     icon: Icons.calendar_today_outlined,
                                     onTap: () => pickDate(isStart: true),
                                   ),
@@ -489,7 +534,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                                 Expanded(
                                   child: _DateMiniCard(
                                     label: 'Hasta',
-                                    value: DateFormat('dd MMM').format(localTo),
+                                    value: _formatDashboardDate(localTo),
                                     icon: Icons.event_outlined,
                                     onTap: () => pickDate(isStart: false),
                                   ),
@@ -513,6 +558,19 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                                     label: 'Mes actual',
                                     onTap: () => applyInlinePreset(
                                       _CustomPreset.currentMonth,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _PresetMiniChip(
+                                    label: '365 días',
+                                    onTap: () => applyInlinePreset(
+                                      _CustomPreset.last365Days,
                                     ),
                                   ),
                                 ),
@@ -585,6 +643,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     });
 
     final theme = Theme.of(context);
+    final authState = ref.watch(authRepositoryProvider);
     final report = _reportData;
     final total = report?.totalSales ?? 0;
     final totalCost = report?.totalCost ?? 0;
@@ -603,6 +662,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           );
     final fromStr = DateFormat('yyyy-MM-dd').format(_from);
     final toStr = DateFormat('yyyy-MM-dd').format(_to);
+    final visibleRangeLabel = _formatDashboardRange(_from, _to);
+    final companyContext = _buildCompanyContextLabel(
+      companyId: authState.companyId,
+      companyName: authState.companyName,
+      companyRnc: authState.companyRnc,
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -656,7 +721,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                 child: _CenteredFilterButton(
                   label: filterLabel,
                   compact: isPhone,
-                  onTap: _openRangeOptionsSheet,
+                  onTap: () => unawaited(_openRangeOptionsSheet()),
                 ),
               ),
               const SizedBox(height: 12),
@@ -673,7 +738,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                 const SizedBox(height: 12),
               ],
               if (hasNoVisibleData)
-                const _SimpleNoDataState()
+                _SimpleNoDataState(
+                  rangeLabel: visibleRangeLabel,
+                  companyContext: companyContext,
+                  onChangeRange: () => unawaited(_openRangeOptionsSheet()),
+                )
               else ...[
                 isPhone
                     ? _MobileMetricStrip(
@@ -871,9 +940,14 @@ class _ReportRangeDialog extends StatelessWidget {
             option: _ReportRangeOption.fortnight,
           ),
           (
+            title: '365 días',
+            subtitle: 'Ultimo año disponible',
+            icon: Icons.calendar_month_outlined,
+            option: _ReportRangeOption.year,
+          ),
+          (
             title: 'Personalizado',
-            subtitle:
-                '${DateFormat('dd MMM').format(from)} - ${DateFormat('dd MMM').format(to)}',
+            subtitle: _formatDashboardRange(from, to),
             icon: Icons.edit_calendar_outlined,
             option: _ReportRangeOption.custom,
           ),
@@ -1254,20 +1328,69 @@ class _WarningBanner extends StatelessWidget {
 }
 
 class _SimpleNoDataState extends StatelessWidget {
-  const _SimpleNoDataState();
+  const _SimpleNoDataState({
+    required this.rangeLabel,
+    required this.companyContext,
+    required this.onChangeRange,
+  });
+
+  final String rangeLabel;
+  final String companyContext;
+  final VoidCallback onChangeRange;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return SizedBox(
       width: double.infinity,
-      height: MediaQuery.sizeOf(context).height * 0.55,
+      height: MediaQuery.sizeOf(context).height * 0.38,
       child: Center(
-        child: Text(
-          'Sin datos',
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-            fontWeight: FontWeight.w700,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.search_off_outlined,
+                size: 42,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Sin ventas en este rango',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Rango: $rangeLabel',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (companyContext.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Empresa: $companyContext',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: onChangeRange,
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('Cambiar filtro'),
+              ),
+            ],
           ),
         ),
       ),
@@ -1716,9 +1839,9 @@ class _MetricInfo {
   final Color color;
 }
 
-enum _ReportRangeOption { today, yesterday, week, fortnight, custom }
+enum _ReportRangeOption { today, yesterday, week, fortnight, year, custom }
 
-enum _CustomPreset { last15Days, currentMonth }
+enum _CustomPreset { last15Days, currentMonth, last365Days }
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
@@ -2338,6 +2461,37 @@ String _formatDayLabel(String value) {
   final parsed = DateTime.tryParse(value);
   if (parsed == null) return value;
   return DateFormat('dd/MM').format(parsed);
+}
+
+DateTime _dateOnly(DateTime value) =>
+    DateTime(value.year, value.month, value.day);
+
+DateTime _clampDate(DateTime value, DateTime firstDate, DateTime lastDate) {
+  if (value.isBefore(firstDate)) return firstDate;
+  if (value.isAfter(lastDate)) return lastDate;
+  return value;
+}
+
+String _formatDashboardDate(DateTime value) {
+  return DateFormat('dd/MM/yyyy').format(value);
+}
+
+String _formatDashboardRange(DateTime from, DateTime to) {
+  return '${_formatDashboardDate(from)} - ${_formatDashboardDate(to)}';
+}
+
+String _buildCompanyContextLabel({
+  required int? companyId,
+  required String? companyName,
+  required String? companyRnc,
+}) {
+  final parts = <String>[];
+  final name = companyName?.trim();
+  final rnc = companyRnc?.trim();
+  if (name != null && name.isNotEmpty) parts.add(name);
+  if (companyId != null) parts.add('ID $companyId');
+  if (rnc != null && rnc.isNotEmpty) parts.add('RNC $rnc');
+  return parts.join(' · ');
 }
 
 bool _isSameDate(DateTime left, DateTime right) {

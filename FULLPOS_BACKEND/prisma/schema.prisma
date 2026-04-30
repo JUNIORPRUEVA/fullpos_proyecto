@@ -47,6 +47,8 @@ model Company {
   electronicDgiiTokenCaches ElectronicDgiiTokenCache[]
   electronicAuditLogs ElectronicAuditLog[]
   electronicAuthSeeds ElectronicAuthSeed[]
+  dgiiCertificationBatches DgiiCertificationBatch[]
+  dgiiCertificationCases DgiiCertificationCase[]
 
   integrationTokens IntegrationToken[]
 
@@ -813,4 +815,55 @@ model ElectronicAuthSeed {
   createdAt     DateTime  @default(now())
 
   @@index([companyId, expiresAt])
+}
+
+model DgiiCertificationBatch {
+  id              Int      @id @default(autoincrement())
+  companyId       Int
+  company         Company  @relation(fields: [companyId], references: [id])
+  rnc             String?
+  fileName        String
+  uploadedAt      DateTime @default(now())
+  status          String   @default("IMPORTED")
+  totalCases      Int      @default(0)
+  ecfCases        Int      @default(0)
+  rfceCases       Int      @default(0)
+  rawMetadataJson Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  cases           DgiiCertificationCase[]
+
+  @@index([companyId, uploadedAt])
+  @@index([companyId, status])
+}
+
+model DgiiCertificationCase {
+  id                 Int      @id @default(autoincrement())
+  batchId            Int
+  batch              DgiiCertificationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  companyId          Int
+  company            Company  @relation(fields: [companyId], references: [id])
+  sheetName          String
+  rowNumber          Int
+  encf               String?
+  tipoEcf            String?
+  rncEmisor          String?
+  rncComprador       String?
+  fechaEmision       DateTime?
+  montoTotal         Decimal? @db.Decimal(14, 2)
+  rawRowJson         Json
+  status             String   @default("IMPORTED")
+  xmlGenerated       String?
+  xmlSigned          String?
+  trackId            String?
+  dgiiRawResponseJson Json?
+  errorMessage       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([companyId, batchId])
+  @@index([companyId, status])
+  @@index([companyId, sheetName])
+  @@index([companyId, encf])
 }

@@ -16,6 +16,9 @@ import '../data/sale_realtime_service.dart';
 DateTime _dateOnly(DateTime value) =>
     DateTime(value.year, value.month, value.day);
 
+const _maxSalesByDayRangeDays = 365;
+const _maxSalesByDayRangeOffsetDays = _maxSalesByDayRangeDays - 1;
+
 class SalesByDayPage extends ConsumerStatefulWidget {
   const SalesByDayPage({super.key, this.initialFrom, this.initialTo});
 
@@ -49,10 +52,13 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     final today = _dateOnly(DateTime.now());
-    _from = _dateOnly(
-      widget.initialFrom ?? today.subtract(const Duration(days: 364)),
+    final normalizedRange = _normalizeSalesByDayRange(
+      widget.initialFrom ??
+          today.subtract(const Duration(days: _maxSalesByDayRangeOffsetDays)),
+      widget.initialTo ?? today,
     );
-    _to = _dateOnly(widget.initialTo ?? today);
+    _from = normalizedRange.start;
+    _to = normalizedRange.end;
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream
@@ -82,9 +88,10 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
   }
 
   void _setRange(DateTime from, DateTime to) {
+    final normalizedRange = _normalizeSalesByDayRange(from, to);
     setState(() {
-      _from = _dateOnly(from);
-      _to = _dateOnly(to);
+      _from = normalizedRange.start;
+      _to = normalizedRange.end;
     });
     _load(showLoading: true);
   }
@@ -119,11 +126,11 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
           _loading = false;
         }
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
         if (showLoading) {
-          _error = 'No se pudieron cargar las ventas.';
+          _error = _friendlySalesByDayLoadError(error);
           _loading = false;
         }
       });
@@ -215,10 +222,30 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
         return StatefulBuilder(
           builder: (context, setDialogState) {
             Future<void> pickCustomRange() async {
+              final today = _dateOnly(DateTime.now());
+              final firstAllowedDate = today.subtract(
+                const Duration(days: _maxSalesByDayRangeOffsetDays),
+              );
+              final lastAllowedDate = today;
+              if (localFrom.isBefore(firstAllowedDate)) {
+                localFrom = firstAllowedDate;
+              }
+              if (localFrom.isAfter(lastAllowedDate)) {
+                localFrom = lastAllowedDate;
+              }
+              if (localTo.isBefore(firstAllowedDate)) {
+                localTo = firstAllowedDate;
+              }
+              if (localTo.isAfter(lastAllowedDate)) {
+                localTo = lastAllowedDate;
+              }
+              if (localFrom.isAfter(localTo)) {
+                localFrom = localTo;
+              }
               final picked = await showDateRangePicker(
                 context: context,
-                firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                lastDate: DateTime.now().add(const Duration(days: 1)),
+                firstDate: firstAllowedDate,
+                lastDate: lastAllowedDate,
                 initialDateRange: DateTimeRange(start: localFrom, end: localTo),
               );
               if (picked == null) return;
@@ -284,6 +311,32 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
                                 final today = _dateOnly(DateTime.now());
                                 localFrom = today.subtract(
                                   const Duration(days: 6),
+                                );
+                                localTo = today;
+                              });
+                            },
+                          ),
+                          _DialogQuickButton(
+                            label: '30 dias',
+                            onTap: () {
+                              setDialogState(() {
+                                final today = _dateOnly(DateTime.now());
+                                localFrom = today.subtract(
+                                  const Duration(days: 29),
+                                );
+                                localTo = today;
+                              });
+                            },
+                          ),
+                          _DialogQuickButton(
+                            label: '365 dias',
+                            onTap: () {
+                              setDialogState(() {
+                                final today = _dateOnly(DateTime.now());
+                                localFrom = today.subtract(
+                                  const Duration(
+                                    days: _maxSalesByDayRangeOffsetDays,
+                                  ),
                                 );
                                 localTo = today;
                               });
@@ -409,6 +462,29 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
         _searchCtrl.text.trim().isNotEmpty;
   }
 
+  String _activeFiltersLabel() {
+    final parts = <String>[];
+
+    void add(String label, TextEditingController controller) {
+      final value = controller.text.trim();
+      if (value.isNotEmpty) parts.add('$label: $value');
+    }
+
+    add('Cliente', _clientCtrl);
+    add('Cajero', _cashierCtrl);
+    add('Pago', _paymentCtrl);
+    add('Buscar', _searchCtrl);
+    return parts.join(' · ');
+  }
+
+  void _clearFilters() {
+    _clientCtrl.clear();
+    _cashierCtrl.clear();
+    _paymentCtrl.clear();
+    _searchCtrl.clear();
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
@@ -514,23 +590,71 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     }
 
     if (filtered.isEmpty) {
+      final rangeLabel = _formatSalesByDayRange(_from, _to);
+      final filtersLabel = _activeFiltersLabel();
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _hasActiveFilters
-                  ? 'No hay ventas para los filtros seleccionados.'
-                  : 'No hay ventas registradas en el rango actual.',
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _showFiltersDialog,
-              icon: const Icon(Icons.date_range_outlined),
-              label: const Text('Cambiar rango'),
-            ),
-          ],
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 380),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.search_off_outlined,
+                size: 42,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _hasActiveFilters
+                    ? 'No hay ventas para los filtros seleccionados.'
+                    : 'No hay ventas registradas en el rango actual.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Rango: $rangeLabel',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (filtersLabel.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Filtros: $filtersLabel',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _showFiltersDialog,
+                    icon: const Icon(Icons.date_range_outlined),
+                    label: const Text('Cambiar rango'),
+                  ),
+                  if (_hasActiveFilters)
+                    TextButton.icon(
+                      onPressed: _clearFilters,
+                      icon: const Icon(Icons.filter_alt_off_outlined),
+                      label: const Text('Limpiar filtros'),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -886,4 +1010,47 @@ bool _sameDate(DateTime left, DateTime right) {
   return left.year == right.year &&
       left.month == right.month &&
       left.day == right.day;
+}
+
+DateTime _clampDate(DateTime value, DateTime firstDate, DateTime lastDate) {
+  if (value.isBefore(firstDate)) return firstDate;
+  if (value.isAfter(lastDate)) return lastDate;
+  return value;
+}
+
+DateTimeRange _normalizeSalesByDayRange(DateTime from, DateTime to) {
+  final today = _dateOnly(DateTime.now());
+  final firstAllowedDate = today.subtract(
+    const Duration(days: _maxSalesByDayRangeOffsetDays),
+  );
+  var normalizedFrom = _clampDate(_dateOnly(from), firstAllowedDate, today);
+  var normalizedTo = _clampDate(_dateOnly(to), firstAllowedDate, today);
+  if (normalizedFrom.isAfter(normalizedTo)) {
+    normalizedFrom = normalizedTo;
+  }
+  return DateTimeRange(start: normalizedFrom, end: normalizedTo);
+}
+
+String _formatSalesByDayDate(DateTime value) {
+  return DateFormat('dd/MM/yyyy').format(value);
+}
+
+String _formatSalesByDayRange(DateTime from, DateTime to) {
+  return '${_formatSalesByDayDate(from)} - ${_formatSalesByDayDate(to)}';
+}
+
+String _friendlySalesByDayLoadError(Object error) {
+  final raw = error.toString().replaceFirst('Exception: ', '').trim();
+  final lower = raw.toLowerCase();
+  if (lower.contains('range cannot exceed')) {
+    return 'El rango no puede exceder $_maxSalesByDayRangeDays días.';
+  }
+  if (lower.contains('from must be before')) {
+    return 'La fecha inicial debe ser anterior o igual a la fecha final.';
+  }
+  if (lower.contains('rango de fechas inv')) {
+    return 'El rango de fechas no es válido.';
+  }
+  if (raw.isEmpty) return 'No se pudieron cargar las ventas.';
+  return 'No se pudieron cargar las ventas: $raw';
 }

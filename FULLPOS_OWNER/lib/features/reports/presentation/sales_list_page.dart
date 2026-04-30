@@ -13,6 +13,8 @@ import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
 
 const _salesHorizontalGap = 8.0;
+const _maxSalesRangeDays = 365;
+const _maxSalesRangeOffsetDays = _maxSalesRangeDays - 1;
 
 class SalesListPage extends ConsumerStatefulWidget {
   const SalesListPage({super.key, this.initialFrom, this.initialTo});
@@ -42,8 +44,15 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
     super.initState();
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
-    _to = widget.initialTo ?? now;
-    _from = widget.initialFrom ?? todayStart.subtract(const Duration(days: 364));
+    final defaultFrom = todayStart.subtract(
+      const Duration(days: _maxSalesRangeOffsetDays),
+    );
+    final normalizedRange = _normalizeSalesRange(
+      widget.initialFrom ?? defaultFrom,
+      widget.initialTo ?? now,
+    );
+    _from = normalizedRange.start;
+    _to = normalizedRange.end;
     WidgetsBinding.instance.addObserver(this);
     _load(page: 1, showLoading: true);
     _saleRealtimeSubscription = ref
@@ -67,6 +76,26 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
     if (state == AppLifecycleState.resumed) {
       _load(page: _currentPage, showLoading: false);
     }
+  }
+
+  void _setRange(DateTime from, DateTime to) {
+    final normalizedRange = _normalizeSalesRange(from, to);
+    setState(() {
+      _from = normalizedRange.start;
+      _to = normalizedRange.end;
+      _currentPage = 1;
+    });
+    _load(page: 1, showLoading: true);
+  }
+
+  Future<void> _pickCustomRange() async {
+    final picked = await _showCompactDateRangeSheet(
+      context,
+      initialFrom: _from,
+      initialTo: _to,
+    );
+    if (picked == null || !mounted) return;
+    _setRange(picked.start, picked.end);
   }
 
   Future<void> _load({required int page, required bool showLoading}) async {
@@ -96,11 +125,11 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
         _currentPage = resolvedPage;
         if (showLoading) _loading = false;
       });
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
         if (showLoading) {
-          _error = 'Error cargando ventas';
+          _error = _friendlySalesLoadError(error);
           _loading = false;
         }
       });
@@ -159,12 +188,9 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
           _SalesFilters(
             from: _from,
             to: _to,
+            onPickRange: () => unawaited(_pickCustomRange()),
             onChange: (from, to) {
-              setState(() {
-                _from = from;
-                _to = to;
-              });
-              _load(page: 1, showLoading: true);
+              _setRange(from, to);
             },
             onQuickRange: (days) {
               final now = DateTime.now();
@@ -176,11 +202,7 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                       now.month,
                       now.day,
                     ).subtract(Duration(days: days - 1));
-              setState(() {
-                _from = start;
-                _to = end;
-              });
-              _load(page: 1, showLoading: true);
+              _setRange(start, end);
             },
           ),
           const SizedBox(height: 12),
@@ -188,7 +210,11 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                ? Center(child: Text(_error!))
+                ? _SalesLoadErrorState(
+                    message: _error!,
+                    rangeLabel: _formatSalesDateRange(_from, _to),
+                    onRetry: () => _load(page: 1, showLoading: true),
+                  )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -260,21 +286,28 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
                       ),
                       const SizedBox(height: 8),
                       Expanded(
-                        child: Card(
-                          child: ListView.separated(
-                            itemCount: visibleSales.length,
-                            separatorBuilder: (context, separatorIndex) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final sale = visibleSales[index];
-                              return _CompactSaleRow(
-                                sale: sale,
-                                onTap: () =>
-                                    context.go('/sales/detail/${sale.id}'),
-                              );
-                            },
-                          ),
-                        ),
+                        child: allSales.isEmpty
+                            ? _SalesNoDataState(
+                                rangeLabel: _formatSalesDateRange(_from, _to),
+                                onChangeRange: () =>
+                                    unawaited(_pickCustomRange()),
+                              )
+                            : Card(
+                                child: ListView.separated(
+                                  itemCount: visibleSales.length,
+                                  separatorBuilder: (context, separatorIndex) =>
+                                      const Divider(height: 1),
+                                  itemBuilder: (context, index) {
+                                    final sale = visibleSales[index];
+                                    return _CompactSaleRow(
+                                      sale: sale,
+                                      onTap: () => context.go(
+                                        '/sales/detail/${sale.id}',
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
                       ),
                     ],
                   ),
@@ -289,12 +322,14 @@ class _SalesFilters extends StatelessWidget {
   const _SalesFilters({
     required this.from,
     required this.to,
+    required this.onPickRange,
     required this.onChange,
     required this.onQuickRange,
   });
 
   final DateTime from;
   final DateTime to;
+  final VoidCallback onPickRange;
   final void Function(DateTime, DateTime) onChange;
   final ValueChanged<int> onQuickRange;
 
@@ -304,7 +339,7 @@ class _SalesFilters extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          const _RangeChip(label: 'Rango'),
+          _RangeChip(label: _salesRangeLabel(from, to)),
           const SizedBox(width: _salesHorizontalGap),
           ActionChip(
             label: const Text('Hoy'),
@@ -321,18 +356,14 @@ class _SalesFilters extends StatelessWidget {
             onPressed: () => onQuickRange(30),
           ),
           const SizedBox(width: _salesHorizontalGap),
+          ActionChip(
+            label: const Text('365 dias'),
+            onPressed: () => onQuickRange(_maxSalesRangeDays),
+          ),
+          const SizedBox(width: _salesHorizontalGap),
           IconButton.filledTonal(
             tooltip: 'Elegir rango',
-            onPressed: () async {
-              final picked = await _showCompactDateRangeSheet(
-                context,
-                initialFrom: from,
-                initialTo: to,
-              );
-              if (picked != null) {
-                onChange(picked.start, picked.end);
-              }
-            },
+            onPressed: onPickRange,
             icon: const Icon(Icons.calendar_month_outlined),
           ),
         ],
@@ -434,6 +465,116 @@ class _SalesMetric extends StatelessWidget {
   }
 }
 
+class _SalesLoadErrorState extends StatelessWidget {
+  const _SalesLoadErrorState({
+    required this.message,
+    required this.rangeLabel,
+    required this.onRetry,
+  });
+
+  final String message;
+  final String rangeLabel;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_off_outlined,
+              size: 42,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Rango: $rangeLabel',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SalesNoDataState extends StatelessWidget {
+  const _SalesNoDataState({
+    required this.rangeLabel,
+    required this.onChangeRange,
+  });
+
+  final String rangeLabel;
+  final VoidCallback onChangeRange;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.search_off_outlined,
+              size: 42,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Sin ventas en este rango',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Rango: $rangeLabel',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: onChangeRange,
+              icon: const Icon(Icons.tune_rounded, size: 18),
+              label: const Text('Cambiar filtro'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CompactSaleRow extends StatelessWidget {
   const _CompactSaleRow({required this.sale, required this.onTap});
 
@@ -492,8 +633,12 @@ Future<DateTimeRange?> _showCompactDateRangeSheet(
   required DateTime initialFrom,
   required DateTime initialTo,
 }) {
-  final firstDate = DateTime.now().subtract(const Duration(days: 365));
-  final lastDate = DateTime.now().add(const Duration(days: 1));
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final firstDate = today.subtract(
+    const Duration(days: _maxSalesRangeOffsetDays),
+  );
+  final lastDate = today;
   final fmt = DateFormat('yyyy-MM-dd');
 
   return showModalBottomSheet<DateTimeRange>(
@@ -510,6 +655,11 @@ Future<DateTimeRange?> _showCompactDateRangeSheet(
         initialFrom.day,
       );
       var end = DateTime(initialTo.year, initialTo.month, initialTo.day);
+      if (start.isBefore(firstDate)) start = firstDate;
+      if (start.isAfter(lastDate)) start = lastDate;
+      if (end.isBefore(firstDate)) end = firstDate;
+      if (end.isAfter(lastDate)) end = lastDate;
+      if (start.isAfter(end)) start = end;
 
       return StatefulBuilder(
         builder: (context, setModalState) {
@@ -703,4 +853,83 @@ String _translatePaymentMethod(String? value) {
           ? 'No especificado'
           : normalized;
   }
+}
+
+bool _sameSalesDate(DateTime left, DateTime right) {
+  return left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
+}
+
+DateTime _salesDateOnly(DateTime value) {
+  return DateTime(value.year, value.month, value.day);
+}
+
+DateTime _clampSalesDate(
+  DateTime value,
+  DateTime firstDate,
+  DateTime lastDate,
+) {
+  if (value.isBefore(firstDate)) return firstDate;
+  if (value.isAfter(lastDate)) return lastDate;
+  return value;
+}
+
+DateTimeRange _normalizeSalesRange(DateTime from, DateTime to) {
+  final today = _salesDateOnly(DateTime.now());
+  final firstDate = today.subtract(
+    const Duration(days: _maxSalesRangeOffsetDays),
+  );
+  var normalizedFrom = _clampSalesDate(_salesDateOnly(from), firstDate, today);
+  var normalizedTo = _clampSalesDate(_salesDateOnly(to), firstDate, today);
+  if (normalizedFrom.isAfter(normalizedTo)) {
+    normalizedFrom = normalizedTo;
+  }
+  return DateTimeRange(start: normalizedFrom, end: normalizedTo);
+}
+
+String _formatSalesDateRange(DateTime from, DateTime to) {
+  final fmt = DateFormat('dd/MM/yyyy');
+  return '${fmt.format(_salesDateOnly(from))} - ${fmt.format(_salesDateOnly(to))}';
+}
+
+String _friendlySalesLoadError(Object error) {
+  final raw = error.toString().replaceFirst('Exception: ', '').trim();
+  final lower = raw.toLowerCase();
+  if (lower.contains('range cannot exceed')) {
+    return 'El rango no puede exceder $_maxSalesRangeDays días.';
+  }
+  if (lower.contains('from must be before')) {
+    return 'La fecha inicial debe ser anterior o igual a la fecha final.';
+  }
+  if (lower.contains('rango de fechas inv')) {
+    return 'El rango de fechas no es válido.';
+  }
+  if (raw.isEmpty) return 'No se pudieron cargar las ventas.';
+  return 'No se pudieron cargar las ventas: $raw';
+}
+
+String _salesRangeLabel(DateTime from, DateTime to) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final fromDay = DateTime(from.year, from.month, from.day);
+  final toDay = DateTime(to.year, to.month, to.day);
+  if (_sameSalesDate(fromDay, today) && _sameSalesDate(toDay, today)) {
+    return 'Hoy';
+  }
+  if (_sameSalesDate(toDay, today) &&
+      fromDay == today.subtract(const Duration(days: 6))) {
+    return '7 dias';
+  }
+  if (_sameSalesDate(toDay, today) &&
+      fromDay == today.subtract(const Duration(days: 29))) {
+    return '30 dias';
+  }
+  if (_sameSalesDate(toDay, today) &&
+      fromDay ==
+          today.subtract(const Duration(days: _maxSalesRangeOffsetDays))) {
+    return '365 dias';
+  }
+  final fmt = DateFormat('dd/MM/yyyy');
+  return '${fmt.format(fromDay)} - ${fmt.format(toDay)}';
 }

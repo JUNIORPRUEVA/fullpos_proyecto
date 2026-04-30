@@ -19,6 +19,7 @@ import { DgiiAuthService } from './services/dgii-auth.service';
 import { InboundReceptionService } from './services/inbound-reception.service';
 import { InboundApprovalService } from './services/inbound-approval.service';
 import { ElectronicInvoicingService } from './services/electronic-invoicing.service';
+import { DgiiCertificationService } from './services/dgii-certification.service';
 import {
   auditTimelineParamsSchema,
   configQuerySchema,
@@ -31,6 +32,15 @@ import {
   validateCreateCertificateRequest,
 } from './controllers/electronic-invoicing-admin.controller';
 import { createElectronicInvoicingDgiiController } from './controllers/electronic-invoicing-dgii.controller';
+import {
+  certificationBatchParamsSchema,
+  certificationCaseParamsSchema,
+  certificationCasesQuerySchema,
+  certificationLocatorSchema,
+  createElectronicInvoicingCertificationController,
+  uploadDgiiCertificationExcel,
+  validateDgiiCertificationExcelUpload,
+} from './controllers/electronic-invoicing-certification.controller';
 import {
   createElectronicInvoicingPublicController,
   validateCommercialApprovalRequest,
@@ -56,6 +66,7 @@ const submissionService = new DgiiSubmissionService(directory, authService);
 const resultService = new DgiiResultService(directory, authService);
 const receptionService = new InboundReceptionService(prisma, authService, mapper, audit);
 const approvalService = new InboundApprovalService(prisma, authService, mapper, audit);
+const certificationService = new DgiiCertificationService(prisma, mapper);
 const electronicInvoicingService = new ElectronicInvoicingService(
   prisma,
   mapper,
@@ -69,6 +80,7 @@ const electronicInvoicingService = new ElectronicInvoicingService(
 
 const adminController = createElectronicInvoicingAdminController(electronicInvoicingService);
 const dgiiController = createElectronicInvoicingDgiiController(electronicInvoicingService);
+const certificationController = createElectronicInvoicingCertificationController(certificationService);
 const publicController = createElectronicInvoicingPublicController(
   authService,
   receptionService,
@@ -434,6 +446,53 @@ const posDebugDgiiAuthByRncSchema = posLocatorsBaseSchema
   });
 
 export const posElectronicInvoicingRouter = Router();
+
+posElectronicInvoicingRouter.post(
+  '/certification/import-excel',
+  overrideKeyGuard,
+  uploadDgiiCertificationExcel,
+  validateDgiiCertificationExcelUpload,
+  asyncHandler(certificationController.importExcel),
+);
+
+posElectronicInvoicingRouter.get(
+  '/certification/batches',
+  overrideKeyGuard,
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.listBatches),
+);
+
+posElectronicInvoicingRouter.get(
+  '/certification/batches/:id',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.getBatch),
+);
+
+posElectronicInvoicingRouter.get(
+  '/certification/batches/:id/cases',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationCasesQuerySchema, 'query'),
+  asyncHandler(certificationController.listCases),
+);
+
+posElectronicInvoicingRouter.get(
+  '/certification/cases/:id',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.getCase),
+);
+
+posElectronicInvoicingRouter.delete(
+  '/certification/batches/:id',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.deleteBatch),
+);
 
 type OutboundStage = 'generate' | 'resolve_company' | 'sale_lookup' | 'map_sale' | 'sequence' | 'xml' | 'sign' | 'token' | 'submit' | 'result' | 'save';
 
