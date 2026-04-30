@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 type RawRow = Record<string, unknown>;
 
 export type CertificationIssuerFallback = {
@@ -30,12 +33,116 @@ type FieldSpec = {
   transform?: (value: string) => string | null;
 };
 
+type DgiiLocationEntry = {
+  code: string;
+  label: string;
+  normalizedLabel: string;
+};
+
+let locationCatalogCache: {
+  entries: DgiiLocationEntry[];
+  byCode: Set<string>;
+  byLabel: Map<string, DgiiLocationEntry[]>;
+} | null = null;
+
 function normalizeHeader(value: unknown) {
   return String(value ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
+}
+
+function normalizeLocationLabel(value: unknown) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b(PROVINCIA|MUNICIPIO|DISTRITO|MUNICIPAL|DM|D M)\b/g, ' ')
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function compactLocationLabel(value: unknown) {
+  return normalizeLocationLabel(value).replace(/\s+/g, '');
+}
+
+function loadDgiiLocationCatalog() {
+  if (locationCatalogCache) return locationCatalogCache;
+  const byCode = new Set<string>();
+  const byLabel = new Map<string, DgiiLocationEntry[]>();
+  const entries: DgiiLocationEntry[] = [];
+  const candidateFiles = [
+    path.resolve(process.cwd(), 'resources', 'dgii', 'xsd', 'e-CF 32 v.1.0.xsd'),
+    path.resolve(process.cwd(), 'resources', 'dgii', 'xsd', 'e-CF 31 v.1.0.xsd'),
+  ];
+  const xsdPath = candidateFiles.find((filePath) => fs.existsSync(filePath));
+  if (!xsdPath) {
+    locationCatalogCache = { entries, byCode, byLabel };
+    return locationCatalogCache;
+  }
+
+  const xsd = fs.readFileSync(xsdPath, 'utf8');
+  const regex = /<xs:enumeration\s+value\s*=\s*["']\s*(\d{6})\s*["'][^>]*\/?>\s*<!--([\s\S]*?)-->/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(xsd)) !== null) {
+    const code = match[1];
+    const rawLabel = match[2].replace(/\s+/g, ' ').trim();
+    const normalizedLabel = normalizeLocationLabel(rawLabel);
+    const compactLabel = compactLocationLabel(rawLabel);
+    if (!normalizedLabel) continue;
+    const entry = { code, label: rawLabel, normalizedLabel };
+    entries.push(entry);
+    byCode.add(code);
+    for (const key of new Set([normalizedLabel, compactLabel])) {
+      const list = byLabel.get(key) ?? [];
+      list.push(entry);
+      byLabel.set(key, list);
+    }
+  }
+
+  locationCatalogCache = { entries, byCode, byLabel };
+  return locationCatalogCache;
+}
+
+function preferLocationEntry(entries: DgiiLocationEntry[], tag: string) {
+  if (entries.length === 0) return null;
+  const upperTag = tag.toUpperCase();
+  if (upperTag.includes('PROVINCIA')) {
+    return entries.find((entry) => entry.code.endsWith('0000')) ?? entries[0];
+  }
+  if (upperTag.includes('MUNICIPIO')) {
+    return entries.find((entry) => entry.label.toUpperCase().includes('MUNICIPIO')) ??
+      entries.find((entry) => entry.code.endsWith('00') && !entry.code.endsWith('0000')) ??
+      entries[0];
+  }
+  return entries[0];
+}
+
+function normalizeProvinciaMunicipioCode(value: string | null, tag: string) {
+  const clean = cleanDgiiValue(value);
+  if (!clean) return null;
+  const catalog = loadDgiiLocationCatalog();
+  const digits = clean.replace(/\D/g, '');
+  if (/^\d{6}$/.test(digits) && (catalog.byCode.size === 0 || catalog.byCode.has(digits))) {
+    return digits;
+  }
+  const normalized = normalizeLocationLabel(clean);
+  const compact = compactLocationLabel(clean);
+  const matches = [
+    ...(catalog.byLabel.get(normalized) ?? []),
+    ...(catalog.byLabel.get(compact) ?? []),
+  ];
+  const exact = preferLocationEntry(matches, tag);
+  if (exact) return exact.code;
+  const containsMatches = catalog.entries.filter((entry) =>
+    entry.normalizedLabel === normalized ||
+    entry.normalizedLabel.endsWith(` ${normalized}`) ||
+    normalized.endsWith(` ${entry.normalizedLabel}`),
+  );
+  return preferLocationEntry(containsMatches, tag)?.code ?? null;
 }
 
 function normalizeValue(value: unknown) {
@@ -238,8 +345,8 @@ const EMISOR_FIELDS: FieldSpec[] = [
   { tag: 'NombreComercial', aliases: ['nombreComercial', 'nombre comercial'] },
   { tag: 'Sucursal', aliases: ['sucursal'] },
   { tag: 'DireccionEmisor', aliases: ['direccionEmisor', 'direccion emisor', 'direccion'] },
-  { tag: 'Municipio', aliases: ['municipio', 'municipioEmisor'] },
-  { tag: 'Provincia', aliases: ['provincia', 'provinciaEmisor'] },
+  { tag: 'Municipio', aliases: ['municipio', 'municipioEmisor'], transform: (value) => normalizeProvinciaMunicipioCode(value, 'Municipio') },
+  { tag: 'Provincia', aliases: ['provincia', 'provinciaEmisor'], transform: (value) => normalizeProvinciaMunicipioCode(value, 'Provincia') },
   { tag: 'CorreoEmisor', aliases: ['correoEmisor', 'emailEmisor', 'correo emisor'] },
   { tag: 'WebSite', aliases: ['website', 'web site', 'sitio web'] },
   { tag: 'ActividadEconomica', aliases: ['actividadEconomica', 'actividad economica'] },
@@ -253,8 +360,8 @@ const COMPRADOR_FIELDS: FieldSpec[] = [
   { tag: 'ContactoComprador', aliases: ['contactoComprador', 'contacto comprador'] },
   { tag: 'CorreoComprador', aliases: ['correoComprador', 'emailComprador', 'correo comprador'] },
   { tag: 'DireccionComprador', aliases: ['direccionComprador', 'direccion comprador'] },
-  { tag: 'MunicipioComprador', aliases: ['municipioComprador', 'municipio comprador'] },
-  { tag: 'ProvinciaComprador', aliases: ['provinciaComprador', 'provincia comprador'] },
+  { tag: 'MunicipioComprador', aliases: ['municipioComprador', 'municipio comprador'], transform: (value) => normalizeProvinciaMunicipioCode(value, 'MunicipioComprador') },
+  { tag: 'ProvinciaComprador', aliases: ['provinciaComprador', 'provincia comprador'], transform: (value) => normalizeProvinciaMunicipioCode(value, 'ProvinciaComprador') },
 ];
 
 const TOTALES_FIELDS: FieldSpec[] = [
@@ -501,7 +608,9 @@ export class DgiiCertificationXmlBuilderService {
       `    <Version>${ECF_VERSION}</Version>`,
       ...section('IdDoc', idDocLines, '    '),
       ...section('Emisor', emisor.lines, '    '),
-      ...section('Comprador', comprador.lines, '    '),
+      '    <Comprador>',
+      ...comprador.lines,
+      '    </Comprador>',
       ...section('Totales', totalesLines, '    '),
       '  </Encabezado>',
       '  <DetallesItems>',

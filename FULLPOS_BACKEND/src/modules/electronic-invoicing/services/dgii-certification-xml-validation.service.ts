@@ -39,6 +39,10 @@ function findParserErrors(node: any, out: string[] = []) {
   return out;
 }
 
+function hasXmlSignature(xml: string) {
+  return /<([A-Za-z0-9_:-]+:)?Signature(\s|>)/.test(xml);
+}
+
 export class DgiiCertificationXmlValidationService {
   private xmllintWarningLogged = false;
 
@@ -98,7 +102,10 @@ export class DgiiCertificationXmlValidationService {
     } else if (wellFormed) {
       const selectedXsd = this.selectXsdFile(xml, xsdFiles);
       xsdFileUsed = selectedXsd;
-      const result = this.validateWithXmllint(xml, selectedXsd, engine.command!);
+      const preSignValidation = !hasXmlSignature(xml);
+      const result = this.validateWithXmllint(xml, selectedXsd, engine.command!, {
+        allowUnsignedSignatureSlot: preSignValidation,
+      });
       xsdValidated = true;
       xsdValid = result.valid;
       xsdError = result.errorOutput;
@@ -196,12 +203,32 @@ export class DgiiCertificationXmlValidationService {
     return path.join(this.xsdDirectory, preferred ?? xsdFiles[0]);
   }
 
-  private validateWithXmllint(xml: string, xsdPath: string, xmllintCommand: string) {
+  private validateWithXmllint(
+    xml: string,
+    xsdPath: string,
+    xmllintCommand: string,
+    options?: { allowUnsignedSignatureSlot?: boolean },
+  ) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fullpos-dgii-xsd-'));
     const xmlPath = path.join(tmpDir, 'document.xml');
     try {
       fs.writeFileSync(xmlPath, xml, 'utf8');
-      const result = spawnSync(xmllintCommand, ['--noout', '--schema', xsdPath, xmlPath], {
+      let schemaPath = xsdPath;
+      const warnings: string[] = [];
+      if (options?.allowUnsignedSignatureSlot) {
+        const unsignedXsdPath = path.join(tmpDir, 'unsigned-pre-sign.xsd');
+        const xsd = fs.readFileSync(xsdPath, 'utf8');
+        const adjustedXsd = xsd.replace(
+          /<xs:any\s+processContents="skip"\s+minOccurs="1"\s+maxOccurs="1"\s*\/>/,
+          '<xs:any processContents="skip" minOccurs="0" maxOccurs="1"/>',
+        );
+        if (adjustedXsd !== xsd) {
+          fs.writeFileSync(unsignedXsdPath, adjustedXsd, 'utf8');
+          schemaPath = unsignedXsdPath;
+          warnings.push('Pre-sign XSD validation allowed missing Signature node. Official XSD still applies after signing.');
+        }
+      }
+      const result = spawnSync(xmllintCommand, ['--noout', '--schema', schemaPath, xmlPath], {
         encoding: 'utf8',
         windowsHide: true,
       });
@@ -210,6 +237,7 @@ export class DgiiCertificationXmlValidationService {
       const output = [stdout, stderr].filter(Boolean).join('\n').trim();
       console.debug('[electronic-invoicing.certification.xsd] xmllint.validation', {
         xsdFileUsed: xsdPath,
+        schemaPath,
         xmlPath,
         command: xmllintCommand,
         exitStatus: result.status,
@@ -219,13 +247,13 @@ export class DgiiCertificationXmlValidationService {
         rawOutput: output,
       });
       if (result.status === 0 && !result.error) {
-        return { valid: true, errors: [], warnings: output ? [output] : [], errorOutput: null };
+        return { valid: true, errors: [], warnings: [...warnings, ...(output ? [output] : [])], errorOutput: null };
       }
       const errorOutput = stderr || output || result.error?.message || 'XSD validation failed';
       return {
         valid: false,
         errors: [errorOutput],
-        warnings: [],
+        warnings,
         errorOutput,
       };
     } finally {
