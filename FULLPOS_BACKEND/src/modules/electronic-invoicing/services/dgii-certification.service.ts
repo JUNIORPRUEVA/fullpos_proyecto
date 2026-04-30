@@ -674,7 +674,13 @@ export class DgiiCertificationService {
           details: validation,
         };
       }
-      const warningMessage = result.warnings.length > 0 ? `Warnings: ${result.warnings.join('; ')}` : null;
+      const validationErrorMessage = validation.xsdValidated && !validation.valid
+        ? `XSD error: ${validation.xsdError ?? validation.errors[0] ?? 'XSD validation failed'}`
+        : null;
+      const warningMessage = [
+        result.warnings.length > 0 ? `Warnings: ${result.warnings.join('; ')}` : null,
+        validationErrorMessage,
+      ].filter((value): value is string => !!value).join('; ') || null;
       const updated = await this.prisma.dgiiCertificationCase.update({
         where: { id: item.id },
         data: {

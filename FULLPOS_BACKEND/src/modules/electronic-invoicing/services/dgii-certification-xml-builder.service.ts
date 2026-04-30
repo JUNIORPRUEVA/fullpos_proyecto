@@ -39,10 +39,17 @@ function normalizeHeader(value: unknown) {
 }
 
 function normalizeValue(value: unknown) {
+  return cleanDgiiValue(value);
+}
+
+function cleanDgiiValue(value: unknown) {
   if (value == null) return null;
   if (value instanceof Date) return value.toISOString();
   const text = String(value).trim();
-  return text.length > 0 ? text : null;
+  if (!text) return null;
+  const normalized = text.toLowerCase();
+  if (['#e', '#n/a', 'n/a', 'null', 'undefined'].includes(normalized)) return null;
+  return text;
 }
 
 function xmlEscape(value: unknown) {
@@ -103,6 +110,13 @@ function moneyText(value: string | null) {
   return parsed == null ? null : parsed.toFixed(2);
 }
 
+function integerText(value: string | null) {
+  const clean = cleanDgiiValue(value);
+  if (!clean) return null;
+  const parsed = Number(clean.replace(/,/g, ''));
+  return Number.isInteger(parsed) ? String(parsed) : null;
+}
+
 function parsePositiveMoney(value: string | null) {
   const parsed = parseMoney(value);
   return parsed == null || parsed < 0 ? null : parsed;
@@ -144,6 +158,32 @@ function readField(reader: RowReader, canonicalName: string, aliases: string[], 
   const raw = reader.get(canonicalName, aliases);
   if (raw == null) return null;
   return transform ? transform(raw) : raw;
+}
+
+function readAny(reader: RowReader, canonicalName: string, aliases: string[]) {
+  return readField(reader, canonicalName, aliases);
+}
+
+function readDate(reader: RowReader, canonicalName: string, aliases: string[]) {
+  return readField(reader, canonicalName, aliases, parseDate);
+}
+
+function readMoney(reader: RowReader, canonicalName: string, aliases: string[]) {
+  return readField(reader, canonicalName, aliases, moneyText);
+}
+
+function sourceFallback(reader: RowReader, canonicalName: string, value: string | null, source: string, fallbackFieldsUsed: Record<string, string>) {
+  if (!value) return null;
+  reader.sourceFieldsUsed[canonicalName] = source;
+  reader.extractedFields[canonicalName] = value;
+  fallbackFieldsUsed[canonicalName] = source;
+  return value;
+}
+
+function pushValue(lines: string[], indent: string, tag: string, value: string | null | undefined, values: Record<string, string>) {
+  if (value == null || value === '') return;
+  values[tag] = value;
+  addTag(lines, indent, tag, value);
 }
 
 function buildFields(
@@ -275,51 +315,153 @@ export class DgiiCertificationXmlBuilderService {
       FechaEmision: { value: todayDominicanDate(), source: 'certification.currentDate' },
     };
 
-    const idDoc = buildFields(reader, ID_DOC_FIELDS, '      ');
+    const fallbackFieldsUsed: Record<string, string> = {};
+    const idDocLines: string[] = [];
+    const idDocValues: Record<string, string> = {};
     const emisor = buildFields(reader, EMISOR_FIELDS, '      ', emisorFallbacks);
+    Object.assign(fallbackFieldsUsed, emisor.fallbackFieldsUsed);
     const comprador = buildFields(reader, COMPRADOR_FIELDS, '      ');
-    const totales = buildFields(reader, TOTALES_FIELDS, '      ');
-    const item = buildFields(reader, ITEM_FIELDS, '      ');
+    const totalesLines: string[] = [];
+    const totalesValues: Record<string, string> = {};
+    const itemLines: string[] = [];
+    const itemValues: Record<string, string> = {};
 
-    const fallbackFieldsUsed = {
-      ...idDoc.fallbackFieldsUsed,
-      ...emisor.fallbackFieldsUsed,
-      ...comprador.fallbackFieldsUsed,
-      ...totales.fallbackFieldsUsed,
-      ...item.fallbackFieldsUsed,
-    };
     if (fallbackFieldsUsed.FechaEmision === 'certification.currentDate') {
       warnings.push('FechaEmision fallback used for certification because workbook row does not include issue date.');
     }
 
-    const itemLines = [...item.lines];
-    const montoTotalText = totales.values.MontoTotal ?? readField(reader, 'MontoTotal', ['montoTotal', 'Monto Total', 'Total', 'TotalFactura'], moneyText);
-    if (!itemLines.some((line) => line.includes('<NumeroLinea>'))) {
-      itemLines.unshift('      <NumeroLinea>1</NumeroLinea>');
+    const tipoEcf = readAny(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
+    const encf = readAny(reader, 'eNCF', ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante']);
+    const fechaVencimiento = readDate(reader, 'FechaVencimientoSecuencia', ['fechaVencimientoSecuencia', 'fecha vencimiento secuencia', 'vencimiento secuencia']);
+    const indicadorMontoGravado = readAny(reader, 'IndicadorMontoGravado', ['indicadorMontoGravado', 'indicador monto gravado']);
+    const tipoIngresosRaw = readAny(reader, 'TipoIngresos', ['tipoIngresos', 'tipo ingresos']);
+    let tipoIngresos = tipoIngresosRaw ? integerText(tipoIngresosRaw)?.padStart(2, '0') ?? null : null;
+    if (!tipoIngresos) {
+      tipoIngresos = sourceFallback(reader, 'TipoIngresos', '01', 'certification.defaultTipoIngresos', fallbackFieldsUsed);
+      warnings.push('TipoIngresos default 01 used for certification because workbook row does not include a valid value.');
     }
-    if (!item.values.NombreItem && montoTotalText) {
-      itemLines.push('      <NombreItem>Servicio de prueba DGII</NombreItem>');
-      itemLines.push('      <CantidadItem>1</CantidadItem>');
-      itemLines.push(`      <PrecioUnitarioItem>${xmlEscape(montoTotalText)}</PrecioUnitarioItem>`);
-      itemLines.push(`      <MontoItem>${xmlEscape(montoTotalText)}</MontoItem>`);
-      reader.extractedFields.NombreItem = 'Servicio de prueba DGII';
-      reader.extractedFields.CantidadItem = '1';
-      reader.extractedFields.PrecioUnitarioItem = montoTotalText;
-      reader.extractedFields.MontoItem = montoTotalText;
-      fallbackFieldsUsed.NombreItem = 'certification.itemFallback';
-      fallbackFieldsUsed.CantidadItem = 'certification.itemFallback';
-      fallbackFieldsUsed.PrecioUnitarioItem = 'certification.itemFallback';
-      fallbackFieldsUsed.MontoItem = 'certification.itemFallback';
-      warnings.push('Item fallback used for certification because workbook row does not include item detail.');
+    const tipoPago = integerText(readAny(reader, 'TipoPago', ['tipoPago', 'tipo pago']));
+    const fechaLimitePago = readDate(reader, 'FechaLimitePago', ['fechaLimitePago', 'fecha limite pago']);
+    const terminoPagoRaw = readAny(reader, 'TerminoPago', ['terminoPago', 'termino pago']);
+    const terminoPago = terminoPagoRaw && terminoPagoRaw.length <= 15 ? terminoPagoRaw : null;
+    if (terminoPagoRaw && !terminoPago) warnings.push('TerminoPago omitted because it is longer than 15 characters or invalid.');
+
+    pushValue(idDocLines, '      ', 'TipoeCF', tipoEcf, idDocValues);
+    pushValue(idDocLines, '      ', 'eNCF', encf, idDocValues);
+    pushValue(idDocLines, '      ', 'FechaVencimientoSecuencia', fechaVencimiento, idDocValues);
+    if (indicadorMontoGravado === '0' || indicadorMontoGravado === '1') {
+      pushValue(idDocLines, '      ', 'IndicadorMontoGravado', indicadorMontoGravado, idDocValues);
+    } else if (indicadorMontoGravado) {
+      warnings.push(`IndicadorMontoGravado omitted because value "${indicadorMontoGravado}" is not 0 or 1.`);
+    }
+    pushValue(idDocLines, '      ', 'TipoIngresos', tipoIngresos, idDocValues);
+    if (tipoPago === '1' || tipoPago === '2' || tipoPago === '3') {
+      pushValue(idDocLines, '      ', 'TipoPago', tipoPago, idDocValues);
+    } else if (tipoPago) {
+      warnings.push(`TipoPago omitted because value "${tipoPago}" is not 1, 2 or 3.`);
+    }
+    pushValue(idDocLines, '      ', 'FechaLimitePago', fechaLimitePago, idDocValues);
+    pushValue(idDocLines, '      ', 'TerminoPago', terminoPago, idDocValues);
+
+    const montoTotalText = readMoney(reader, 'MontoTotal', ['montoTotal', 'Monto Total', 'Total', 'TotalFactura']);
+    const totalItbisText = readMoney(reader, 'TotalITBIS', ['totalITBIS', 'Total ITBIS', 'itbisTotal']);
+    const totalItbis = parseMoney(totalItbisText) ?? 0;
+    const montoExentoText = readMoney(reader, 'MontoExento', ['montoExento', 'monto exento']);
+    const montoGravadoTotalText = readMoney(reader, 'MontoGravadoTotal', ['montoGravadoTotal', 'monto gravado total']);
+    const montoGravadoI1Text = readMoney(reader, 'MontoGravadoI1', ['montoGravadoI1', 'monto gravado i1']);
+    const montoGravadoI2Text = readMoney(reader, 'MontoGravadoI2', ['montoGravadoI2', 'monto gravado i2']);
+    const montoGravadoI3Text = readMoney(reader, 'MontoGravadoI3', ['montoGravadoI3', 'monto gravado i3']);
+    const itemIndicatorRaw = integerText(readAny(reader, 'IndicadorFacturacion', ['indicadorFacturacion', 'indicador facturacion']));
+    const nombreItemRaw = readAny(reader, 'NombreItem', ['nombreItem', 'Nombre Item', 'descripcion', 'Descripcion', 'Item', 'Concepto']);
+    const explicitMontoItem = readMoney(reader, 'MontoItem', ['montoItem', 'monto item', 'totalLinea', 'total linea']);
+    const explicitPrecioUnitario = readMoney(reader, 'PrecioUnitarioItem', ['precioUnitarioItem', 'precio unitario', 'precio']);
+    const explicitCantidad = readMoney(reader, 'CantidadItem', ['cantidadItem', 'cantidad', 'qty']);
+    const descuentoMonto = readMoney(reader, 'DescuentoMonto', ['descuentoMonto', 'descuento monto', 'descuento']);
+    const indicadorBienServicioRaw = integerText(readAny(reader, 'IndicadorBienoServicio', ['indicadorBienoServicio', 'indicador bien servicio', 'bienoservicio']));
+    const unitPriceBase = explicitPrecioUnitario ?? explicitMontoItem ?? montoTotalText;
+    let indicadorFacturacion = ['0', '1', '2', '3', '4'].includes(itemIndicatorRaw ?? '') ? itemIndicatorRaw : null;
+    let nombreItem = nombreItemRaw;
+    let cantidadItem = explicitCantidad;
+    let precioUnitarioItem = unitPriceBase;
+    let montoItemText = explicitMontoItem ?? montoTotalText;
+    let indicadorBienServicio = ['1', '2'].includes(indicadorBienServicioRaw ?? '') ? indicadorBienServicioRaw : null;
+
+    if (!nombreItem && montoTotalText) {
+      const taxableFallback = totalItbis > 0;
+      indicadorFacturacion = taxableFallback ? '1' : '4';
+      nombreItem = 'Servicio de prueba DGII';
+      indicadorBienServicio = '2';
+      cantidadItem = '1.00';
+      precioUnitarioItem = montoTotalText;
+      montoItemText = montoTotalText;
+      sourceFallback(reader, 'IndicadorFacturacion', indicadorFacturacion, 'certification.itemFallback', fallbackFieldsUsed);
+      sourceFallback(reader, 'NombreItem', nombreItem, 'certification.itemFallback', fallbackFieldsUsed);
+      sourceFallback(reader, 'IndicadorBienoServicio', indicadorBienServicio, 'certification.itemFallback', fallbackFieldsUsed);
+      sourceFallback(reader, 'CantidadItem', cantidadItem, 'certification.itemFallback', fallbackFieldsUsed);
+      sourceFallback(reader, 'PrecioUnitarioItem', precioUnitarioItem, 'certification.itemFallback', fallbackFieldsUsed);
+      sourceFallback(reader, 'MontoItem', montoItemText, 'certification.itemFallback', fallbackFieldsUsed);
+      warnings.push('Certification item fallback used.');
     }
 
-    const tipoEcf = idDoc.values.TipoeCF ?? readField(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
     const requiredFields = [
       ...GENERATION_MINIMUM_FIELDS,
+      'TipoPago',
+      'IndicadorFacturacion',
+      'NombreItem',
+      'IndicadorBienoServicio',
+      'CantidadItem',
+      'PrecioUnitarioItem',
+      'MontoItem',
       ...(BUYER_REQUIRED_BY_TYPE.has(tipoEcf ?? '') ? ['RNCComprador', 'RazonSocialComprador'] : []),
+      ...((tipoEcf === '33' || tipoEcf === '34') ? ['NCFModificado', 'FechaNCFModificado', 'CodigoModificacion'] : []),
     ];
+
+    pushValue(totalesLines, '      ', 'MontoGravadoTotal', montoGravadoTotalText, totalesValues);
+    pushValue(totalesLines, '      ', 'MontoGravadoI1', montoGravadoI1Text, totalesValues);
+    pushValue(totalesLines, '      ', 'MontoGravadoI2', montoGravadoI2Text, totalesValues);
+    pushValue(totalesLines, '      ', 'MontoGravadoI3', montoGravadoI3Text, totalesValues);
+    if (indicadorFacturacion === '4' && montoTotalText && !montoExentoText) {
+      sourceFallback(reader, 'MontoExento', montoTotalText, 'certification.exentoFromMontoTotal', fallbackFieldsUsed);
+      pushValue(totalesLines, '      ', 'MontoExento', montoTotalText, totalesValues);
+    } else {
+      pushValue(totalesLines, '      ', 'MontoExento', montoExentoText, totalesValues);
+    }
+    if (indicadorFacturacion === '1') pushValue(totalesLines, '      ', 'ITBIS1', '18', totalesValues);
+    if (indicadorFacturacion === '2') pushValue(totalesLines, '      ', 'ITBIS2', '16', totalesValues);
+    if (indicadorFacturacion === '3') pushValue(totalesLines, '      ', 'ITBIS3', '0', totalesValues);
+    pushValue(totalesLines, '      ', 'TotalITBIS', totalItbisText, totalesValues);
+    pushValue(totalesLines, '      ', 'TotalITBIS1', readMoney(reader, 'TotalITBIS1', ['totalITBIS1', 'total itbis 1']), totalesValues);
+    pushValue(totalesLines, '      ', 'TotalITBIS2', readMoney(reader, 'TotalITBIS2', ['totalITBIS2', 'total itbis 2']), totalesValues);
+    pushValue(totalesLines, '      ', 'TotalITBIS3', readMoney(reader, 'TotalITBIS3', ['totalITBIS3', 'total itbis 3']), totalesValues);
+    pushValue(totalesLines, '      ', 'MontoTotal', montoTotalText, totalesValues);
+    pushValue(totalesLines, '      ', 'MontoPeriodo', readMoney(reader, 'MontoPeriodo', ['montoPeriodo', 'monto periodo']), totalesValues);
+    pushValue(totalesLines, '      ', 'SaldoAnterior', readMoney(reader, 'SaldoAnterior', ['saldoAnterior', 'saldo anterior']), totalesValues);
+    pushValue(totalesLines, '      ', 'MontoAvancePago', readMoney(reader, 'MontoAvancePago', ['montoAvancePago', 'monto avance pago']), totalesValues);
+    pushValue(totalesLines, '      ', 'ValorPagar', readMoney(reader, 'ValorPagar', ['valorPagar', 'valor pagar']), totalesValues);
+    pushValue(totalesLines, '      ', 'TotalITBISRetenido', readMoney(reader, 'TotalITBISRetenido', ['totalITBISRetenido', 'total itbis retenido']), totalesValues);
+    pushValue(totalesLines, '      ', 'TotalISRRetencion', readMoney(reader, 'TotalISRRetencion', ['totalISRRetencion', 'total isr retencion']), totalesValues);
+
+    pushValue(itemLines, '      ', 'NumeroLinea', integerText(readAny(reader, 'NumeroLinea', ['numeroLinea', 'numero linea', 'linea'])) ?? '1', itemValues);
+    pushValue(itemLines, '      ', 'IndicadorFacturacion', indicadorFacturacion, itemValues);
+    pushValue(itemLines, '      ', 'NombreItem', nombreItem, itemValues);
+    pushValue(itemLines, '      ', 'IndicadorBienoServicio', indicadorBienServicio, itemValues);
+    pushValue(itemLines, '      ', 'CantidadItem', cantidadItem, itemValues);
+    pushValue(itemLines, '      ', 'UnidadMedida', integerText(readAny(reader, 'UnidadMedida', ['unidadMedida', 'unidad medida', 'unidad'])), itemValues);
+    pushValue(itemLines, '      ', 'PrecioUnitarioItem', precioUnitarioItem, itemValues);
+    pushValue(itemLines, '      ', 'DescuentoMonto', descuentoMonto, itemValues);
+    pushValue(itemLines, '      ', 'MontoItem', montoItemText, itemValues);
+
+    const informacionReferenciaLines: string[] = [];
+    const informacionReferenciaValues: Record<string, string> = {};
+    if (tipoEcf === '33' || tipoEcf === '34') {
+      pushValue(informacionReferenciaLines, '    ', 'NCFModificado', readAny(reader, 'NCFModificado', ['ncfModificado', 'NCF Modificado', 'NCFModificado', 'eNCFModificado']), informacionReferenciaValues);
+      pushValue(informacionReferenciaLines, '    ', 'FechaNCFModificado', readDate(reader, 'FechaNCFModificado', ['fechaNCFModificado', 'Fecha NCF Modificado', 'FechaNCFModificado']), informacionReferenciaValues);
+      pushValue(informacionReferenciaLines, '    ', 'CodigoModificacion', integerText(readAny(reader, 'CodigoModificacion', ['codigoModificacion', 'Codigo Modificacion', 'CodigoModificacion'])), informacionReferenciaValues);
+      pushValue(informacionReferenciaLines, '    ', 'RazonModificacion', readAny(reader, 'RazonModificacion', ['razonModificacion', 'Razon Modificacion', 'RazonModificacion']), informacionReferenciaValues);
+    }
+
     const presentTags = new Set(
-      [...idDoc.lines, ...emisor.lines, ...comprador.lines, ...totales.lines, ...itemLines]
+      [...idDocLines, ...emisor.lines, ...comprador.lines, ...totalesLines, ...itemLines, ...informacionReferenciaLines]
         .map((line) => line.match(/<([A-Za-z0-9]+)>/)?.[1])
         .filter((value): value is string => !!value),
     );
@@ -329,9 +471,8 @@ export class DgiiCertificationXmlBuilderService {
     }
 
     const montoTotal = parsePositiveMoney(montoTotalText);
-    const montoItem = parsePositiveMoney(reader.extractedFields.MontoItem ?? item.values.MontoItem ?? readField(reader, 'MontoItem', ['montoItem', 'monto item', 'totalLinea', 'total linea']));
-    const totalItbis = parseMoney(totales.values.TotalITBIS ?? readField(reader, 'TotalITBIS', ['totalITBIS', 'Total ITBIS', 'itbisTotal'])) ?? 0;
-    const descuento = parseMoney(item.values.DescuentoMonto ?? readField(reader, 'DescuentoMonto', ['descuentoMonto', 'descuento monto', 'descuento'])) ?? 0;
+    const montoItem = parsePositiveMoney(montoItemText);
+    const descuento = parseMoney(descuentoMonto) ?? 0;
     if (montoTotal != null && montoItem != null) {
       const calculated = Math.round((montoItem + totalItbis - descuento) * 100) / 100;
       if (Math.abs(calculated - montoTotal) > 0.01) {
@@ -358,16 +499,17 @@ export class DgiiCertificationXmlBuilderService {
       `<${ECF_XSD_ROOT_ELEMENT}>`,
       '  <Encabezado>',
       `    <Version>${ECF_VERSION}</Version>`,
-      ...section('IdDoc', idDoc.lines, '    '),
+      ...section('IdDoc', idDocLines, '    '),
       ...section('Emisor', emisor.lines, '    '),
       ...section('Comprador', comprador.lines, '    '),
-      ...section('Totales', totales.lines, '    '),
+      ...section('Totales', totalesLines, '    '),
       '  </Encabezado>',
       '  <DetallesItems>',
       '    <Item>',
       ...itemLines,
       '    </Item>',
       '  </DetallesItems>',
+      ...section('InformacionReferencia', informacionReferenciaLines, '  '),
       `  <FechaHoraFirma>${xmlEscape(dominicanTimestamp())}</FechaHoraFirma>`,
       `</${ECF_XSD_ROOT_ELEMENT}>`,
     ];
