@@ -400,6 +400,10 @@ const ITEM_FIELDS: FieldSpec[] = [
 
 const GENERATION_MINIMUM_FIELDS = ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal'];
 const BUYER_REQUIRED_BY_TYPE = new Set(['31', '34']);
+const TIPO_INGRESOS_TYPES = new Set(['31', '32', '33', '34', '44', '45', '46']);
+const TIPO_PAGO_REQUIRED_TYPES = new Set(['31', '32', '33', '34', '44', '45', '46']);
+const FECHA_VENCIMIENTO_REQUIRED_TYPES = new Set(['41', '43', '46', '47']);
+const RETENCION_ITEM_REQUIRED_TYPES = new Set(['41', '47']);
 const ECF_XSD_ROOT_ELEMENT = 'ECF';
 const ECF_VERSION = '1.0';
 
@@ -440,10 +444,11 @@ export class DgiiCertificationXmlBuilderService {
     const tipoEcf = readAny(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
     const encf = readAny(reader, 'eNCF', ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante']);
     const fechaVencimiento = readDate(reader, 'FechaVencimientoSecuencia', ['fechaVencimientoSecuencia', 'fecha vencimiento secuencia', 'vencimiento secuencia']);
+    const indicadorNotaCredito = integerText(readAny(reader, 'IndicadorNotaCredito', ['indicadorNotaCredito', 'indicador nota credito']));
     const indicadorMontoGravado = readAny(reader, 'IndicadorMontoGravado', ['indicadorMontoGravado', 'indicador monto gravado']);
     const tipoIngresosRaw = readAny(reader, 'TipoIngresos', ['tipoIngresos', 'tipo ingresos']);
     let tipoIngresos = tipoIngresosRaw ? integerText(tipoIngresosRaw)?.padStart(2, '0') ?? null : null;
-    if (!tipoIngresos) {
+    if (!tipoIngresos && TIPO_INGRESOS_TYPES.has(tipoEcf ?? '')) {
       tipoIngresos = sourceFallback(reader, 'TipoIngresos', '01', 'certification.defaultTipoIngresos', fallbackFieldsUsed);
       warnings.push('TipoIngresos default 01 used for certification because workbook row does not include a valid value.');
     }
@@ -455,13 +460,35 @@ export class DgiiCertificationXmlBuilderService {
 
     pushValue(idDocLines, '      ', 'TipoeCF', tipoEcf, idDocValues);
     pushValue(idDocLines, '      ', 'eNCF', encf, idDocValues);
-    pushValue(idDocLines, '      ', 'FechaVencimientoSecuencia', fechaVencimiento, idDocValues);
-    if (indicadorMontoGravado === '0' || indicadorMontoGravado === '1') {
+    if (FECHA_VENCIMIENTO_REQUIRED_TYPES.has(tipoEcf ?? '')) {
+      pushValue(idDocLines, '      ', 'FechaVencimientoSecuencia', fechaVencimiento, idDocValues);
+    } else if (fechaVencimiento) {
+      warnings.push(`FechaVencimientoSecuencia omitted because tipo e-CF ${tipoEcf ?? 'N/D'} does not allow it in IdDoc.`);
+    }
+    if (tipoEcf === '34') {
+      pushValue(
+        idDocLines,
+        '      ',
+        'IndicadorNotaCredito',
+        indicadorNotaCredito === '0' || indicadorNotaCredito === '1'
+          ? indicadorNotaCredito
+          : sourceFallback(reader, 'IndicadorNotaCredito', '1', 'certification.defaultIndicadorNotaCredito', fallbackFieldsUsed),
+        idDocValues,
+      );
+      if (indicadorNotaCredito !== '0' && indicadorNotaCredito !== '1') {
+        warnings.push('IndicadorNotaCredito default 1 used for certification because workbook row does not include a valid value.');
+      }
+    }
+    if (tipoEcf !== '34' && (indicadorMontoGravado === '0' || indicadorMontoGravado === '1')) {
       pushValue(idDocLines, '      ', 'IndicadorMontoGravado', indicadorMontoGravado, idDocValues);
     } else if (indicadorMontoGravado) {
       warnings.push(`IndicadorMontoGravado omitted because value "${indicadorMontoGravado}" is not 0 or 1.`);
     }
-    pushValue(idDocLines, '      ', 'TipoIngresos', tipoIngresos, idDocValues);
+    if (TIPO_INGRESOS_TYPES.has(tipoEcf ?? '')) {
+      pushValue(idDocLines, '      ', 'TipoIngresos', tipoIngresos, idDocValues);
+    } else if (tipoIngresosRaw) {
+      warnings.push(`TipoIngresos omitted because tipo e-CF ${tipoEcf ?? 'N/D'} does not allow it in IdDoc.`);
+    }
     if (tipoPago === '1' || tipoPago === '2' || tipoPago === '3') {
       pushValue(idDocLines, '      ', 'TipoPago', tipoPago, idDocValues);
     } else if (tipoPago) {
@@ -512,33 +539,42 @@ export class DgiiCertificationXmlBuilderService {
 
     const requiredFields = [
       ...GENERATION_MINIMUM_FIELDS,
-      'TipoPago',
+      ...(TIPO_PAGO_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['TipoPago'] : []),
+      ...(FECHA_VENCIMIENTO_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['FechaVencimientoSecuencia'] : []),
       'IndicadorFacturacion',
+      ...(RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['Retencion'] : []),
+      ...(RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['IndicadorAgenteRetencionoPercepcion'] : []),
+      ...(tipoEcf === '47' ? ['MontoISRRetenido'] : []),
       'NombreItem',
       'IndicadorBienoServicio',
       'CantidadItem',
       'PrecioUnitarioItem',
       'MontoItem',
       ...(BUYER_REQUIRED_BY_TYPE.has(tipoEcf ?? '') ? ['RNCComprador', 'RazonSocialComprador'] : []),
+      ...(tipoEcf === '34' ? ['IndicadorNotaCredito'] : []),
       ...((tipoEcf === '33' || tipoEcf === '34') ? ['NCFModificado', 'FechaNCFModificado', 'CodigoModificacion'] : []),
     ];
 
     pushValue(totalesLines, '      ', 'MontoGravadoTotal', montoGravadoTotalText, totalesValues);
-    pushValue(totalesLines, '      ', 'MontoGravadoI1', montoGravadoI1Text, totalesValues);
-    pushValue(totalesLines, '      ', 'MontoGravadoI2', montoGravadoI2Text, totalesValues);
+    if (tipoEcf !== '46') {
+      pushValue(totalesLines, '      ', 'MontoGravadoI1', montoGravadoI1Text, totalesValues);
+      pushValue(totalesLines, '      ', 'MontoGravadoI2', montoGravadoI2Text, totalesValues);
+    }
     pushValue(totalesLines, '      ', 'MontoGravadoI3', montoGravadoI3Text, totalesValues);
-    if (indicadorFacturacion === '4' && montoTotalText && !montoExentoText) {
+    if (tipoEcf !== '46' && indicadorFacturacion === '4' && montoTotalText && !montoExentoText) {
       sourceFallback(reader, 'MontoExento', montoTotalText, 'certification.exentoFromMontoTotal', fallbackFieldsUsed);
       pushValue(totalesLines, '      ', 'MontoExento', montoTotalText, totalesValues);
-    } else {
+    } else if (tipoEcf !== '46') {
       pushValue(totalesLines, '      ', 'MontoExento', montoExentoText, totalesValues);
     }
-    if (indicadorFacturacion === '1') pushValue(totalesLines, '      ', 'ITBIS1', '18', totalesValues);
-    if (indicadorFacturacion === '2') pushValue(totalesLines, '      ', 'ITBIS2', '16', totalesValues);
+    if (tipoEcf !== '46' && indicadorFacturacion === '1') pushValue(totalesLines, '      ', 'ITBIS1', '18', totalesValues);
+    if (tipoEcf !== '46' && indicadorFacturacion === '2') pushValue(totalesLines, '      ', 'ITBIS2', '16', totalesValues);
     if (indicadorFacturacion === '3') pushValue(totalesLines, '      ', 'ITBIS3', '0', totalesValues);
     pushValue(totalesLines, '      ', 'TotalITBIS', totalItbisText, totalesValues);
-    pushValue(totalesLines, '      ', 'TotalITBIS1', readMoney(reader, 'TotalITBIS1', ['totalITBIS1', 'total itbis 1']), totalesValues);
-    pushValue(totalesLines, '      ', 'TotalITBIS2', readMoney(reader, 'TotalITBIS2', ['totalITBIS2', 'total itbis 2']), totalesValues);
+    if (tipoEcf !== '46') {
+      pushValue(totalesLines, '      ', 'TotalITBIS1', readMoney(reader, 'TotalITBIS1', ['totalITBIS1', 'total itbis 1']), totalesValues);
+      pushValue(totalesLines, '      ', 'TotalITBIS2', readMoney(reader, 'TotalITBIS2', ['totalITBIS2', 'total itbis 2']), totalesValues);
+    }
     pushValue(totalesLines, '      ', 'TotalITBIS3', readMoney(reader, 'TotalITBIS3', ['totalITBIS3', 'total itbis 3']), totalesValues);
     pushValue(totalesLines, '      ', 'MontoTotal', montoTotalText, totalesValues);
     pushValue(totalesLines, '      ', 'MontoPeriodo', readMoney(reader, 'MontoPeriodo', ['montoPeriodo', 'monto periodo']), totalesValues);
@@ -550,6 +586,25 @@ export class DgiiCertificationXmlBuilderService {
 
     pushValue(itemLines, '      ', 'NumeroLinea', integerText(readAny(reader, 'NumeroLinea', ['numeroLinea', 'numero linea', 'linea'])) ?? '1', itemValues);
     pushValue(itemLines, '      ', 'IndicadorFacturacion', indicadorFacturacion, itemValues);
+    if (RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '')) {
+      const indicadorAgente = integerText(readAny(reader, 'IndicadorAgenteRetencionoPercepcion', [
+        'indicadorAgenteRetencionoPercepcion',
+        'indicador agente retencion',
+        'indicador retencion',
+      ]));
+      const montoItbisRetenido = readMoney(reader, 'MontoITBISRetenido', ['montoITBISRetenido', 'monto itbis retenido']);
+      const montoIsrRetenido = readMoney(reader, 'MontoISRRetenido', ['montoISRRetenido', 'monto isr retenido']);
+      if (indicadorAgente) {
+        itemLines.push('      <Retencion>');
+        pushValue(itemLines, '        ', 'IndicadorAgenteRetencionoPercepcion', indicadorAgente, itemValues);
+        if (tipoEcf === '41') {
+          pushValue(itemLines, '        ', 'MontoITBISRetenido', montoItbisRetenido, itemValues);
+        }
+        pushValue(itemLines, '        ', 'MontoISRRetenido', montoIsrRetenido, itemValues);
+        itemLines.push('      </Retencion>');
+        itemValues.Retencion = 'present';
+      }
+    }
     pushValue(itemLines, '      ', 'NombreItem', nombreItem, itemValues);
     pushValue(itemLines, '      ', 'IndicadorBienoServicio', indicadorBienServicio, itemValues);
     pushValue(itemLines, '      ', 'CantidadItem', cantidadItem, itemValues);

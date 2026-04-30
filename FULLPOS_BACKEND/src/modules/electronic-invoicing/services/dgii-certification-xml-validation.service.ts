@@ -106,10 +106,10 @@ export class DgiiCertificationXmlValidationService {
       const result = this.validateWithXmllint(xml, selectedXsd, engine.command!, {
         allowUnsignedSignatureSlot: preSignValidation,
       });
-      xsdValidated = true;
+      xsdValidated = !result.schemaInvalid;
       xsdValid = result.valid;
-      xsdError = result.errorOutput;
-      errors.push(...result.errors);
+      xsdError = result.schemaInvalid ? null : result.errorOutput;
+      if (!result.schemaInvalid) errors.push(...result.errors);
       warnings.push(...result.warnings);
     } else {
       warnings.push('XSD validation skipped because XML is not well formed.');
@@ -218,10 +218,9 @@ export class DgiiCertificationXmlValidationService {
       if (options?.allowUnsignedSignatureSlot) {
         const unsignedXsdPath = path.join(tmpDir, 'unsigned-pre-sign.xsd');
         const xsd = fs.readFileSync(xsdPath, 'utf8');
-        const adjustedXsd = xsd.replace(
-          /<xs:any\s+processContents="skip"\s+minOccurs="1"\s+maxOccurs="1"\s*\/>/,
-          '<xs:any processContents="skip" minOccurs="0" maxOccurs="1"/>',
-        );
+        const adjustedXsd = xsd
+          .replace(/name=" IndicadorServicioTodoIncluidoType"/g, 'name="IndicadorServicioTodoIncluidoType"')
+          .replace(/<xs:any\b([^>]*)minOccurs="1"([^>]*)maxOccurs="1"([^>]*)\/>/g, '<xs:any$1minOccurs="0"$2maxOccurs="1"$3/>');
         if (adjustedXsd !== xsd) {
           fs.writeFileSync(unsignedXsdPath, adjustedXsd, 'utf8');
           schemaPath = unsignedXsdPath;
@@ -247,11 +246,25 @@ export class DgiiCertificationXmlValidationService {
         rawOutput: output,
       });
       if (result.status === 0 && !result.error) {
-        return { valid: true, errors: [], warnings: [...warnings, ...(output ? [output] : [])], errorOutput: null };
+        return { valid: true, schemaInvalid: false, errors: [], warnings: [...warnings, ...(output ? [output] : [])], errorOutput: null };
       }
       const errorOutput = stderr || output || result.error?.message || 'XSD validation failed';
+      const schemaInvalid = /Schemas parser error|failed to compile|not a valid regular expression|does not resolve to a\(n\) type definition/i.test(errorOutput);
+      if (schemaInvalid) {
+        return {
+          valid: false,
+          schemaInvalid: true,
+          errors: [],
+          warnings: [
+            ...warnings,
+            `DGII XSD file failed to compile with xmllint. XML was not XSD-validated. Details: ${errorOutput}`,
+          ],
+          errorOutput,
+        };
+      }
       return {
         valid: false,
+        schemaInvalid: false,
         errors: [errorOutput],
         warnings,
         errorOutput,
