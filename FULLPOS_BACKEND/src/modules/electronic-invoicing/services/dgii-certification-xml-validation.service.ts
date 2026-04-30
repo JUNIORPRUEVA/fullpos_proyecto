@@ -43,6 +43,19 @@ function hasXmlSignature(xml: string) {
   return /<([A-Za-z0-9_:-]+:)?Signature(\s|>)/.test(xml);
 }
 
+function makeXsdXmllintCompatible(xsd: string) {
+  return xsd
+    .replace(/name=" IndicadorServicioTodoIncluidoType"/g, 'name="IndicadorServicioTodoIncluidoType"')
+    .replace(/\[\$0-9\]/g, '[0-9]')
+    .replace(/\(\?:\.\[0-9\]\{2\}\)\?/g, '(\\.[0-9]{2})?')
+    .replace(/\(\?:/g, '(');
+}
+
+function allowUnsignedPreSignXsd(xmlSchema: string) {
+  return xmlSchema
+    .replace(/<xs:any\b([^>]*)minOccurs="1"([^>]*)maxOccurs="1"([^>]*)\/>/g, '<xs:any$1minOccurs="0"$2maxOccurs="1"$3/>');
+}
+
 export class DgiiCertificationXmlValidationService {
   private xmllintWarningLogged = false;
 
@@ -215,16 +228,21 @@ export class DgiiCertificationXmlValidationService {
       fs.writeFileSync(xmlPath, xml, 'utf8');
       let schemaPath = xsdPath;
       const warnings: string[] = [];
+      const xsd = fs.readFileSync(xsdPath, 'utf8');
+      let adjustedXsd = makeXsdXmllintCompatible(xsd);
+      const usedXmllintCompatibility = adjustedXsd !== xsd;
       if (options?.allowUnsignedSignatureSlot) {
-        const unsignedXsdPath = path.join(tmpDir, 'unsigned-pre-sign.xsd');
-        const xsd = fs.readFileSync(xsdPath, 'utf8');
-        const adjustedXsd = xsd
-          .replace(/name=" IndicadorServicioTodoIncluidoType"/g, 'name="IndicadorServicioTodoIncluidoType"')
-          .replace(/<xs:any\b([^>]*)minOccurs="1"([^>]*)maxOccurs="1"([^>]*)\/>/g, '<xs:any$1minOccurs="0"$2maxOccurs="1"$3/>');
-        if (adjustedXsd !== xsd) {
-          fs.writeFileSync(unsignedXsdPath, adjustedXsd, 'utf8');
-          schemaPath = unsignedXsdPath;
-          warnings.push('Pre-sign XSD validation allowed missing Signature node. Official XSD still applies after signing.');
+        adjustedXsd = allowUnsignedPreSignXsd(adjustedXsd);
+      }
+      if (adjustedXsd !== xsd) {
+        const adjustedXsdPath = path.join(tmpDir, 'xmllint-compatible.xsd');
+        fs.writeFileSync(adjustedXsdPath, adjustedXsd, 'utf8');
+        schemaPath = adjustedXsdPath;
+        if (usedXmllintCompatibility) {
+          warnings.push('XSD validation used a temporary xmllint-compatible schema copy. Official XSD files were not modified.');
+        }
+        if (options?.allowUnsignedSignatureSlot) {
+          warnings.push('Pre-sign XSD validation allowed the pending Signature slot. Official XSD still applies after signing.');
         }
       }
       const result = spawnSync(xmllintCommand, ['--noout', '--schema', schemaPath, xmlPath], {

@@ -20,6 +20,7 @@ function normalizeValue(value: unknown) {
   if (value == null) return null;
   if (value instanceof Date) return value.toISOString();
   const text = String(value).trim();
+  if (!text || ['#e', '#n/a', 'n/a', 'null', 'undefined'].includes(text.toLowerCase())) return null;
   return text.length > 0 ? text : null;
 }
 
@@ -55,7 +56,8 @@ class RowReader {
 
   get(canonicalName: string, aliases: string[]) {
     const normalizedAliases = aliases.map(normalizeHeader);
-    const found = this.entries.find((entry) => normalizedAliases.includes(entry.normalizedKey));
+    const found = this.entries.find((entry) => normalizedAliases.includes(entry.normalizedKey)) ??
+      this.entries.find((entry) => normalizedAliases.some((alias) => entry.normalizedKey === `${alias}1`));
     if (!found) return null;
     const value = normalizeValue(found.value);
     if (value != null) {
@@ -72,13 +74,12 @@ function normalizeRnc(value: string | null) {
 
 function parseDate(value: string | null) {
   if (!value) return null;
-  const normalized = value
-    .trim()
-    .replace(/^(\d{2})\/(\d{2})\/(\d{4})$/, '$3-$2-$1')
-    .replace(/^(\d{2})-(\d{2})-(\d{4})$/, '$3-$2-$1');
-  const parsed = new Date(normalized);
+  const text = value.trim();
+  const dominican = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dominican) return `${pad2(Number(dominican[1]))}-${pad2(Number(dominican[2]))}-${dominican[3]}`;
+  const parsed = new Date(text.replace(/^(\d{4})-(\d{2})-(\d{2}).*$/, '$1-$2-$3'));
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString().slice(0, 10);
+  return `${pad2(parsed.getUTCDate())}-${pad2(parsed.getUTCMonth() + 1)}-${parsed.getUTCFullYear()}`;
 }
 
 function parseMoney(value: string | null) {
@@ -128,6 +129,8 @@ function buildFields(reader: RowReader, specs: FieldSpec[], indent: string) {
 const RFCE_ID_DOC_FIELDS: FieldSpec[] = [
   { tag: 'TipoeCF', aliases: ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo'] },
   { tag: 'eNCF', aliases: ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante'] },
+  { tag: 'TipoIngresos', aliases: ['tipoIngresos', 'tipo ingresos'] },
+  { tag: 'TipoPago', aliases: ['tipoPago', 'tipo pago', 'condicion pago', 'condicionPago', 'forma pago', 'Forma Pago'] },
   { tag: 'Periodo', aliases: ['periodo', 'Periodo'] },
   { tag: 'FechaDesde', aliases: ['fechaDesde', 'fecha desde', 'desde'], transform: parseDate },
   { tag: 'FechaHasta', aliases: ['fechaHasta', 'fecha hasta', 'hasta'], transform: parseDate },
@@ -142,11 +145,30 @@ const RFCE_EMISOR_FIELDS: FieldSpec[] = [
   { tag: 'FechaEmision', aliases: ['fechaEmision', 'Fecha Emision', 'FechaEmision', 'Fecha'], transform: parseDate },
 ];
 
+const RFCE_COMPRADOR_FIELDS: FieldSpec[] = [
+  { tag: 'RNCComprador', aliases: ['rncComprador', 'RNC Comprador', 'RNCComprador'], transform: normalizeRnc },
+  { tag: 'IdentificadorExtranjero', aliases: ['identificadorExtranjero', 'id extranjero', 'identificacion extranjero'] },
+  { tag: 'RazonSocialComprador', aliases: ['razonSocialComprador', 'Razon Social Comprador', 'Nombre Comprador', 'Comprador'] },
+];
+
 const RFCE_TOTALES_FIELDS: FieldSpec[] = [
   { tag: 'MontoGravadoTotal', aliases: ['montoGravadoTotal', 'monto gravado total'], transform: moneyText },
+  { tag: 'MontoGravadoI1', aliases: ['montoGravadoI1', 'monto gravado i1'], transform: moneyText },
+  { tag: 'MontoGravadoI2', aliases: ['montoGravadoI2', 'monto gravado i2'], transform: moneyText },
+  { tag: 'MontoGravadoI3', aliases: ['montoGravadoI3', 'monto gravado i3'], transform: moneyText },
   { tag: 'MontoExento', aliases: ['montoExento', 'monto exento'], transform: moneyText },
   { tag: 'TotalITBIS', aliases: ['totalITBIS', 'Total ITBIS', 'itbisTotal'], transform: moneyText },
+  { tag: 'TotalITBIS1', aliases: ['totalITBIS1', 'total itbis 1'], transform: moneyText },
+  { tag: 'TotalITBIS2', aliases: ['totalITBIS2', 'total itbis 2'], transform: moneyText },
+  { tag: 'TotalITBIS3', aliases: ['totalITBIS3', 'total itbis 3'], transform: moneyText },
+  { tag: 'MontoImpuestoAdicional', aliases: ['montoImpuestoAdicional', 'monto impuesto adicional'], transform: moneyText },
   { tag: 'MontoTotal', aliases: ['montoTotal', 'Monto Total', 'Total', 'TotalFactura'], transform: moneyText },
+  { tag: 'MontoNoFacturable', aliases: ['montoNoFacturable', 'monto no facturable'], transform: moneyText },
+  { tag: 'MontoPeriodo', aliases: ['montoPeriodo', 'monto periodo'], transform: moneyText },
+];
+
+const RFCE_AFTER_TOTALES_FIELDS: FieldSpec[] = [
+  { tag: 'CodigoSeguridadeCF', aliases: ['codigoSeguridadeCF', 'codigo seguridad ecf', 'codigo seguridad eCF', 'codigo seguridad'] },
 ];
 
 const RFCE_RESUMEN_FIELDS: FieldSpec[] = [
@@ -162,10 +184,11 @@ const RFCE_RESUMEN_FIELDS: FieldSpec[] = [
 const RFCE_REQUIRED_FIELDS = [
   'TipoeCF',
   'eNCF',
+  'TipoIngresos',
+  'TipoPago',
   'RNCEmisor',
   'RazonSocialEmisor',
   'FechaEmision',
-  'FechaHoraFirma',
   'MontoTotal',
 ];
 
@@ -176,7 +199,9 @@ export class DgiiCertificationRfceXmlBuilderService {
 
     const idDocLines = buildFields(reader, RFCE_ID_DOC_FIELDS, '      ');
     const emisorLines = buildFields(reader, RFCE_EMISOR_FIELDS, '      ');
+    const compradorLines = buildFields(reader, RFCE_COMPRADOR_FIELDS, '      ');
     const totalesLines = buildFields(reader, RFCE_TOTALES_FIELDS, '      ');
+    const afterTotalesLines = buildFields(reader, RFCE_AFTER_TOTALES_FIELDS, '    ');
     const resumenLines = buildFields(reader, RFCE_RESUMEN_FIELDS, '    ');
     const fechaFirmaFromRow = readField(reader, 'FechaHoraFirma', [
       'fechaFirma',
@@ -194,7 +219,7 @@ export class DgiiCertificationRfceXmlBuilderService {
     }
 
     const presentTags = new Set(
-      [...idDocLines, ...emisorLines, ...totalesLines, ...resumenLines]
+      [...idDocLines, ...emisorLines, ...compradorLines, ...totalesLines, ...resumenLines]
         .map((line) => line.match(/<([A-Za-z0-9]+)>/)?.[1])
         .filter((value): value is string => !!value),
     );
@@ -218,16 +243,21 @@ export class DgiiCertificationRfceXmlBuilderService {
       warnings.push('RFCE resumen fields were not found; generated XML includes only mapped header and totals.');
     }
 
+    const rfcePayloadLines = [...resumenLines];
+    addTag(rfcePayloadLines, '    ', 'FechaHoraFirma', fechaFirma);
+
     const xmlLines = [
       '<?xml version="1.0" encoding="UTF-8"?>',
       '<RFCE>',
       '  <Encabezado>',
+      '    <Version>1.0</Version>',
       ...section('IdDoc', idDocLines, '    '),
       ...section('Emisor', emisorLines, '    '),
+      ...section('Comprador', compradorLines, '    '),
       ...section('Totales', totalesLines, '    '),
+      ...afterTotalesLines,
       '  </Encabezado>',
-      ...section('ResumenFacturaConsumo', resumenLines, '  '),
-      `  <FechaHoraFirma>${xmlEscape(fechaFirma)}</FechaHoraFirma>`,
+      ...section('ResumenFacturaConsumo', rfcePayloadLines, '  '),
       '</RFCE>',
     ];
 

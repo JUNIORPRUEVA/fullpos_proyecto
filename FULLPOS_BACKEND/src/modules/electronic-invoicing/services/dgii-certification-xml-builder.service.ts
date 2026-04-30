@@ -191,7 +191,8 @@ class RowReader {
 
   get(canonicalName: string, aliases: string[]) {
     const normalizedAliases = aliases.map(normalizeHeader);
-    const found = this.normalizedEntries.find((entry) => normalizedAliases.includes(entry.normalizedKey));
+    const found = this.normalizedEntries.find((entry) => normalizedAliases.includes(entry.normalizedKey)) ??
+      this.normalizedEntries.find((entry) => normalizedAliases.some((alias) => entry.normalizedKey === `${alias}1`));
     if (!found) return null;
     const value = normalizeValue(found.value);
     if (value != null) {
