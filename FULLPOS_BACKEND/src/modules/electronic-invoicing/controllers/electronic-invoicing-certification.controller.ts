@@ -43,6 +43,13 @@ export const certificationCasesQuerySchema = certificationLocatorBaseSchema.exte
   path: ['companyRnc'],
 });
 
+export const certificationResetSchema = certificationLocatorBaseSchema.extend({
+  force: z.coerce.boolean().optional().default(false),
+}).strict().refine((value) => !!value.companyRnc || !!value.companyCloudId, {
+  message: 'RNC o ID interno requerido',
+  path: ['companyRnc'],
+});
+
 function requestFile(req: Request) {
   return (req as Request & {
     file?: {
@@ -142,6 +149,12 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
       res.type('application/xml').send(xml);
     },
 
+    validateCaseXml: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      res.json(await service.validateCaseXml(company.id, params.id));
+    },
+
     generateBatchXml: async (req: Request, res: Response) => {
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
@@ -182,6 +195,13 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
       res.json(await service.queryBatchResults(company.id, params.id, req.requestId));
+    },
+
+    resetCase: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      const body = req.body as typeof certificationResetSchema['_output'];
+      res.json(await service.resetCase(company.id, params.id, body.force, req.requestId));
     },
 
     getBatchSummary: async (req: Request, res: Response) => {

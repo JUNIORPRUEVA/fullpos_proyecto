@@ -3,6 +3,14 @@ type RawRow = Record<string, unknown>;
 export type CertificationXmlBuildResult = {
   xml: string;
   warnings: string[];
+  errors: string[];
+  sourceFieldsUsed: Record<string, string>;
+};
+
+type FieldSpec = {
+  tag: string;
+  aliases: string[];
+  transform?: (value: string) => string | null;
 };
 
 function normalizeHeader(value: unknown) {
@@ -29,25 +37,52 @@ function xmlEscape(value: unknown) {
     .replace(/'/g, '&apos;');
 }
 
-function findRaw(row: RawRow, aliases: string[]) {
-  const normalizedAliases = aliases.map(normalizeHeader);
-  for (const [key, value] of Object.entries(row)) {
-    if (normalizedAliases.includes(normalizeHeader(key))) {
-      return normalizeValue(value);
-    }
+function caseRow(input: { rawRowJson: unknown }) {
+  return input.rawRowJson && typeof input.rawRowJson === 'object' && !Array.isArray(input.rawRowJson)
+    ? input.rawRowJson as RawRow
+    : {};
+}
+
+class RowReader {
+  private readonly normalizedEntries: Array<{ normalizedKey: string; originalKey: string; value: unknown }>;
+  readonly sourceFieldsUsed: Record<string, string> = {};
+
+  constructor(row: RawRow) {
+    this.normalizedEntries = Object.entries(row).map(([originalKey, value]) => ({
+      normalizedKey: normalizeHeader(originalKey),
+      originalKey,
+      value,
+    }));
   }
-  return null;
+
+  get(canonicalName: string, aliases: string[]) {
+    const normalizedAliases = aliases.map(normalizeHeader);
+    const found = this.normalizedEntries.find((entry) => normalizedAliases.includes(entry.normalizedKey));
+    if (!found) return null;
+    const value = normalizeValue(found.value);
+    if (value != null) this.sourceFieldsUsed[canonicalName] = found.originalKey;
+    return value;
+  }
 }
 
 function normalizeRnc(value: string | null) {
   return value?.replace(/\D/g, '') || null;
 }
 
-function parseMoney(value: string | number | null) {
+function parseMoney(value: string | null) {
   if (value == null || value === '') return null;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(String(value).replace(/RD\$|\$|,/gi, '').trim());
-  return Number.isFinite(parsed) ? parsed : null;
+  return Number.isFinite(parsed) ? Math.round(parsed * 100) / 100 : null;
+}
+
+function moneyText(value: string | null) {
+  const parsed = parseMoney(value);
+  return parsed == null ? null : parsed.toFixed(2);
+}
+
+function parsePositiveMoney(value: string | null) {
+  const parsed = parseMoney(value);
+  return parsed == null || parsed < 0 ? null : parsed;
 }
 
 function parseDate(value: string | null) {
@@ -61,145 +96,206 @@ function parseDate(value: string | null) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function formatMoney(value: number) {
-  return value.toFixed(2);
-}
-
 function pad2(value: number) {
   return String(value).padStart(2, '0');
 }
 
-function signatureTimestamp(value = new Date()) {
+function dominicanTimestamp(value = new Date()) {
   const dominicanTime = new Date(value.getTime() - 4 * 60 * 60 * 1000);
   return `${pad2(dominicanTime.getUTCDate())}-${pad2(dominicanTime.getUTCMonth() + 1)}-${dominicanTime.getUTCFullYear()} ${pad2(dominicanTime.getUTCHours())}:${pad2(dominicanTime.getUTCMinutes())}:${pad2(dominicanTime.getUTCSeconds())}`;
 }
 
-function first(row: RawRow, aliases: string[]) {
-  return findRaw(row, aliases);
+function addTag(lines: string[], indent: string, tag: string, value: string | null | undefined) {
+  if (value == null || value === '') return;
+  lines.push(`${indent}<${tag}>${xmlEscape(value)}</${tag}>`);
 }
 
-function caseRow(input: { rawRowJson: unknown }) {
-  return input.rawRowJson && typeof input.rawRowJson === 'object' && !Array.isArray(input.rawRowJson)
-    ? input.rawRowJson as RawRow
-    : {};
+function section(name: string, inner: string[], indent = '  ') {
+  if (inner.length === 0) return [];
+  return [`${indent}<${name}>`, ...inner, `${indent}</${name}>`];
 }
 
-function collectCommon(row: RawRow) {
-  const warnings: string[] = [];
-  const encf = first(row, ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante']);
-  const tipoEcf = first(row, ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
-  const rncEmisor = normalizeRnc(first(row, ['rncEmisor', 'RNC Emisor', 'RNCEmisor']));
-  const rncComprador = normalizeRnc(first(row, ['rncComprador', 'RNC Comprador', 'RNCComprador']));
-  const razonSocialEmisor = first(row, ['razonSocialEmisor', 'Razon Social Emisor', 'Nombre Emisor', 'Emisor']) ?? 'EMISOR CERTIFICACION DGII';
-  const razonSocialComprador = first(row, ['razonSocialComprador', 'Razon Social Comprador', 'Nombre Comprador', 'Comprador']);
-  const fechaRaw = first(row, ['fechaEmision', 'Fecha Emision', 'FechaEmisión', 'Fecha']);
-  const fechaEmision = parseDate(fechaRaw);
-  const montoRaw = first(row, ['montoTotal', 'Monto Total', 'Total', 'TotalFactura']);
-  const montoTotal = parseMoney(montoRaw);
-  const descripcion = first(row, ['descripcion', 'Descripcion', 'NombreItem', 'Item', 'Concepto']) ?? 'Caso certificacion DGII';
-
-  if (!encf) warnings.push('No se detecto eNCF');
-  if (!tipoEcf) warnings.push('No se detecto tipo e-CF');
-  if (!rncEmisor) warnings.push('No se detecto RNC emisor');
-  if (!fechaEmision) warnings.push('No se detecto fecha de emision valida');
-  if (montoTotal == null) warnings.push('No se detecto monto total valido');
-
-  return {
-    encf,
-    tipoEcf,
-    rncEmisor,
-    rncComprador,
-    razonSocialEmisor,
-    razonSocialComprador,
-    fechaEmision,
-    montoTotal,
-    descripcion,
-    warnings,
-  };
+function readField(reader: RowReader, canonicalName: string, aliases: string[], transform?: (value: string) => string | null) {
+  const raw = reader.get(canonicalName, aliases);
+  if (raw == null) return null;
+  return transform ? transform(raw) : raw;
 }
 
-function assertRequired(
-  values: Record<string, unknown>,
-  message = 'Faltan campos obligatorios para generar XML',
-) {
-  const missing = Object.entries(values)
-    .filter(([, value]) => value == null || value === '')
-    .map(([key]) => key);
-  if (missing.length > 0) {
-    throw {
-      status: 409,
-      message,
-      errorCode: 'DGII_CERTIFICATION_XML_REQUIRED_FIELDS_MISSING',
-      details: { missing },
-    };
+function buildFields(reader: RowReader, specs: FieldSpec[], indent: string) {
+  const lines: string[] = [];
+  for (const spec of specs) {
+    addTag(lines, indent, spec.tag, readField(reader, spec.tag, spec.aliases, spec.transform));
   }
+  return lines;
 }
+
+function buildMissingMessage(missing: string[]) {
+  return `Missing required DGII fields: ${missing.join(', ')}`;
+}
+
+const ID_DOC_FIELDS: FieldSpec[] = [
+  { tag: 'TipoeCF', aliases: ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo'] },
+  { tag: 'eNCF', aliases: ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante'] },
+  { tag: 'FechaVencimientoSecuencia', aliases: ['fechaVencimientoSecuencia', 'fecha vencimiento secuencia', 'vencimiento secuencia'], transform: parseDate },
+  { tag: 'IndicadorMontoGravado', aliases: ['indicadorMontoGravado', 'indicador monto gravado'] },
+  { tag: 'TipoIngresos', aliases: ['tipoIngresos', 'tipo ingresos'] },
+  { tag: 'TipoPago', aliases: ['tipoPago', 'tipo pago'] },
+  { tag: 'FechaLimitePago', aliases: ['fechaLimitePago', 'fecha limite pago'], transform: parseDate },
+  { tag: 'TerminoPago', aliases: ['terminoPago', 'termino pago'] },
+];
+
+const EMISOR_FIELDS: FieldSpec[] = [
+  { tag: 'RNCEmisor', aliases: ['rncEmisor', 'RNC Emisor', 'RNCEmisor'], transform: normalizeRnc },
+  { tag: 'RazonSocialEmisor', aliases: ['razonSocialEmisor', 'Razon Social Emisor', 'Nombre Emisor', 'Emisor'] },
+  { tag: 'NombreComercial', aliases: ['nombreComercial', 'nombre comercial'] },
+  { tag: 'Sucursal', aliases: ['sucursal'] },
+  { tag: 'DireccionEmisor', aliases: ['direccionEmisor', 'direccion emisor', 'direccion'] },
+  { tag: 'Municipio', aliases: ['municipio', 'municipioEmisor'] },
+  { tag: 'Provincia', aliases: ['provincia', 'provinciaEmisor'] },
+  { tag: 'CorreoEmisor', aliases: ['correoEmisor', 'emailEmisor', 'correo emisor'] },
+  { tag: 'WebSite', aliases: ['website', 'web site', 'sitio web'] },
+  { tag: 'ActividadEconomica', aliases: ['actividadEconomica', 'actividad economica'] },
+  { tag: 'FechaEmision', aliases: ['fechaEmision', 'Fecha Emision', 'FechaEmision', 'Fecha'], transform: parseDate },
+];
+
+const COMPRADOR_FIELDS: FieldSpec[] = [
+  { tag: 'RNCComprador', aliases: ['rncComprador', 'RNC Comprador', 'RNCComprador'], transform: normalizeRnc },
+  { tag: 'IdentificadorExtranjero', aliases: ['identificadorExtranjero', 'id extranjero', 'identificacion extranjero'] },
+  { tag: 'RazonSocialComprador', aliases: ['razonSocialComprador', 'Razon Social Comprador', 'Nombre Comprador', 'Comprador'] },
+  { tag: 'ContactoComprador', aliases: ['contactoComprador', 'contacto comprador'] },
+  { tag: 'CorreoComprador', aliases: ['correoComprador', 'emailComprador', 'correo comprador'] },
+  { tag: 'DireccionComprador', aliases: ['direccionComprador', 'direccion comprador'] },
+  { tag: 'MunicipioComprador', aliases: ['municipioComprador', 'municipio comprador'] },
+  { tag: 'ProvinciaComprador', aliases: ['provinciaComprador', 'provincia comprador'] },
+];
+
+const TOTALES_FIELDS: FieldSpec[] = [
+  { tag: 'MontoGravadoTotal', aliases: ['montoGravadoTotal', 'monto gravado total'], transform: moneyText },
+  { tag: 'MontoGravadoI1', aliases: ['montoGravadoI1', 'monto gravado i1'], transform: moneyText },
+  { tag: 'MontoGravadoI2', aliases: ['montoGravadoI2', 'monto gravado i2'], transform: moneyText },
+  { tag: 'MontoGravadoI3', aliases: ['montoGravadoI3', 'monto gravado i3'], transform: moneyText },
+  { tag: 'MontoExento', aliases: ['montoExento', 'monto exento'], transform: moneyText },
+  { tag: 'ITBIS1', aliases: ['itbis1', 'ITBIS1'] },
+  { tag: 'ITBIS2', aliases: ['itbis2', 'ITBIS2'] },
+  { tag: 'ITBIS3', aliases: ['itbis3', 'ITBIS3'] },
+  { tag: 'TotalITBIS', aliases: ['totalITBIS', 'Total ITBIS', 'itbisTotal'], transform: moneyText },
+  { tag: 'TotalITBIS1', aliases: ['totalITBIS1', 'total itbis 1'], transform: moneyText },
+  { tag: 'TotalITBIS2', aliases: ['totalITBIS2', 'total itbis 2'], transform: moneyText },
+  { tag: 'TotalITBIS3', aliases: ['totalITBIS3', 'total itbis 3'], transform: moneyText },
+  { tag: 'MontoTotal', aliases: ['montoTotal', 'Monto Total', 'Total', 'TotalFactura'], transform: moneyText },
+  { tag: 'MontoPeriodo', aliases: ['montoPeriodo', 'monto periodo'], transform: moneyText },
+  { tag: 'SaldoAnterior', aliases: ['saldoAnterior', 'saldo anterior'], transform: moneyText },
+  { tag: 'MontoAvancePago', aliases: ['montoAvancePago', 'monto avance pago'], transform: moneyText },
+  { tag: 'ValorPagar', aliases: ['valorPagar', 'valor pagar'], transform: moneyText },
+  { tag: 'TotalITBISRetenido', aliases: ['totalITBISRetenido', 'total itbis retenido'], transform: moneyText },
+  { tag: 'TotalISRRetencion', aliases: ['totalISRRetencion', 'total isr retencion'], transform: moneyText },
+];
+
+const ITEM_FIELDS: FieldSpec[] = [
+  { tag: 'NumeroLinea', aliases: ['numeroLinea', 'numero linea', 'linea'] },
+  { tag: 'IndicadorFacturacion', aliases: ['indicadorFacturacion', 'indicador facturacion'] },
+  { tag: 'NombreItem', aliases: ['nombreItem', 'Nombre Item', 'descripcion', 'Descripcion', 'Item', 'Concepto'] },
+  { tag: 'IndicadorBienoServicio', aliases: ['indicadorBienoServicio', 'indicador bien servicio', 'bienoservicio'] },
+  { tag: 'CantidadItem', aliases: ['cantidadItem', 'cantidad', 'qty'] },
+  { tag: 'UnidadMedida', aliases: ['unidadMedida', 'unidad medida', 'unidad'] },
+  { tag: 'PrecioUnitarioItem', aliases: ['precioUnitarioItem', 'precio unitario', 'precio'], transform: moneyText },
+  { tag: 'DescuentoMonto', aliases: ['descuentoMonto', 'descuento monto', 'descuento'], transform: moneyText },
+  { tag: 'MontoItem', aliases: ['montoItem', 'monto item', 'totalLinea', 'total linea'], transform: moneyText },
+];
+
+const REQUIRED_BY_TYPE: Record<string, string[]> = {
+  '31': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'RNCComprador', 'RazonSocialComprador', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '32': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '33': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '34': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'RNCComprador', 'RazonSocialComprador', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '41': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '43': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '44': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '45': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '46': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
+  '47': ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal', 'NombreItem', 'MontoItem'],
+};
 
 export class DgiiCertificationXmlBuilderService {
   buildEcfXmlFromCertificationCase(input: { rawRowJson: unknown }): CertificationXmlBuildResult {
     const row = caseRow(input);
-    const mapped = collectCommon(row);
-    assertRequired({
-      encf: mapped.encf,
-      tipoEcf: mapped.tipoEcf,
-      rncEmisor: mapped.rncEmisor,
-      fechaEmision: mapped.fechaEmision,
-      montoTotal: mapped.montoTotal,
-    });
+    const reader = new RowReader(row);
+    const warnings: string[] = [];
+    const errors: string[] = [];
 
-    const montoTotal = mapped.montoTotal!;
-    // TODO: Confirm full DGII Step 2 XSD mapping against official DGII workbook columns.
-    const comprador = mapped.rncComprador || mapped.razonSocialComprador
-      ? `
-    <Comprador>${mapped.rncComprador ? `
-      <RNCComprador>${xmlEscape(mapped.rncComprador)}</RNCComprador>` : ''}
-      <RazonSocialComprador>${xmlEscape(mapped.razonSocialComprador ?? 'CONSUMIDOR FINAL')}</RazonSocialComprador>
-    </Comprador>`
-      : '';
+    const idDocLines = buildFields(reader, ID_DOC_FIELDS, '      ');
+    const emisorLines = buildFields(reader, EMISOR_FIELDS, '      ');
+    const compradorLines = buildFields(reader, COMPRADOR_FIELDS, '      ');
+    const totalesLines = buildFields(reader, TOTALES_FIELDS, '      ');
+    const itemLines = buildFields(reader, ITEM_FIELDS, '      ');
 
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<eCF>
-  <Encabezado>
-    <IdDoc>
-      <eNCF>${xmlEscape(mapped.encf)}</eNCF>
-      <TipoeCF>${xmlEscape(mapped.tipoEcf)}</TipoeCF>
-      <FechaEmision>${xmlEscape(mapped.fechaEmision)}</FechaEmision>
-    </IdDoc>
-    <Emisor>
-      <RNCEmisor>${xmlEscape(mapped.rncEmisor)}</RNCEmisor>
-      <RazonSocialEmisor>${xmlEscape(mapped.razonSocialEmisor)}</RazonSocialEmisor>
-    </Emisor>${comprador}
-    <Totales>
-      <MontoTotal>${xmlEscape(formatMoney(montoTotal))}</MontoTotal>
-    </Totales>
-  </Encabezado>
-  <DetallesItems>
-    <Item>
-      <NumeroLinea>1</NumeroLinea>
-      <NombreItem>${xmlEscape(mapped.descripcion)}</NombreItem>
-      <CantidadItem>1.00</CantidadItem>
-      <PrecioUnitarioItem>${xmlEscape(formatMoney(montoTotal))}</PrecioUnitarioItem>
-      <MontoItem>${xmlEscape(formatMoney(montoTotal))}</MontoItem>
-    </Item>
-  </DetallesItems>
-  <FechaHoraFirma>${xmlEscape(signatureTimestamp())}</FechaHoraFirma>
-</eCF>`;
+    if (!itemLines.some((line) => line.includes('<NumeroLinea>'))) {
+      itemLines.unshift('      <NumeroLinea>1</NumeroLinea>');
+    }
 
-    return { xml, warnings: mapped.warnings };
+    const tipoEcf = readField(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
+    const requiredFields = REQUIRED_BY_TYPE[tipoEcf ?? ''] ?? REQUIRED_BY_TYPE['31'];
+    const presentTags = new Set(
+      [...idDocLines, ...emisorLines, ...compradorLines, ...totalesLines, ...itemLines]
+        .map((line) => line.match(/<([A-Za-z0-9]+)>/)?.[1])
+        .filter((value): value is string => !!value),
+    );
+    const missing = requiredFields.filter((field) => !presentTags.has(field));
+    if (missing.length > 0) {
+      errors.push(buildMissingMessage(missing));
+    }
+
+    const montoTotal = parsePositiveMoney(readField(reader, 'MontoTotal', ['montoTotal', 'Monto Total', 'Total', 'TotalFactura']));
+    const montoItem = parsePositiveMoney(readField(reader, 'MontoItem', ['montoItem', 'monto item', 'totalLinea', 'total linea']));
+    const totalItbis = parseMoney(readField(reader, 'TotalITBIS', ['totalITBIS', 'Total ITBIS', 'itbisTotal'])) ?? 0;
+    const descuento = parseMoney(readField(reader, 'DescuentoMonto', ['descuentoMonto', 'descuento monto', 'descuento'])) ?? 0;
+    if (montoTotal != null && montoItem != null) {
+      const calculated = Math.round((montoItem + totalItbis - descuento) * 100) / 100;
+      if (Math.abs(calculated - montoTotal) > 0.01) {
+        warnings.push(`MontoTotal (${montoTotal.toFixed(2)}) no coincide con MontoItem + ITBIS - descuentos (${calculated.toFixed(2)})`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return { xml: '', warnings, errors, sourceFieldsUsed: reader.sourceFieldsUsed };
+    }
+
+    const xmlLines = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<eCF>',
+      '  <Encabezado>',
+      ...section('IdDoc', idDocLines, '    '),
+      ...section('Emisor', emisorLines, '    '),
+      ...section('Comprador', compradorLines, '    '),
+      ...section('Totales', totalesLines, '    '),
+      '  </Encabezado>',
+      '  <DetallesItems>',
+      '    <Item>',
+      ...itemLines,
+      '    </Item>',
+      '  </DetallesItems>',
+      `  <FechaHoraFirma>${xmlEscape(dominicanTimestamp())}</FechaHoraFirma>`,
+      '</eCF>',
+    ];
+
+    return {
+      xml: xmlLines.join('\n'),
+      warnings,
+      errors,
+      sourceFieldsUsed: reader.sourceFieldsUsed,
+    };
   }
 
   buildRfceXmlFromCertificationCase(input: { rawRowJson: unknown }): CertificationXmlBuildResult {
     const row = caseRow(input);
-    const mapped = collectCommon(row);
-    // TODO: Complete RFCE structure after confirming official DGII RecepcionFC workbook/XSD mapping.
+    const reader = new RowReader(row);
     throw {
       status: 409,
-      message: 'RFCE XML generation is not fully mapped yet.',
+      message: 'RFCE XML generation is not implemented in this phase.',
       errorCode: 'DGII_CERTIFICATION_RFCE_XML_NOT_MAPPED',
       details: {
-        encf: mapped.encf,
-        tipoEcf: mapped.tipoEcf,
-        warnings: mapped.warnings,
+        encf: readField(reader, 'eNCF', ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante']),
+        tipoEcf: readField(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']),
       },
     };
   }

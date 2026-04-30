@@ -21,6 +21,7 @@ import { InboundApprovalService } from './services/inbound-approval.service';
 import { ElectronicInvoicingService } from './services/electronic-invoicing.service';
 import { DgiiCertificationService } from './services/dgii-certification.service';
 import { DgiiCertificationXmlBuilderService } from './services/dgii-certification-xml-builder.service';
+import { DgiiCertificationXmlValidationService } from './services/dgii-certification-xml-validation.service';
 import {
   auditTimelineParamsSchema,
   configQuerySchema,
@@ -38,6 +39,7 @@ import {
   certificationCaseParamsSchema,
   certificationCasesQuerySchema,
   certificationLocatorSchema,
+  certificationResetSchema,
   createElectronicInvoicingCertificationController,
   uploadDgiiCertificationExcel,
   validateDgiiCertificationExcelUpload,
@@ -68,6 +70,7 @@ const resultService = new DgiiResultService(directory, authService);
 const receptionService = new InboundReceptionService(prisma, authService, mapper, audit);
 const approvalService = new InboundApprovalService(prisma, authService, mapper, audit);
 const certificationXmlBuilder = new DgiiCertificationXmlBuilderService();
+const certificationXmlValidation = new DgiiCertificationXmlValidationService();
 const certificationService = new DgiiCertificationService(
   prisma,
   mapper,
@@ -76,6 +79,7 @@ const certificationService = new DgiiCertificationService(
   submissionService,
   resultService,
   directory,
+  certificationXmlValidation,
 );
 const electronicInvoicingService = new ElectronicInvoicingService(
   prisma,
@@ -529,6 +533,14 @@ posElectronicInvoicingRouter.get(
 );
 
 posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/validate-xml',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.validateCaseXml),
+);
+
+posElectronicInvoicingRouter.post(
   '/certification/batches/:id/generate-xml',
   overrideKeyGuard,
   validate(certificationBatchParamsSchema, 'params'),
@@ -582,6 +594,14 @@ posElectronicInvoicingRouter.post(
   validate(certificationBatchParamsSchema, 'params'),
   validate(certificationLocatorSchema),
   asyncHandler(certificationController.queryBatchResults),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/reset',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationResetSchema),
+  asyncHandler(certificationController.resetCase),
 );
 
 posElectronicInvoicingRouter.delete(

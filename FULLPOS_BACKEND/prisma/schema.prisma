@@ -865,6 +865,9 @@ model DgiiCertificationCase {
   dgiiStatusMessage  String?
   rejectionCode      String?
   rejectionMessage   String?
+  xmlValidationStatus String?  @default("NOT_VALIDATED")
+  xmlValidationJson   Json?
+  xmlValidatedAt      DateTime?
   errorMessage       String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt

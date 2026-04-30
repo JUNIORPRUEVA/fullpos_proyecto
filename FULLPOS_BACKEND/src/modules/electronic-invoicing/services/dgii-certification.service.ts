@@ -9,6 +9,7 @@ import { DgiiSignatureService } from './dgii-signature.service';
 import { DgiiSubmissionService } from './dgii-submission.service';
 import { DgiiResultService } from './dgii-result.service';
 import { DgiiDirectoryService } from './dgii-directory.service';
+import { DgiiCertificationXmlValidationService } from './dgii-certification-xml-validation.service';
 import { DgiiEnvironment } from '../types/dgii.types';
 import {
   assertCertificateIsCurrentlyValid,
@@ -40,6 +41,7 @@ type CertificationCaseFilters = {
 };
 
 const REQUIRED_SHEETS: CertificationSheetName[] = ['ECF', 'RFCE'];
+const FINAL_CERTIFICATION_STATUSES = new Set(['ACCEPTED', 'ACCEPTED_CONDITIONAL', 'REJECTED']);
 
 function normalizeHeader(value: unknown) {
   return String(value ?? '')
@@ -113,6 +115,7 @@ export class DgiiCertificationService {
     private readonly submissionService: DgiiSubmissionService,
     private readonly resultService: DgiiResultService,
     private readonly directory: DgiiDirectoryService,
+    private readonly xmlValidationService: DgiiCertificationXmlValidationService,
   ) {}
 
   async resolveCompany(companyRnc?: string | null, companyCloudId?: string | null, requestId?: string) {
@@ -363,13 +366,20 @@ export class DgiiCertificationService {
   }
 
   private assertMutableStatus(item: { status: string }) {
-    if (['ACCEPTED', 'ACCEPTED_CONDITIONAL', 'REJECTED'].includes(item.status)) {
+    if (FINAL_CERTIFICATION_STATUSES.has(item.status)) {
       throw {
         status: 409,
         message: 'Este caso ya tiene resultado final DGII. Regenerar/reiniciar debe hacerse explicitamente.',
         errorCode: 'DGII_CERTIFICATION_FINAL_CASE_LOCKED',
       };
     }
+  }
+
+  private validationStatus(validation: ReturnType<DgiiCertificationXmlValidationService['validate']>) {
+    if (!validation.wellFormed) return 'XML_INVALID';
+    if (validation.xsdValidated && validation.valid) return 'XSD_VALID';
+    if (validation.xsdValidated && !validation.valid) return 'XSD_INVALID';
+    return 'XSD_NOT_AVAILABLE';
   }
 
   private certificationStatusFromSubmit(result: Awaited<ReturnType<DgiiSubmissionService['submit']>>) {
@@ -429,17 +439,38 @@ export class DgiiCertificationService {
     if (!item) {
       throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
     }
+    this.assertMutableStatus(item);
 
     try {
       const result = item.sheetName === 'RFCE'
         ? this.xmlBuilder.buildRfceXmlFromCertificationCase(item)
         : this.xmlBuilder.buildEcfXmlFromCertificationCase(item);
+      if (result.errors.length > 0) {
+        throw {
+          status: 409,
+          message: result.errors.join('; '),
+          errorCode: 'DGII_CERTIFICATION_XML_REQUIRED_FIELDS_MISSING',
+          details: { errors: result.errors, warnings: result.warnings, sourceFieldsUsed: result.sourceFieldsUsed },
+        };
+      }
+      const validation = this.xmlValidationService.validate(result.xml);
+      if (!validation.wellFormed) {
+        throw {
+          status: 409,
+          message: 'XML generado no esta bien formado',
+          errorCode: 'DGII_CERTIFICATION_XML_NOT_WELL_FORMED',
+          details: validation,
+        };
+      }
       const warningMessage = result.warnings.length > 0 ? `Warnings: ${result.warnings.join('; ')}` : null;
       const updated = await this.prisma.dgiiCertificationCase.update({
         where: { id: item.id },
         data: {
           xmlGenerated: result.xml,
           status: 'XML_GENERATED',
+          xmlValidationStatus: this.validationStatus(validation),
+          xmlValidationJson: validation as unknown as Prisma.InputJsonObject,
+          xmlValidatedAt: new Date(),
           errorMessage: warningMessage,
         },
       });
@@ -454,9 +485,11 @@ export class DgiiCertificationService {
         tipoEcf: item.tipoEcf,
         xmlLength: result.xml.length,
         warnings: result.warnings,
+        validation,
+        sourceFieldsUsed: result.sourceFieldsUsed,
       });
 
-      return { case: serializeCase(updated), xmlGenerated: result.xml, warnings: result.warnings };
+      return { case: serializeCase(updated), xmlGenerated: result.xml, warnings: result.warnings, validation, sourceFieldsUsed: result.sourceFieldsUsed };
     } catch (error) {
       const message = (error as any)?.message ?? 'No se pudo generar XML para el caso de certificacion';
       const errorCode = (error as any)?.errorCode ?? 'DGII_CERTIFICATION_XML_GENERATION_FAILED';
@@ -486,6 +519,30 @@ export class DgiiCertificationService {
         details: (error as any)?.details ?? null,
       };
     }
+  }
+
+  async validateCaseXml(companyId: number, id: number) {
+    const item = await this.prisma.dgiiCertificationCase.findFirst({
+      where: { id, companyId },
+      select: { id: true, xmlGenerated: true },
+    });
+    if (!item) {
+      throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
+    }
+    if (!item.xmlGenerated?.trim()) {
+      throw { status: 409, message: 'Este caso aun no tiene XML generado', errorCode: 'DGII_CERTIFICATION_XML_NOT_FOUND' };
+    }
+    const validation = this.xmlValidationService.validate(item.xmlGenerated);
+    await this.prisma.dgiiCertificationCase.update({
+      where: { id: item.id },
+      data: {
+        xmlValidationStatus: this.validationStatus(validation),
+        xmlValidationJson: validation as unknown as Prisma.InputJsonObject,
+        xmlValidatedAt: new Date(),
+        errorMessage: validation.errors.length > 0 ? validation.errors.join('; ') : undefined,
+      },
+    });
+    return validation;
   }
 
   async getGeneratedXml(companyId: number, id: number) {
@@ -560,18 +617,61 @@ export class DgiiCertificationService {
     if (!item.xmlGenerated?.trim()) {
       throw { status: 409, message: 'Este caso no tiene XML generado para firmar', errorCode: 'DGII_CERTIFICATION_XML_NOT_FOUND' };
     }
+    const xmlValidation = this.xmlValidationService.validate(item.xmlGenerated);
+    if (!xmlValidation.canSign) {
+      await this.prisma.dgiiCertificationCase.update({
+        where: { id: item.id },
+        data: {
+          xmlValidationStatus: this.validationStatus(xmlValidation),
+          xmlValidationJson: xmlValidation as unknown as Prisma.InputJsonObject,
+          xmlValidatedAt: new Date(),
+          errorMessage: 'Este XML todavia no esta listo para firmarse. Corrige los campos requeridos o carga los XSD oficiales DGII.',
+        },
+      });
+      throw {
+        status: 409,
+        message: 'Este XML todavia no esta listo para firmarse. Corrige los campos requeridos o carga los XSD oficiales DGII.',
+        errorCode: 'DGII_CERTIFICATION_XML_NOT_SIGNABLE',
+        details: xmlValidation,
+      };
+    }
 
     try {
       const { certificate, loaded } = await this.loadActiveCertificate(companyId);
       const signedXml = this.signatureService.signXml(item.xmlGenerated, loaded.privateKeyPem, loaded.certPem);
       const diagnostics = this.signatureService.inspectSignedXml(signedXml);
+      const signedXmlValidation = this.xmlValidationService.validate(signedXml);
+      const localVerification = this.signatureService.verifySignedXml(signedXml);
+      const requiredSignatureNodesPresent =
+        diagnostics.signedXmlHasSignature &&
+        diagnostics.signedXmlHasSignedInfo &&
+        diagnostics.signedXmlHasX509Certificate &&
+        diagnostics.signatureReferenceUri === '' &&
+        diagnostics.canonicalizationAlgorithm === 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315' &&
+        diagnostics.signatureAlgorithm === 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256' &&
+        diagnostics.digestAlgorithm === 'http://www.w3.org/2001/04/xmlenc#sha256';
+      if (!signedXmlValidation.wellFormed || !requiredSignatureNodesPresent || !localVerification.valid) {
+        throw {
+          status: 409,
+          message: 'La firma XML local no cumple la estructura DGII esperada',
+          errorCode: 'DGII_CERTIFICATION_SIGNATURE_INVALID',
+          details: {
+            diagnostics,
+            signedXmlValidation,
+            localVerification,
+          },
+        };
+      }
       const updated = await this.prisma.dgiiCertificationCase.update({
         where: { id: item.id },
         data: {
           xmlSigned: signedXml,
           status: 'SIGNED',
           signedAt: new Date(),
-          errorMessage: diagnostics.signedXmlHasSignature ? null : 'Advertencia: no se detecto nodo Signature en el XML firmado',
+          xmlValidationStatus: this.validationStatus(xmlValidation),
+          xmlValidationJson: xmlValidation as unknown as Prisma.InputJsonObject,
+          xmlValidatedAt: new Date(),
+          errorMessage: null,
         },
       });
 
@@ -586,7 +686,7 @@ export class DgiiCertificationService {
         diagnostics,
       });
 
-      return { case: serializeCase(updated), signedXml, warnings: diagnostics.signedXmlHasSignature ? [] : ['No se detecto nodo Signature'] };
+      return { case: serializeCase(updated), signedXml, warnings: [], diagnostics, localVerification };
     } catch (error) {
       const message = (error as any)?.message ?? 'No se pudo firmar XML';
       await this.prisma.dgiiCertificationCase.update({
@@ -753,7 +853,11 @@ export class DgiiCertificationService {
 
     const environment = await this.getEnvironment(companyId);
     const result = await this.resultService.query(companyId, environment, item.trackId, requestId);
-    const nextStatus = this.certificationStatusFromResult(result);
+    const normalizedNextStatus = this.certificationStatusFromResult(result);
+    const keepPriorStatus =
+      FINAL_CERTIFICATION_STATUSES.has(item.status) ||
+      (normalizedNextStatus === 'ERROR' && ['SENT', 'EN_PROCESO'].includes(item.status));
+    const nextStatus = keepPriorStatus ? item.status : normalizedNextStatus;
     const rejectionCode = nextStatus === 'REJECTED' ? this.extractRejectionCode(result.raw, result.code) : item.rejectionCode;
     const rejectionMessage = nextStatus === 'REJECTED' ? this.extractRejectionMessage(result.raw, result.message) : item.rejectionMessage;
 
@@ -768,7 +872,7 @@ export class DgiiCertificationService {
         dgiiStatusMessage: result.message ?? null,
         rejectionCode,
         rejectionMessage,
-        errorMessage: nextStatus === 'ERROR' ? result.message ?? 'No se pudo consultar resultado DGII' : null,
+        errorMessage: normalizedNextStatus === 'ERROR' ? result.message ?? 'No se pudo consultar resultado DGII' : null,
       },
     });
 
@@ -854,6 +958,67 @@ export class DgiiCertificationService {
       isReadyForNextStep: blockingIssues.length > 0 && !blockingIssues.includes('ERRORS_PRESENT'),
       blockingIssues,
     };
+  }
+
+  async resetCase(companyId: number, id: number, force = false, requestId?: string) {
+    const item = await this.prisma.dgiiCertificationCase.findFirst({
+      where: { id, companyId },
+    });
+    if (!item) {
+      throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
+    }
+    if (item.status === 'ACCEPTED' && !force) {
+      throw {
+        status: 409,
+        message: 'No se puede reiniciar un caso aceptado sin force=true',
+        errorCode: 'DGII_CERTIFICATION_ACCEPTED_RESET_REQUIRES_FORCE',
+      };
+    }
+    if (['ACCEPTED_CONDITIONAL', 'REJECTED'].includes(item.status) && !force) {
+      throw {
+        status: 409,
+        message: 'No se puede reiniciar un caso final sin force=true',
+        errorCode: 'DGII_CERTIFICATION_FINAL_RESET_REQUIRES_FORCE',
+      };
+    }
+    const resettable = ['IMPORTED', 'XML_GENERATED', 'SIGNED', 'SENT', 'EN_PROCESO', 'ERROR', 'ACCEPTED', 'ACCEPTED_CONDITIONAL', 'REJECTED'];
+    if (!resettable.includes(item.status)) {
+      throw {
+        status: 409,
+        message: `Estado no reiniciable: ${item.status}`,
+        errorCode: 'DGII_CERTIFICATION_STATUS_NOT_RESETTABLE',
+      };
+    }
+    const updated = await this.prisma.dgiiCertificationCase.update({
+      where: { id: item.id },
+      data: {
+        status: 'IMPORTED',
+        xmlGenerated: null,
+        xmlSigned: null,
+        trackId: null,
+        dgiiRawResponseJson: Prisma.JsonNull,
+        signedAt: null,
+        sentAt: null,
+        resultCheckedAt: null,
+        dgiiStatusCode: null,
+        dgiiStatusMessage: null,
+        rejectionCode: null,
+        rejectionMessage: null,
+        xmlValidationStatus: 'NOT_VALIDATED',
+        xmlValidationJson: Prisma.JsonNull,
+        xmlValidatedAt: null,
+        errorMessage: null,
+      },
+    });
+    console.warn('[electronic-invoicing.certification] case.reset', {
+      requestId: requestId ?? null,
+      companyId,
+      caseId: item.id,
+      encf: item.encf,
+      fromStatus: item.status,
+      force,
+    });
+    return { case: serializeCase(updated), fromStatus: item.status, force };
   }
 
   async deleteBatch(companyId: number, id: number) {

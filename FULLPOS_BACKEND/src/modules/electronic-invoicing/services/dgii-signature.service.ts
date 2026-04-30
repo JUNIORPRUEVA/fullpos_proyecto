@@ -6,6 +6,8 @@ import { extractEmbeddedCertificate } from '../utils/xml.utils';
 export type SignedXmlDiagnostics = {
   signedXmlRoot: string | null;
   signedXmlHasSignature: boolean;
+  signedXmlHasSignedInfo: boolean;
+  signedXmlHasX509Certificate: boolean;
   signedXmlHasIdAttributeOnRoot: boolean;
   signatureReferenceUri: string | null;
   canonicalizationAlgorithm: string | null;
@@ -112,6 +114,8 @@ export class DgiiSignatureService {
     const document = new DOMParser().parseFromString(xml.replace(/^\uFEFF/, ''), 'text/xml');
     const root = document.documentElement;
     const signature = findFirstElementByLocalName(document, 'Signature');
+    const signedInfo = signature ? findFirstElementByLocalName(signature, 'SignedInfo') : null;
+    const x509Certificate = signature ? findFirstElementByLocalName(signature, 'X509Certificate') : null;
     const reference = signature ? findFirstElementByLocalName(signature, 'Reference') : null;
     const canonicalizationMethod = signature ? findFirstElementByLocalName(signature, 'CanonicalizationMethod') : null;
     const signatureMethod = signature ? findFirstElementByLocalName(signature, 'SignatureMethod') : null;
@@ -121,6 +125,8 @@ export class DgiiSignatureService {
     return {
       signedXmlRoot: root?.localName || root?.nodeName || null,
       signedXmlHasSignature: !!signature,
+      signedXmlHasSignedInfo: !!signedInfo,
+      signedXmlHasX509Certificate: !!x509Certificate,
       signedXmlHasIdAttributeOnRoot: !!root?.hasAttribute('Id') || !!root?.hasAttribute('ID') || !!root?.hasAttribute('id'),
       signatureReferenceUri: reference?.getAttribute('URI') ?? null,
       canonicalizationAlgorithm: canonicalizationMethod?.getAttribute('Algorithm') ?? null,
@@ -254,7 +260,6 @@ export class DgiiSignatureService {
       xpath: rootXpath,
       transforms: [
         ENVELOPED_SIGNATURE_TRANSFORM,
-        canonicalizationAlgorithm,
       ],
       digestAlgorithm,
       isEmptyUri: options.emptyReferenceUri,
