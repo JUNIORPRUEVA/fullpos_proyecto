@@ -401,7 +401,6 @@ const ITEM_FIELDS: FieldSpec[] = [
 const GENERATION_MINIMUM_FIELDS = ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal'];
 const BUYER_REQUIRED_BY_TYPE = new Set(['31', '34']);
 const TIPO_INGRESOS_TYPES = new Set(['31', '32', '33', '34', '44', '45', '46']);
-const TIPO_PAGO_REQUIRED_TYPES = new Set(['31', '32', '33', '34', '44', '45', '46']);
 const FECHA_VENCIMIENTO_REQUIRED_TYPES = new Set(['41', '43', '46', '47']);
 const RETENCION_ITEM_REQUIRED_TYPES = new Set(['41', '47']);
 const ECF_XSD_ROOT_ELEMENT = 'ECF';
@@ -525,7 +524,7 @@ export class DgiiCertificationXmlBuilderService {
       indicadorFacturacion = taxableFallback ? '1' : '4';
       nombreItem = 'Servicio de prueba DGII';
       indicadorBienServicio = '2';
-      cantidadItem = '1.00';
+      cantidadItem = '1';
       precioUnitarioItem = montoTotalText;
       montoItemText = montoTotalText;
       sourceFallback(reader, 'IndicadorFacturacion', indicadorFacturacion, 'certification.itemFallback', fallbackFieldsUsed);
@@ -534,25 +533,17 @@ export class DgiiCertificationXmlBuilderService {
       sourceFallback(reader, 'CantidadItem', cantidadItem, 'certification.itemFallback', fallbackFieldsUsed);
       sourceFallback(reader, 'PrecioUnitarioItem', precioUnitarioItem, 'certification.itemFallback', fallbackFieldsUsed);
       sourceFallback(reader, 'MontoItem', montoItemText, 'certification.itemFallback', fallbackFieldsUsed);
-      warnings.push('Certification item fallback used.');
+      warnings.push('Item fallback used for certification because workbook row does not include item detail.');
     }
 
     const requiredFields = [
       ...GENERATION_MINIMUM_FIELDS,
-      ...(TIPO_PAGO_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['TipoPago'] : []),
-      ...(FECHA_VENCIMIENTO_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['FechaVencimientoSecuencia'] : []),
-      'IndicadorFacturacion',
-      ...(RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['Retencion'] : []),
-      ...(RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['IndicadorAgenteRetencionoPercepcion'] : []),
-      ...(tipoEcf === '47' ? ['MontoISRRetenido'] : []),
       'NombreItem',
       'IndicadorBienoServicio',
       'CantidadItem',
       'PrecioUnitarioItem',
       'MontoItem',
       ...(BUYER_REQUIRED_BY_TYPE.has(tipoEcf ?? '') ? ['RNCComprador', 'RazonSocialComprador'] : []),
-      ...(tipoEcf === '34' ? ['IndicadorNotaCredito'] : []),
-      ...((tipoEcf === '33' || tipoEcf === '34') ? ['NCFModificado', 'FechaNCFModificado', 'CodigoModificacion'] : []),
     ];
 
     pushValue(totalesLines, '      ', 'MontoGravadoTotal', montoGravadoTotalText, totalesValues);
