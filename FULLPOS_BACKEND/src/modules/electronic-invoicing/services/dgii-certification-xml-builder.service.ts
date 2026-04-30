@@ -232,6 +232,14 @@ function parsePositiveMoney(value: string | null) {
 function parseDate(value: string | null) {
   if (!value) return null;
   const text = value.trim();
+  if (/^\d{4,5}(\.0+)?$/.test(text)) {
+    const serial = Number(text);
+    if (serial > 0 && serial < 60000) {
+      const excelEpoch = Date.UTC(1899, 11, 30);
+      const parsed = new Date(excelEpoch + serial * 24 * 60 * 60 * 1000);
+      return `${pad2(parsed.getUTCDate())}-${pad2(parsed.getUTCMonth() + 1)}-${parsed.getUTCFullYear()}`;
+    }
+  }
   const dominicanMatch = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (dominicanMatch) {
     return `${pad2(Number(dominicanMatch[1]))}-${pad2(Number(dominicanMatch[2]))}-${dominicanMatch[3]}`;
@@ -331,10 +339,10 @@ function todayDominicanDate(value = new Date()) {
 const ID_DOC_FIELDS: FieldSpec[] = [
   { tag: 'TipoeCF', aliases: ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo'] },
   { tag: 'eNCF', aliases: ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante'] },
-  { tag: 'FechaVencimientoSecuencia', aliases: ['fechaVencimientoSecuencia', 'fecha vencimiento secuencia', 'vencimiento secuencia'], transform: parseDate },
+  { tag: 'FechaVencimientoSecuencia', aliases: ['fechaVencimientoSecuencia', 'fecha vencimiento secuencia', 'Fecha Vencimiento Secuencia', 'fechaVencimiento', 'Fecha Vencimiento', 'vencimiento secuencia', 'vencimiento ncf', 'fecha vencimiento ncf', 'fecha vencimiento e-ncf'], transform: parseDate },
   { tag: 'IndicadorMontoGravado', aliases: ['indicadorMontoGravado', 'indicador monto gravado'] },
   { tag: 'TipoIngresos', aliases: ['tipoIngresos', 'tipo ingresos'] },
-  { tag: 'TipoPago', aliases: ['tipoPago', 'tipo pago'] },
+  { tag: 'TipoPago', aliases: ['tipoPago', 'tipo pago', 'condicion pago', 'condicionPago', 'forma pago', 'Forma Pago'] },
   { tag: 'FechaLimitePago', aliases: ['fechaLimitePago', 'fecha limite pago'], transform: parseDate },
   { tag: 'TerminoPago', aliases: ['terminoPago', 'termino pago'] },
 ];
@@ -362,6 +370,11 @@ const COMPRADOR_FIELDS: FieldSpec[] = [
   { tag: 'DireccionComprador', aliases: ['direccionComprador', 'direccion comprador'] },
   { tag: 'MunicipioComprador', aliases: ['municipioComprador', 'municipio comprador'], transform: (value) => normalizeProvinciaMunicipioCode(value, 'MunicipioComprador') },
   { tag: 'ProvinciaComprador', aliases: ['provinciaComprador', 'provincia comprador'], transform: (value) => normalizeProvinciaMunicipioCode(value, 'ProvinciaComprador') },
+];
+
+const COMPRADOR_47_FIELDS: FieldSpec[] = [
+  { tag: 'IdentificadorExtranjero', aliases: ['identificadorExtranjero', 'id extranjero', 'identificacion extranjero'] },
+  { tag: 'RazonSocialComprador', aliases: ['razonSocialComprador', 'Razon Social Comprador', 'Nombre Comprador', 'Comprador'] },
 ];
 
 const TOTALES_FIELDS: FieldSpec[] = [
@@ -401,7 +414,8 @@ const ITEM_FIELDS: FieldSpec[] = [
 const GENERATION_MINIMUM_FIELDS = ['TipoeCF', 'eNCF', 'RNCEmisor', 'RazonSocialEmisor', 'FechaEmision', 'MontoTotal'];
 const BUYER_REQUIRED_BY_TYPE = new Set(['31', '34']);
 const TIPO_INGRESOS_TYPES = new Set(['31', '32', '33', '34', '44', '45', '46']);
-const FECHA_VENCIMIENTO_REQUIRED_TYPES = new Set(['41', '43', '46', '47']);
+const TIPO_PAGO_XSD_REQUIRED_TYPES = new Set(['31', '33', '44', '45']);
+const FECHA_VENCIMIENTO_REQUIRED_TYPES = new Set(['31', '33', '41', '43', '44', '45', '46', '47']);
 const RETENCION_ITEM_REQUIRED_TYPES = new Set(['41', '47']);
 const ECF_XSD_ROOT_ELEMENT = 'ECF';
 const ECF_VERSION = '1.0';
@@ -430,7 +444,13 @@ export class DgiiCertificationXmlBuilderService {
     const idDocValues: Record<string, string> = {};
     const emisor = buildFields(reader, EMISOR_FIELDS, '      ', emisorFallbacks);
     Object.assign(fallbackFieldsUsed, emisor.fallbackFieldsUsed);
-    const comprador = buildFields(reader, COMPRADOR_FIELDS, '      ');
+    const tipoEcf = readAny(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
+    const compradorSpecs = tipoEcf === '47'
+      ? COMPRADOR_47_FIELDS
+      : tipoEcf === '43'
+        ? []
+        : COMPRADOR_FIELDS;
+    const comprador = buildFields(reader, compradorSpecs, '      ');
     const totalesLines: string[] = [];
     const totalesValues: Record<string, string> = {};
     const itemLines: string[] = [];
@@ -440,9 +460,28 @@ export class DgiiCertificationXmlBuilderService {
       warnings.push('FechaEmision fallback used for certification because workbook row does not include issue date.');
     }
 
-    const tipoEcf = readAny(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
     const encf = readAny(reader, 'eNCF', ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante']);
-    const fechaVencimiento = readDate(reader, 'FechaVencimientoSecuencia', ['fechaVencimientoSecuencia', 'fecha vencimiento secuencia', 'vencimiento secuencia']);
+    let fechaVencimiento = readDate(reader, 'FechaVencimientoSecuencia', [
+      'fechaVencimientoSecuencia',
+      'fecha vencimiento secuencia',
+      'Fecha Vencimiento Secuencia',
+      'fechaVencimiento',
+      'Fecha Vencimiento',
+      'vencimiento secuencia',
+      'vencimiento ncf',
+      'fecha vencimiento ncf',
+      'fecha vencimiento e-ncf',
+    ]);
+    if (!fechaVencimiento && FECHA_VENCIMIENTO_REQUIRED_TYPES.has(tipoEcf ?? '')) {
+      fechaVencimiento = sourceFallback(
+        reader,
+        'FechaVencimientoSecuencia',
+        emisor.values.FechaEmision ?? todayDominicanDate(),
+        'certification.fechaVencimientoFromFechaEmision',
+        fallbackFieldsUsed,
+      );
+      warnings.push('FechaVencimientoSecuencia fallback used for certification XSD compatibility because workbook row does not include sequence expiration.');
+    }
     const indicadorNotaCredito = integerText(readAny(reader, 'IndicadorNotaCredito', ['indicadorNotaCredito', 'indicador nota credito']));
     const indicadorMontoGravado = readAny(reader, 'IndicadorMontoGravado', ['indicadorMontoGravado', 'indicador monto gravado']);
     const tipoIngresosRaw = readAny(reader, 'TipoIngresos', ['tipoIngresos', 'tipo ingresos']);
@@ -451,7 +490,11 @@ export class DgiiCertificationXmlBuilderService {
       tipoIngresos = sourceFallback(reader, 'TipoIngresos', '01', 'certification.defaultTipoIngresos', fallbackFieldsUsed);
       warnings.push('TipoIngresos default 01 used for certification because workbook row does not include a valid value.');
     }
-    const tipoPago = integerText(readAny(reader, 'TipoPago', ['tipoPago', 'tipo pago']));
+    let tipoPago = integerText(readAny(reader, 'TipoPago', ['tipoPago', 'tipo pago', 'condicion pago', 'condicionPago', 'forma pago', 'Forma Pago']));
+    if (!tipoPago && TIPO_PAGO_XSD_REQUIRED_TYPES.has(tipoEcf ?? '')) {
+      tipoPago = sourceFallback(reader, 'TipoPago', '1', 'certification.defaultTipoPago', fallbackFieldsUsed);
+      warnings.push('TipoPago default 1 used for certification XSD compatibility because workbook row does not include a valid value.');
+    }
     const fechaLimitePago = readDate(reader, 'FechaLimitePago', ['fechaLimitePago', 'fecha limite pago']);
     const terminoPagoRaw = readAny(reader, 'TerminoPago', ['terminoPago', 'termino pago']);
     const terminoPago = terminoPagoRaw && terminoPagoRaw.length <= 15 ? terminoPagoRaw : null;
@@ -581,10 +624,13 @@ export class DgiiCertificationXmlBuilderService {
       const indicadorAgente = integerText(readAny(reader, 'IndicadorAgenteRetencionoPercepcion', [
         'indicadorAgenteRetencionoPercepcion',
         'indicador agente retencion',
+        'Indicador Agente Retencion o Percepcion',
+        'Indicador Agente Retencion Percepcion',
+        'Agente Retencion',
         'indicador retencion',
       ]));
-      const montoItbisRetenido = readMoney(reader, 'MontoITBISRetenido', ['montoITBISRetenido', 'monto itbis retenido']);
-      const montoIsrRetenido = readMoney(reader, 'MontoISRRetenido', ['montoISRRetenido', 'monto isr retenido']);
+      const montoItbisRetenido = readMoney(reader, 'MontoITBISRetenido', ['montoITBISRetenido', 'monto itbis retenido', 'ITBIS Retenido', 'Monto ITBIS Retenido']);
+      const montoIsrRetenido = readMoney(reader, 'MontoISRRetenido', ['montoISRRetenido', 'monto isr retenido', 'ISR Retenido', 'Monto ISR Retenido', 'ISRRetenido']);
       if (indicadorAgente) {
         itemLines.push('      <Retencion>');
         pushValue(itemLines, '        ', 'IndicadorAgenteRetencionoPercepcion', indicadorAgente, itemValues);
@@ -654,9 +700,7 @@ export class DgiiCertificationXmlBuilderService {
       `    <Version>${ECF_VERSION}</Version>`,
       ...section('IdDoc', idDocLines, '    '),
       ...section('Emisor', emisor.lines, '    '),
-      '    <Comprador>',
-      ...comprador.lines,
-      '    </Comprador>',
+      ...section('Comprador', comprador.lines, '    '),
       ...section('Totales', totalesLines, '    '),
       '  </Encabezado>',
       '  <DetallesItems>',
