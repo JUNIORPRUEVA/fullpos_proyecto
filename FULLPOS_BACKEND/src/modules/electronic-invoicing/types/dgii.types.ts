@@ -3,6 +3,8 @@ export type DgiiEnvironment = 'precertification' | 'production';
 export interface DgiiEnvironmentConfig {
   environment: DgiiEnvironment;
   submitUrl: string;
+  recepcionEcfUrl?: string;
+  recepcionFcUrl?: string;
   resultUrlTemplate: string;
   authSeedUrl?: string;
   authValidateUrl?: string;

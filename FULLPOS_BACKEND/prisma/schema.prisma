@@ -858,6 +858,13 @@ model DgiiCertificationCase {
   xmlSigned          String?
   trackId            String?
   dgiiRawResponseJson Json?
+  signedAt           DateTime?
+  sentAt             DateTime?
+  resultCheckedAt    DateTime?
+  dgiiStatusCode     String?
+  dgiiStatusMessage  String?
+  rejectionCode      String?
+  rejectionMessage   String?
   errorMessage       String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt

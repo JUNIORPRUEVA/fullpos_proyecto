@@ -171,9 +171,10 @@ export class DgiiSubmissionService {
     signedXml: string,
     requestId?: string,
     manualToken?: string,
-    context?: { invoiceId?: number; ecf?: string },
+    context?: { invoiceId?: number; ecf?: string; endpointOverride?: string },
   ): Promise<DgiiSubmissionResponse> {
     const config = this.directory.getEnvironmentConfig(environment);
+    const submitUrl = context?.endpointOverride?.trim() || config.submitUrl;
     let attempt = 0;
     let lastError: unknown = null;
     let forceRefresh = false;
@@ -197,7 +198,7 @@ export class DgiiSubmissionService {
           invoiceId: context?.invoiceId ?? null,
           ecf: context?.ecf ?? null,
           environment,
-          endpoint: config.submitUrl,
+          endpoint: submitUrl,
           hasToken: !!bearerToken,
           tokenSource: tokenResult.source,
           xmlSize: signedXml.length,
@@ -206,7 +207,7 @@ export class DgiiSubmissionService {
         });
 
         lastPhase = 'submit';
-        const response = await fetch(config.submitUrl, {
+        const response = await fetch(submitUrl, {
           method: 'POST',
           headers: {
             'content-type': 'application/xml; charset=utf-8',
@@ -232,7 +233,7 @@ export class DgiiSubmissionService {
           invoiceId: context?.invoiceId ?? null,
           ecf: context?.ecf ?? null,
           environment,
-          endpoint: config.submitUrl,
+          endpoint: submitUrl,
           dgiiHttpStatus: response.status,
           contentType: parsed.contentType,
           headers: responseHeaders,
@@ -258,7 +259,7 @@ export class DgiiSubmissionService {
           normalizedStatus,
           code: common.code,
           message: common.message,
-          dgiiEndpoint: config.submitUrl,
+          dgiiEndpoint: submitUrl,
           responseContentType: parsed.contentType,
           responseHeaders,
           rawText: parsed.rawText,
@@ -275,7 +276,7 @@ export class DgiiSubmissionService {
           invoiceId: context?.invoiceId ?? null,
           ecf: context?.ecf ?? null,
           environment,
-          endpoint: config.submitUrl,
+          endpoint: submitUrl,
           phase: lastPhase,
           errorCode: normalized.code,
           errorMessage: normalized.message,
@@ -303,7 +304,7 @@ export class DgiiSubmissionService {
       normalizedStatus: 'error',
       code: normalized.code,
       message: normalized.message,
-      dgiiEndpoint: config.submitUrl,
+      dgiiEndpoint: submitUrl,
       raw: {
         phase: lastPhase,
         error: normalized.message,

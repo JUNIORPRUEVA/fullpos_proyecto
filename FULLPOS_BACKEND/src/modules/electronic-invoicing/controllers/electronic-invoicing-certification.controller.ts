@@ -135,10 +135,59 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
       res.type('application/xml').send(xml);
     },
 
+    getCaseSignedXml: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      const xml = await service.getSignedXml(company.id, params.id);
+      res.type('application/xml').send(xml);
+    },
+
     generateBatchXml: async (req: Request, res: Response) => {
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
       res.json(await service.generateXmlForBatch(company.id, params.id, req.requestId));
+    },
+
+    signCase: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      res.json(await service.signCase(company.id, params.id, req.requestId));
+    },
+
+    signBatch: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      res.json(await service.signBatch(company.id, params.id, req.requestId));
+    },
+
+    sendCase: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      res.json(await service.sendCase(company.id, params.id, req.requestId));
+    },
+
+    sendBatch: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      res.json(await service.sendBatch(company.id, params.id, req.requestId));
+    },
+
+    queryCaseResult: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      res.json(await service.queryCaseResult(company.id, params.id, req.requestId));
+    },
+
+    queryBatchResults: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      res.json(await service.queryBatchResults(company.id, params.id, req.requestId));
+    },
+
+    getBatchSummary: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      res.json(await service.getBatchSummary(company.id, params.id));
     },
 
     deleteBatch: async (req: Request, res: Response) => {

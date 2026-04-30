@@ -24,7 +24,8 @@ export class DgiiDirectoryService {
         };
       }
 
-      if (!env.DGII_PRODUCTION_SUBMIT_URL || !env.DGII_PRODUCTION_RESULT_URL_TEMPLATE) {
+      const productionSubmitUrl = env.DGII_PRODUCTION_RECEPCION_ECF_URL || env.DGII_PRODUCTION_SUBMIT_URL;
+      if (!productionSubmitUrl || !env.DGII_PRODUCTION_RESULT_URL_TEMPLATE) {
         throw {
           status: 500,
           message: 'Configuración DGII de producción incompleta',
@@ -34,7 +35,9 @@ export class DgiiDirectoryService {
 
       return {
         environment,
-        submitUrl: env.DGII_PRODUCTION_SUBMIT_URL,
+        submitUrl: productionSubmitUrl,
+        recepcionEcfUrl: env.DGII_PRODUCTION_RECEPCION_ECF_URL || env.DGII_PRODUCTION_SUBMIT_URL,
+        recepcionFcUrl: env.DGII_PRODUCTION_RECEPCION_FC_URL,
         resultUrlTemplate: env.DGII_PRODUCTION_RESULT_URL_TEMPLATE,
         authSeedUrl: env.DGII_PRODUCTION_AUTH_SEED_URL,
         authValidateUrl: env.DGII_PRODUCTION_AUTH_VALIDATE_URL,
@@ -44,7 +47,8 @@ export class DgiiDirectoryService {
       };
     }
 
-    if (!env.DGII_PRECERT_SUBMIT_URL || !env.DGII_PRECERT_RESULT_URL_TEMPLATE) {
+    const precertSubmitUrl = env.DGII_PRECERT_RECEPCION_ECF_URL || env.DGII_PRECERT_SUBMIT_URL;
+    if (!precertSubmitUrl || !env.DGII_PRECERT_RESULT_URL_TEMPLATE) {
       throw {
         status: 500,
         message: 'Configuración DGII de pre-certificación incompleta',
@@ -54,7 +58,9 @@ export class DgiiDirectoryService {
 
     const config: DgiiEnvironmentConfig = {
       environment,
-      submitUrl: env.DGII_PRECERT_SUBMIT_URL,
+      submitUrl: precertSubmitUrl,
+      recepcionEcfUrl: env.DGII_PRECERT_RECEPCION_ECF_URL || env.DGII_PRECERT_SUBMIT_URL,
+      recepcionFcUrl: env.DGII_PRECERT_RECEPCION_FC_URL,
       resultUrlTemplate: env.DGII_PRECERT_RESULT_URL_TEMPLATE,
       authSeedUrl: env.DGII_PRECERT_AUTH_SEED_URL,
       authValidateUrl: env.DGII_PRECERT_AUTH_VALIDATE_URL,

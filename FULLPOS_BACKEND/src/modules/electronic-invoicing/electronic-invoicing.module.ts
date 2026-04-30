@@ -68,7 +68,15 @@ const resultService = new DgiiResultService(directory, authService);
 const receptionService = new InboundReceptionService(prisma, authService, mapper, audit);
 const approvalService = new InboundApprovalService(prisma, authService, mapper, audit);
 const certificationXmlBuilder = new DgiiCertificationXmlBuilderService();
-const certificationService = new DgiiCertificationService(prisma, mapper, certificationXmlBuilder);
+const certificationService = new DgiiCertificationService(
+  prisma,
+  mapper,
+  certificationXmlBuilder,
+  signature,
+  submissionService,
+  resultService,
+  directory,
+);
 const electronicInvoicingService = new ElectronicInvoicingService(
   prisma,
   mapper,
@@ -473,6 +481,14 @@ posElectronicInvoicingRouter.get(
 );
 
 posElectronicInvoicingRouter.get(
+  '/certification/batches/:id/summary',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.getBatchSummary),
+);
+
+posElectronicInvoicingRouter.get(
   '/certification/batches/:id/cases',
   overrideKeyGuard,
   validate(certificationBatchParamsSchema, 'params'),
@@ -504,12 +520,68 @@ posElectronicInvoicingRouter.get(
   asyncHandler(certificationController.getCaseXml),
 );
 
+posElectronicInvoicingRouter.get(
+  '/certification/cases/:id/signed-xml',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.getCaseSignedXml),
+);
+
 posElectronicInvoicingRouter.post(
   '/certification/batches/:id/generate-xml',
   overrideKeyGuard,
   validate(certificationBatchParamsSchema, 'params'),
   validate(certificationLocatorSchema),
   asyncHandler(certificationController.generateBatchXml),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/sign',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.signCase),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/sign',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.signBatch),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/send',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.sendCase),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/send',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.sendBatch),
+);
+
+posElectronicInvoicingRouter.get(
+  '/certification/cases/:id/result',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.queryCaseResult),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/query-results',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.queryBatchResults),
 );
 
 posElectronicInvoicingRouter.delete(
