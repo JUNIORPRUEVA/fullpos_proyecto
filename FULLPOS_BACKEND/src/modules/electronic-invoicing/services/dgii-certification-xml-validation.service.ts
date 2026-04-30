@@ -15,6 +15,7 @@ export type DgiiCertificationXmlValidationResult = {
   xsdFiles: string[];
   xsdFileUsed?: string | null;
   xsdValidationEngineAvailable: boolean;
+  xsdError?: string | null;
 };
 
 type XsdEngine = {
@@ -87,6 +88,7 @@ export class DgiiCertificationXmlValidationService {
     let xsdValidated = false;
     let xsdFileUsed: string | null = null;
     let xsdValid = false;
+    let xsdError: string | null = null;
     if (xsdFiles.length === 0) {
       warnings.push('DGII XSD files not found. Place official XSD files in resources/dgii/xsd.');
     } else if (!engine.available) {
@@ -98,6 +100,7 @@ export class DgiiCertificationXmlValidationService {
       const result = this.validateWithXmllint(xml, selectedXsd, engine.command!);
       xsdValidated = true;
       xsdValid = result.valid;
+      xsdError = result.errorOutput;
       errors.push(...result.errors);
       warnings.push(...result.warnings);
     } else {
@@ -110,13 +113,14 @@ export class DgiiCertificationXmlValidationService {
       valid: xsdFiles.length > 0
         ? xsdValidated && xsdValid && errors.length === 0
         : wellFormed && errors.length === 0,
-      canSign: wellFormed && errors.length === 0,
+      canSign: wellFormed && errors.length === 0 && (xsdFiles.length === 0 || (xsdValidated && xsdValid)),
       errors,
       warnings,
       xsdDirectory: this.xsdDirectory,
       xsdFiles,
       xsdFileUsed,
       xsdValidationEngineAvailable: engine.available,
+      xsdError,
     };
   }
 
@@ -199,22 +203,28 @@ export class DgiiCertificationXmlValidationService {
         encoding: 'utf8',
         windowsHide: true,
       });
-      const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+      const stdout = result.stdout?.trim() ?? '';
+      const stderr = result.stderr?.trim() ?? '';
+      const output = [stdout, stderr].filter(Boolean).join('\n').trim();
       console.debug('[electronic-invoicing.certification.xsd] xmllint.validation', {
         xsdFileUsed: xsdPath,
         xmlPath,
         command: xmllintCommand,
         exitStatus: result.status,
         error: result.error?.message ?? null,
+        stdout,
+        stderr,
         rawOutput: output,
       });
       if (result.status === 0 && !result.error) {
-        return { valid: true, errors: [], warnings: output ? [output] : [] };
+        return { valid: true, errors: [], warnings: output ? [output] : [], errorOutput: null };
       }
+      const errorOutput = stderr || output || result.error?.message || 'XSD validation failed';
       return {
         valid: false,
-        errors: [output || result.error?.message || 'XSD validation failed'],
+        errors: [errorOutput],
         warnings: [],
+        errorOutput,
       };
     } finally {
       try {

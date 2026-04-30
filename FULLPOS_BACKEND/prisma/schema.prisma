@@ -868,6 +868,9 @@ model DgiiCertificationCase {
   xmlValidationStatus String?  @default("NOT_VALIDATED")
   xmlValidationJson   Json?
   xmlValidatedAt      DateTime?
+  xsdValidated        Boolean  @default(false)
+  xsdValid            Boolean  @default(false)
+  xsdError            String?
   errorMessage       String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt

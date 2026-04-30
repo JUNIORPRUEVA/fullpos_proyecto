@@ -57,6 +57,9 @@ const CERTIFICATION_DB_FIELDS = [
   'xmlValidationStatus',
   'xmlValidationJson',
   'xmlValidatedAt',
+  'xsdValidated',
+  'xsdValid',
+  'xsdError',
 ];
 
 function normalizeHeader(value: unknown) {
@@ -411,6 +414,17 @@ export class DgiiCertificationService {
     return 'XSD_NOT_AVAILABLE';
   }
 
+  private validationPersistenceData(validation: ReturnType<DgiiCertificationXmlValidationService['validate']>) {
+    return {
+      xmlValidationStatus: this.validationStatus(validation),
+      xmlValidationJson: validation as unknown as Prisma.InputJsonObject,
+      xmlValidatedAt: new Date(),
+      xsdValidated: validation.xsdValidated,
+      xsdValid: validation.xsdValidated && validation.valid,
+      xsdError: validation.xsdError ?? (validation.xsdValidated && !validation.valid ? validation.errors.join('\n') : null),
+    };
+  }
+
   private async detectCertificationDbFields() {
     const tableName = 'DgiiCertificationCase';
     const prismaModel = Prisma.dmmf.datamodel.models.find((model) => model.name === 'DgiiCertificationCase');
@@ -599,9 +613,7 @@ export class DgiiCertificationService {
         data: {
           xmlGenerated: result.xml,
           status: 'XML_GENERATED',
-          xmlValidationStatus: this.validationStatus(validation),
-          xmlValidationJson: validation as unknown as Prisma.InputJsonObject,
-          xmlValidatedAt: new Date(),
+          ...this.validationPersistenceData(validation),
           errorMessage: warningMessage,
         },
       });
@@ -667,9 +679,7 @@ export class DgiiCertificationService {
     await this.prisma.dgiiCertificationCase.update({
       where: { id: item.id },
       data: {
-        xmlValidationStatus: this.validationStatus(validation),
-        xmlValidationJson: validation as unknown as Prisma.InputJsonObject,
-        xmlValidatedAt: new Date(),
+        ...this.validationPersistenceData(validation),
         errorMessage: validation.errors.length > 0 ? validation.errors.join('; ') : undefined,
       },
     });
@@ -683,6 +693,7 @@ export class DgiiCertificationService {
       valid: validation.xsdValidated && validation.valid,
       xsdFileUsed: validation.xsdFileUsed ?? null,
       errors: validation.errors,
+      xsdError: validation.xsdError ?? null,
       warnings: validation.xsdValidated
         ? validation.warnings
         : [...validation.warnings, 'XSD_NOT_AVAILABLE'],
@@ -766,9 +777,7 @@ export class DgiiCertificationService {
       await this.prisma.dgiiCertificationCase.update({
         where: { id: item.id },
         data: {
-          xmlValidationStatus: this.validationStatus(xmlValidation),
-          xmlValidationJson: xmlValidation as unknown as Prisma.InputJsonObject,
-          xmlValidatedAt: new Date(),
+          ...this.validationPersistenceData(xmlValidation),
           errorMessage: 'Este XML todavia no esta listo para firmarse. Corrige los campos requeridos o carga los XSD oficiales DGII.',
         },
       });
@@ -812,9 +821,7 @@ export class DgiiCertificationService {
           xmlSigned: signedXml,
           status: 'SIGNED',
           signedAt: new Date(),
-          xmlValidationStatus: this.validationStatus(xmlValidation),
-          xmlValidationJson: xmlValidation as unknown as Prisma.InputJsonObject,
-          xmlValidatedAt: new Date(),
+          ...this.validationPersistenceData(xmlValidation),
           errorMessage: null,
         },
       });
@@ -1118,9 +1125,7 @@ export class DgiiCertificationService {
       await this.prisma.dgiiCertificationCase.update({
         where: { id: item.id },
         data: {
-          xmlValidationStatus,
-          xmlValidationJson: validation as unknown as Prisma.InputJsonObject,
-          xmlValidatedAt: new Date(),
+          ...this.validationPersistenceData(validation),
         },
       }).catch(() => undefined);
     }
@@ -1304,6 +1309,9 @@ export class DgiiCertificationService {
         xmlValidationStatus: 'NOT_VALIDATED',
         xmlValidationJson: Prisma.JsonNull,
         xmlValidatedAt: null,
+        xsdValidated: false,
+        xsdValid: false,
+        xsdError: null,
         errorMessage: null,
       },
     });
