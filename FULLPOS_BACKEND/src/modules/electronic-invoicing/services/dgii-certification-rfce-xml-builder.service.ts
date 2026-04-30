@@ -92,6 +92,15 @@ function moneyText(value: string | null) {
   return parsed == null ? null : parsed.toFixed(2);
 }
 
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function dominicanTimestamp(value = new Date()) {
+  const dominicanTime = new Date(value.getTime() - 4 * 60 * 60 * 1000);
+  return `${pad2(dominicanTime.getUTCDate())}-${pad2(dominicanTime.getUTCMonth() + 1)}-${dominicanTime.getUTCFullYear()} ${pad2(dominicanTime.getUTCHours())}:${pad2(dominicanTime.getUTCMinutes())}:${pad2(dominicanTime.getUTCSeconds())}`;
+}
+
 function addTag(lines: string[], indent: string, tag: string, value: string | null | undefined) {
   if (value == null || value === '') return;
   lines.push(`${indent}<${tag}>${xmlEscape(value)}</${tag}>`);
@@ -169,13 +178,20 @@ export class DgiiCertificationRfceXmlBuilderService {
     const emisorLines = buildFields(reader, RFCE_EMISOR_FIELDS, '      ');
     const totalesLines = buildFields(reader, RFCE_TOTALES_FIELDS, '      ');
     const resumenLines = buildFields(reader, RFCE_RESUMEN_FIELDS, '    ');
-    const fechaFirma = readField(reader, 'FechaHoraFirma', [
+    const fechaFirmaFromRow = readField(reader, 'FechaHoraFirma', [
       'fechaFirma',
       'Fecha Firma',
       'fechaHoraFirma',
       'FechaHoraFirma',
       'Fecha Firma Digital',
     ]);
+    const fechaFirma = fechaFirmaFromRow ?? dominicanTimestamp();
+    const fallbackFieldsUsed: Record<string, string> = {};
+    if (!fechaFirmaFromRow) {
+      reader.extractedFields.FechaHoraFirma = fechaFirma;
+      fallbackFieldsUsed.FechaHoraFirma = 'certification.currentDominicanTimestamp';
+      warnings.push('FechaHoraFirma generated automatically for RFCE certification using Dominican Republic timezone.');
+    }
 
     const presentTags = new Set(
       [...idDocLines, ...emisorLines, ...totalesLines, ...resumenLines]
@@ -191,7 +207,7 @@ export class DgiiCertificationRfceXmlBuilderService {
         errors: [`Faltan campos obligatorios RFCE: ${missing.join(', ')}`],
         missingFields: missing,
         extractedFields: reader.extractedFields,
-        fallbackFieldsUsed: {},
+        fallbackFieldsUsed,
         rawRowKeys: reader.rawRowKeys,
         humanReadableMessage: `Faltan campos obligatorios RFCE: ${missing.join(', ')}`,
         sourceFieldsUsed: reader.sourceFieldsUsed,
@@ -221,7 +237,7 @@ export class DgiiCertificationRfceXmlBuilderService {
       errors: [],
       missingFields: [],
       extractedFields: reader.extractedFields,
-      fallbackFieldsUsed: {},
+      fallbackFieldsUsed,
       rawRowKeys: reader.rawRowKeys,
       humanReadableMessage: null,
       sourceFieldsUsed: reader.sourceFieldsUsed,
