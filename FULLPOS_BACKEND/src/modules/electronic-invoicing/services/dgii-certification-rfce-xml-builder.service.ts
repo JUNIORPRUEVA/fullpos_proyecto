@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { CertificationXmlBuildResult } from './dgii-certification-xml-builder.service';
 
 type RawRow = Record<string, unknown>;
@@ -126,6 +127,17 @@ function buildFields(reader: RowReader, specs: FieldSpec[], indent: string) {
   return lines;
 }
 
+function certificationSecurityCode(reader: RowReader) {
+  const seedParts = [
+    readField(reader, 'CasoPrueba', ['casoPrueba', 'caso prueba']),
+    readField(reader, 'eNCF', ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante']),
+    readField(reader, 'RNCEmisor', ['rncEmisor', 'RNC Emisor', 'RNCEmisor'], normalizeRnc),
+    readField(reader, 'MontoTotal', ['montoTotal', 'Monto Total', 'Total', 'TotalFactura'], moneyText),
+  ].filter((value): value is string => !!value);
+  if (seedParts.length === 0) return null;
+  return crypto.createHash('sha256').update(seedParts.join('|')).digest('hex').slice(0, 6).toUpperCase();
+}
+
 const RFCE_ID_DOC_FIELDS: FieldSpec[] = [
   { tag: 'TipoeCF', aliases: ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo'] },
   { tag: 'eNCF', aliases: ['encf', 'eNCF', 'E-NCF', 'NCF', 'comprobante', 'numeroComprobante'] },
@@ -217,9 +229,18 @@ export class DgiiCertificationRfceXmlBuilderService {
       fallbackFieldsUsed.FechaHoraFirma = 'certification.currentDominicanTimestamp';
       warnings.push('FechaHoraFirma generated automatically for RFCE certification using Dominican Republic timezone.');
     }
+    if (!afterTotalesLines.some((line) => line.includes('<CodigoSeguridadeCF>'))) {
+      const generatedSecurityCode = certificationSecurityCode(reader);
+      if (generatedSecurityCode) {
+        addTag(afterTotalesLines, '    ', 'CodigoSeguridadeCF', generatedSecurityCode);
+        reader.extractedFields.CodigoSeguridadeCF = generatedSecurityCode;
+        fallbackFieldsUsed.CodigoSeguridadeCF = 'certification.sha256(CasoPrueba|eNCF|RNCEmisor|MontoTotal).first6';
+        warnings.push('CodigoSeguridadeCF generated for RFCE certification because workbook row does not include the original consumer invoice security code.');
+      }
+    }
 
     const presentTags = new Set(
-      [...idDocLines, ...emisorLines, ...compradorLines, ...totalesLines, ...resumenLines]
+      [...idDocLines, ...emisorLines, ...compradorLines, ...totalesLines, ...afterTotalesLines, ...resumenLines]
         .map((line) => line.match(/<([A-Za-z0-9]+)>/)?.[1])
         .filter((value): value is string => !!value),
     );
