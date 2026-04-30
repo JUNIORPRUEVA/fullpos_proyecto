@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ElectronicInvoicingMapperService } from './electronic-invoicing-mapper.service';
 import { normalizeRnc } from '../utils/validation.utils';
+import { DgiiCertificationXmlBuilderService } from './dgii-certification-xml-builder.service';
 
 type CertificationSheetName = 'ECF' | 'RFCE';
 
@@ -88,6 +89,7 @@ export class DgiiCertificationService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly mapper: ElectronicInvoicingMapperService,
+    private readonly xmlBuilder: DgiiCertificationXmlBuilderService,
   ) {}
 
   async resolveCompany(companyRnc?: string | null, companyCloudId?: string | null, requestId?: string) {
@@ -302,6 +304,121 @@ export class DgiiCertificationService {
       throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
     }
     return serializeCase(item);
+  }
+
+  async generateXmlForCase(companyId: number, id: number, requestId?: string) {
+    const item = await this.prisma.dgiiCertificationCase.findFirst({
+      where: { id, companyId },
+    });
+    if (!item) {
+      throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
+    }
+
+    try {
+      const result = item.sheetName === 'RFCE'
+        ? this.xmlBuilder.buildRfceXmlFromCertificationCase(item)
+        : this.xmlBuilder.buildEcfXmlFromCertificationCase(item);
+      const warningMessage = result.warnings.length > 0 ? `Warnings: ${result.warnings.join('; ')}` : null;
+      const updated = await this.prisma.dgiiCertificationCase.update({
+        where: { id: item.id },
+        data: {
+          xmlGenerated: result.xml,
+          status: 'XML_GENERATED',
+          errorMessage: warningMessage,
+        },
+      });
+
+      console.info('[electronic-invoicing.certification] xml.generated', {
+        requestId: requestId ?? null,
+        companyId,
+        batchId: item.batchId,
+        caseId: item.id,
+        sheetName: item.sheetName,
+        encf: item.encf,
+        tipoEcf: item.tipoEcf,
+        xmlLength: result.xml.length,
+        warnings: result.warnings,
+      });
+
+      return { case: serializeCase(updated), xmlGenerated: result.xml, warnings: result.warnings };
+    } catch (error) {
+      const message = (error as any)?.message ?? 'No se pudo generar XML para el caso de certificacion';
+      const errorCode = (error as any)?.errorCode ?? 'DGII_CERTIFICATION_XML_GENERATION_FAILED';
+      await this.prisma.dgiiCertificationCase.update({
+        where: { id: item.id },
+        data: {
+          status: 'ERROR',
+          errorMessage: message,
+        },
+      });
+      console.error('[electronic-invoicing.certification] xml.generate_error', {
+        requestId: requestId ?? null,
+        companyId,
+        batchId: item.batchId,
+        caseId: item.id,
+        sheetName: item.sheetName,
+        encf: item.encf,
+        tipoEcf: item.tipoEcf,
+        errorCode,
+        message,
+        details: (error as any)?.details ?? null,
+      });
+      throw {
+        status: (error as any)?.status ?? 409,
+        message,
+        errorCode,
+        details: (error as any)?.details ?? null,
+      };
+    }
+  }
+
+  async getGeneratedXml(companyId: number, id: number) {
+    const item = await this.prisma.dgiiCertificationCase.findFirst({
+      where: { id, companyId },
+      select: {
+        id: true,
+        companyId: true,
+        xmlGenerated: true,
+      },
+    });
+    if (!item) {
+      throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
+    }
+    if (!item.xmlGenerated) {
+      throw { status: 404, message: 'Este caso aun no tiene XML generado', errorCode: 'DGII_CERTIFICATION_XML_NOT_FOUND' };
+    }
+    return item.xmlGenerated;
+  }
+
+  async generateXmlForBatch(companyId: number, batchId: number, requestId?: string) {
+    await this.getBatch(companyId, batchId);
+    const cases = await this.prisma.dgiiCertificationCase.findMany({
+      where: { companyId, batchId },
+      orderBy: [{ sheetName: 'asc' }, { rowNumber: 'asc' }],
+      select: { id: true },
+    });
+    const errors: Array<{ caseId: number; message: string; errorCode: string }> = [];
+    let generated = 0;
+
+    for (const item of cases) {
+      try {
+        await this.generateXmlForCase(companyId, item.id, requestId);
+        generated += 1;
+      } catch (error) {
+        errors.push({
+          caseId: item.id,
+          message: (error as any)?.message ?? 'No se pudo generar XML',
+          errorCode: (error as any)?.errorCode ?? 'DGII_CERTIFICATION_XML_GENERATION_FAILED',
+        });
+      }
+    }
+
+    return {
+      total: cases.length,
+      generated,
+      failed: errors.length,
+      errors,
+    };
   }
 
   async deleteBatch(companyId: number, id: number) {

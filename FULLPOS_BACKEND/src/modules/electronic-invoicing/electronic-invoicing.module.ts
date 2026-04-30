@@ -20,6 +20,7 @@ import { InboundReceptionService } from './services/inbound-reception.service';
 import { InboundApprovalService } from './services/inbound-approval.service';
 import { ElectronicInvoicingService } from './services/electronic-invoicing.service';
 import { DgiiCertificationService } from './services/dgii-certification.service';
+import { DgiiCertificationXmlBuilderService } from './services/dgii-certification-xml-builder.service';
 import {
   auditTimelineParamsSchema,
   configQuerySchema,
@@ -66,7 +67,8 @@ const submissionService = new DgiiSubmissionService(directory, authService);
 const resultService = new DgiiResultService(directory, authService);
 const receptionService = new InboundReceptionService(prisma, authService, mapper, audit);
 const approvalService = new InboundApprovalService(prisma, authService, mapper, audit);
-const certificationService = new DgiiCertificationService(prisma, mapper);
+const certificationXmlBuilder = new DgiiCertificationXmlBuilderService();
+const certificationService = new DgiiCertificationService(prisma, mapper, certificationXmlBuilder);
 const electronicInvoicingService = new ElectronicInvoicingService(
   prisma,
   mapper,
@@ -484,6 +486,30 @@ posElectronicInvoicingRouter.get(
   validate(certificationCaseParamsSchema, 'params'),
   validate(certificationLocatorSchema, 'query'),
   asyncHandler(certificationController.getCase),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/generate-xml',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.generateCaseXml),
+);
+
+posElectronicInvoicingRouter.get(
+  '/certification/cases/:id/xml',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.getCaseXml),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/generate-xml',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.generateBatchXml),
 );
 
 posElectronicInvoicingRouter.delete(
