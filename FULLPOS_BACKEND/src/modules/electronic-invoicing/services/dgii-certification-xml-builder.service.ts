@@ -420,6 +420,19 @@ const RETENCION_ITEM_REQUIRED_TYPES = new Set(['41', '47']);
 const ECF_XSD_ROOT_ELEMENT = 'ECF';
 const ECF_VERSION = '1.0';
 
+function allowedTotalFields(tipoEcf: string | null) {
+  if (tipoEcf === '43') {
+    return new Set(['MontoExento', 'MontoTotal', 'MontoPeriodo', 'SaldoAnterior', 'MontoAvancePago', 'ValorPagar']);
+  }
+  if (tipoEcf === '47') {
+    return new Set(['MontoExento', 'MontoTotal', 'MontoPeriodo', 'SaldoAnterior', 'MontoAvancePago', 'ValorPagar', 'TotalISRRetencion']);
+  }
+  if (tipoEcf === '44') {
+    return new Set(['MontoExento', 'MontoImpuestoAdicional', 'MontoTotal', 'MontoNoFacturable', 'MontoPeriodo', 'SaldoAnterior', 'MontoAvancePago', 'ValorPagar']);
+  }
+  return null;
+}
+
 export class DgiiCertificationXmlBuilderService {
   buildEcfXmlFromCertificationCase(input: { rawRowJson: unknown; issuerFallback?: CertificationIssuerFallback | null }): CertificationXmlBuildResult {
     const row = caseRow(input);
@@ -455,6 +468,16 @@ export class DgiiCertificationXmlBuilderService {
     const totalesValues: Record<string, string> = {};
     const itemLines: string[] = [];
     const itemValues: Record<string, string> = {};
+    const totalFieldsAllowed = allowedTotalFields(tipoEcf);
+    const pushTotalValue = (tag: string, value: string | null | undefined) => {
+      if (totalFieldsAllowed && !totalFieldsAllowed.has(tag)) {
+        if (value != null && value !== '') {
+          warnings.push(`${tag} omitted because tipo e-CF ${tipoEcf ?? 'N/D'} does not allow it in Totales.`);
+        }
+        return;
+      }
+      pushValue(totalesLines, '      ', tag, value, totalesValues);
+    };
 
     if (fallbackFieldsUsed.FechaEmision === 'certification.currentDate') {
       warnings.push('FechaEmision fallback used for certification because workbook row does not include issue date.');
@@ -589,34 +612,34 @@ export class DgiiCertificationXmlBuilderService {
       ...(BUYER_REQUIRED_BY_TYPE.has(tipoEcf ?? '') ? ['RNCComprador', 'RazonSocialComprador'] : []),
     ];
 
-    pushValue(totalesLines, '      ', 'MontoGravadoTotal', montoGravadoTotalText, totalesValues);
+    pushTotalValue('MontoGravadoTotal', montoGravadoTotalText);
     if (tipoEcf !== '46') {
-      pushValue(totalesLines, '      ', 'MontoGravadoI1', montoGravadoI1Text, totalesValues);
-      pushValue(totalesLines, '      ', 'MontoGravadoI2', montoGravadoI2Text, totalesValues);
+      pushTotalValue('MontoGravadoI1', montoGravadoI1Text);
+      pushTotalValue('MontoGravadoI2', montoGravadoI2Text);
     }
-    pushValue(totalesLines, '      ', 'MontoGravadoI3', montoGravadoI3Text, totalesValues);
+    pushTotalValue('MontoGravadoI3', montoGravadoI3Text);
     if (tipoEcf !== '46' && indicadorFacturacion === '4' && montoTotalText && !montoExentoText) {
       sourceFallback(reader, 'MontoExento', montoTotalText, 'certification.exentoFromMontoTotal', fallbackFieldsUsed);
-      pushValue(totalesLines, '      ', 'MontoExento', montoTotalText, totalesValues);
+      pushTotalValue('MontoExento', montoTotalText);
     } else if (tipoEcf !== '46') {
-      pushValue(totalesLines, '      ', 'MontoExento', montoExentoText, totalesValues);
+      pushTotalValue('MontoExento', montoExentoText);
     }
-    if (tipoEcf !== '46' && indicadorFacturacion === '1') pushValue(totalesLines, '      ', 'ITBIS1', '18', totalesValues);
-    if (tipoEcf !== '46' && indicadorFacturacion === '2') pushValue(totalesLines, '      ', 'ITBIS2', '16', totalesValues);
-    if (indicadorFacturacion === '3') pushValue(totalesLines, '      ', 'ITBIS3', '0', totalesValues);
-    pushValue(totalesLines, '      ', 'TotalITBIS', totalItbisText, totalesValues);
+    if (tipoEcf !== '46' && indicadorFacturacion === '1') pushTotalValue('ITBIS1', '18');
+    if (tipoEcf !== '46' && indicadorFacturacion === '2') pushTotalValue('ITBIS2', '16');
+    if (indicadorFacturacion === '3') pushTotalValue('ITBIS3', '0');
+    pushTotalValue('TotalITBIS', totalItbisText);
     if (tipoEcf !== '46') {
-      pushValue(totalesLines, '      ', 'TotalITBIS1', readMoney(reader, 'TotalITBIS1', ['totalITBIS1', 'total itbis 1']), totalesValues);
-      pushValue(totalesLines, '      ', 'TotalITBIS2', readMoney(reader, 'TotalITBIS2', ['totalITBIS2', 'total itbis 2']), totalesValues);
+      pushTotalValue('TotalITBIS1', readMoney(reader, 'TotalITBIS1', ['totalITBIS1', 'total itbis 1']));
+      pushTotalValue('TotalITBIS2', readMoney(reader, 'TotalITBIS2', ['totalITBIS2', 'total itbis 2']));
     }
-    pushValue(totalesLines, '      ', 'TotalITBIS3', readMoney(reader, 'TotalITBIS3', ['totalITBIS3', 'total itbis 3']), totalesValues);
-    pushValue(totalesLines, '      ', 'MontoTotal', montoTotalText, totalesValues);
-    pushValue(totalesLines, '      ', 'MontoPeriodo', readMoney(reader, 'MontoPeriodo', ['montoPeriodo', 'monto periodo']), totalesValues);
-    pushValue(totalesLines, '      ', 'SaldoAnterior', readMoney(reader, 'SaldoAnterior', ['saldoAnterior', 'saldo anterior']), totalesValues);
-    pushValue(totalesLines, '      ', 'MontoAvancePago', readMoney(reader, 'MontoAvancePago', ['montoAvancePago', 'monto avance pago']), totalesValues);
-    pushValue(totalesLines, '      ', 'ValorPagar', readMoney(reader, 'ValorPagar', ['valorPagar', 'valor pagar']), totalesValues);
-    pushValue(totalesLines, '      ', 'TotalITBISRetenido', readMoney(reader, 'TotalITBISRetenido', ['totalITBISRetenido', 'total itbis retenido']), totalesValues);
-    pushValue(totalesLines, '      ', 'TotalISRRetencion', readMoney(reader, 'TotalISRRetencion', ['totalISRRetencion', 'total isr retencion']), totalesValues);
+    pushTotalValue('TotalITBIS3', readMoney(reader, 'TotalITBIS3', ['totalITBIS3', 'total itbis 3']));
+    pushTotalValue('MontoTotal', montoTotalText);
+    pushTotalValue('MontoPeriodo', readMoney(reader, 'MontoPeriodo', ['montoPeriodo', 'monto periodo']));
+    pushTotalValue('SaldoAnterior', readMoney(reader, 'SaldoAnterior', ['saldoAnterior', 'saldo anterior']));
+    pushTotalValue('MontoAvancePago', readMoney(reader, 'MontoAvancePago', ['montoAvancePago', 'monto avance pago']));
+    pushTotalValue('ValorPagar', readMoney(reader, 'ValorPagar', ['valorPagar', 'valor pagar']));
+    pushTotalValue('TotalITBISRetenido', readMoney(reader, 'TotalITBISRetenido', ['totalITBISRetenido', 'total itbis retenido']));
+    pushTotalValue('TotalISRRetencion', readMoney(reader, 'TotalISRRetencion', ['totalISRRetencion', 'total isr retencion']));
 
     pushValue(itemLines, '      ', 'NumeroLinea', integerText(readAny(reader, 'NumeroLinea', ['numeroLinea', 'numero linea', 'linea'])) ?? '1', itemValues);
     pushValue(itemLines, '      ', 'IndicadorFacturacion', indicadorFacturacion, itemValues);
