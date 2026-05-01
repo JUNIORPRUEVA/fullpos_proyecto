@@ -1239,7 +1239,18 @@ export class DgiiCertificationService {
   async sendBatch(companyId: number, batchId: number, requestId?: string) {
     await this.getBatch(companyId, batchId);
     const cases = await this.prisma.dgiiCertificationCase.findMany({
-      where: { companyId, batchId, status: 'SIGNED' },
+      where: {
+        companyId,
+        batchId,
+        OR: [
+          { status: 'SIGNED' },
+          {
+            status: 'ERROR',
+            xmlSigned: { not: null },
+            trackId: null,
+          },
+        ],
+      },
       orderBy: [{ sheetName: 'asc' }, { rowNumber: 'asc' }],
       select: { id: true, xmlSigned: true },
     });
