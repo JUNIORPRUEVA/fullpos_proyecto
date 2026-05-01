@@ -171,16 +171,17 @@ export class DgiiSubmissionService {
     signedXml: string,
     requestId?: string,
     manualToken?: string,
-    context?: { invoiceId?: number; ecf?: string; endpointOverride?: string },
+    context?: { invoiceId?: number; ecf?: string; endpointOverride?: string; maxRetriesOverride?: number },
   ): Promise<DgiiSubmissionResponse> {
     const config = this.directory.getEnvironmentConfig(environment);
     const submitUrl = context?.endpointOverride?.trim() || config.submitUrl;
+    const maxRetries = typeof context?.maxRetriesOverride === 'number' ? context.maxRetriesOverride : config.maxRetries;
     let attempt = 0;
     let lastError: unknown = null;
     let forceRefresh = false;
     let lastPhase: 'token' | 'submit' = 'submit';
 
-    while (attempt <= config.maxRetries) {
+    while (attempt <= maxRetries) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
 
@@ -291,7 +292,7 @@ export class DgiiSubmissionService {
           break;
         }
 
-        if (attempt >= config.maxRetries) break;
+        if (attempt >= maxRetries) break;
       }
 
       attempt += 1;

@@ -1154,6 +1154,7 @@ export class DgiiCertificationService {
     const result = await this.submissionService.submit(companyId, environment, item.xmlSigned, requestId, undefined, {
       ecf: item.encf ?? undefined,
       endpointOverride: endpoint,
+      maxRetriesOverride: 0,
     });
     const nextStatus = this.certificationStatusFromSubmit(result);
     const rejectionCode = nextStatus === 'REJECTED' ? this.extractRejectionCode(result.raw, result.code) : null;
