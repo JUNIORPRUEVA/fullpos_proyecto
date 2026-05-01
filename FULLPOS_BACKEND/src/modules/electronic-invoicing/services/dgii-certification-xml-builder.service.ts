@@ -25,6 +25,21 @@ export type CertificationXmlBuildResult = {
   rawRowKeys: string[];
   humanReadableMessage: string | null;
   sourceFieldsUsed: Record<string, string>;
+  audit?: {
+    fileName: string | null;
+    items: Array<{
+      numeroLinea: string;
+      indicadorFacturacion: string | null;
+      cantidadItem: string | null;
+      precioUnitarioItem: string | null;
+      montoItem: string | null;
+    }>;
+    calculatedTotals: Record<string, string>;
+    xmlTotals: Record<string, string>;
+    sourceTotals: Record<string, string>;
+    differences: Record<string, { source: string | null; calculated: string | null }>;
+    readyForDgii: boolean;
+  };
 };
 
 type FieldSpec = {
@@ -218,6 +233,11 @@ function moneyText(value: string | null) {
   return parsed == null ? null : parsed.toFixed(2);
 }
 
+function formatMoney(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return null;
+  return (Math.round(value * 100) / 100).toFixed(2);
+}
+
 function quantityText(value: string | null) {
   const clean = cleanDgiiValue(value);
   if (!clean) return null;
@@ -236,6 +256,13 @@ function integerText(value: string | null) {
   if (!clean) return null;
   const parsed = Number(clean.replace(/,/g, ''));
   return Number.isInteger(parsed) ? String(parsed) : null;
+}
+
+function parseQuantityNumber(value: string | null) {
+  const clean = cleanDgiiValue(value);
+  if (!clean) return null;
+  const parsed = Number(clean.replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parsePositiveMoney(value: string | null) {
@@ -609,13 +636,20 @@ export class DgiiCertificationXmlBuilderService {
     pushValue(idDocLines, '      ', 'BancoPago', bancoPago, idDocValues);
 
     const montoTotalText = readMoney(reader, 'MontoTotal', ['montoTotal', 'Monto Total', 'Total', 'TotalFactura']);
-    const totalItbisText = readMoney(reader, 'TotalITBIS', ['totalITBIS', 'Total ITBIS', 'itbisTotal']);
-    const totalItbis = parseMoney(totalItbisText) ?? 0;
-    const montoExentoText = readMoney(reader, 'MontoExento', ['montoExento', 'monto exento']);
-    const montoGravadoTotalText = readMoney(reader, 'MontoGravadoTotal', ['montoGravadoTotal', 'monto gravado total']);
-    const montoGravadoI1Text = readMoney(reader, 'MontoGravadoI1', ['montoGravadoI1', 'monto gravado i1']);
-    const montoGravadoI2Text = readMoney(reader, 'MontoGravadoI2', ['montoGravadoI2', 'monto gravado i2']);
-    const montoGravadoI3Text = readMoney(reader, 'MontoGravadoI3', ['montoGravadoI3', 'monto gravado i3']);
+    const sourceTotals: Record<string, string> = {};
+    const sourceMontoExentoText = readMoney(reader, 'MontoExento', ['montoExento', 'monto exento']);
+    const sourceMontoGravadoTotalText = readMoney(reader, 'MontoGravadoTotal', ['montoGravadoTotal', 'monto gravado total']);
+    const sourceMontoGravadoI1Text = readMoney(reader, 'MontoGravadoI1', ['montoGravadoI1', 'monto gravado i1']);
+    const sourceMontoGravadoI2Text = readMoney(reader, 'MontoGravadoI2', ['montoGravadoI2', 'monto gravado i2']);
+    const sourceMontoGravadoI3Text = readMoney(reader, 'MontoGravadoI3', ['montoGravadoI3', 'monto gravado i3']);
+    const sourceTotalItbisText = readMoney(reader, 'TotalITBIS', ['totalITBIS', 'Total ITBIS', 'itbisTotal']);
+    if (sourceMontoGravadoTotalText) sourceTotals.MontoGravadoTotal = sourceMontoGravadoTotalText;
+    if (sourceMontoGravadoI1Text) sourceTotals.MontoGravadoI1 = sourceMontoGravadoI1Text;
+    if (sourceMontoGravadoI2Text) sourceTotals.MontoGravadoI2 = sourceMontoGravadoI2Text;
+    if (sourceMontoGravadoI3Text) sourceTotals.MontoGravadoI3 = sourceMontoGravadoI3Text;
+    if (sourceMontoExentoText) sourceTotals.MontoExento = sourceMontoExentoText;
+    if (sourceTotalItbisText) sourceTotals.TotalITBIS = sourceTotalItbisText;
+    if (montoTotalText) sourceTotals.MontoTotal = montoTotalText;
     const itemIndicatorRaw = integerText(readAny(reader, 'IndicadorFacturacion', ['indicadorFacturacion', 'indicador facturacion']));
     const nombreItemRaw = readAny(reader, 'NombreItem', ['nombreItem', 'Nombre Item', 'descripcion', 'Descripcion', 'Item', 'Concepto']);
     const explicitMontoItem = readMoney(reader, 'MontoItem', ['montoItem', 'monto item', 'totalLinea', 'total linea']);
@@ -632,7 +666,7 @@ export class DgiiCertificationXmlBuilderService {
     let indicadorBienServicio = ['1', '2'].includes(indicadorBienServicioRaw ?? '') ? indicadorBienServicioRaw : null;
 
     if (!nombreItem && montoTotalText) {
-      const taxableFallback = totalItbis > 0;
+      const taxableFallback = (parseMoney(sourceTotalItbisText) ?? 0) > 0;
       indicadorFacturacion = taxableFallback ? '1' : '4';
       nombreItem = 'Servicio de prueba DGII';
       indicadorBienServicio = '2';
@@ -648,6 +682,16 @@ export class DgiiCertificationXmlBuilderService {
       warnings.push('Item fallback used for certification because workbook row does not include item detail.');
     }
 
+    if (!montoItemText && explicitCantidad && explicitPrecioUnitario) {
+      const qtyNumber = parseQuantityNumber(explicitCantidad);
+      const unitPriceNumber = parseMoney(explicitPrecioUnitario);
+      if (qtyNumber != null && unitPriceNumber != null) {
+        montoItemText = formatMoney(qtyNumber * unitPriceNumber);
+        sourceFallback(reader, 'MontoItem', montoItemText, 'certification.calculatedFromQuantityAndUnitPrice', fallbackFieldsUsed);
+        warnings.push('MontoItem calculated from CantidadItem x PrecioUnitarioItem.');
+      }
+    }
+
     const requiredFields = [
       ...GENERATION_MINIMUM_FIELDS,
       'NombreItem',
@@ -660,36 +704,54 @@ export class DgiiCertificationXmlBuilderService {
       ...(BUYER_REQUIRED_BY_TYPE.has(tipoEcf ?? '') ? ['RNCComprador', 'RazonSocialComprador'] : []),
     ];
 
-    pushTotalValue('MontoGravadoTotal', montoGravadoTotalText);
+    const montoItemNumber = parsePositiveMoney(montoItemText);
+    const itemBaseAmount = montoItemNumber ?? 0;
+    const montoGravadoI1 = indicadorFacturacion === '1' ? itemBaseAmount : 0;
+    const montoGravadoI2 = indicadorFacturacion === '2' ? itemBaseAmount : 0;
+    const montoGravadoI3 = indicadorFacturacion === '3' ? itemBaseAmount : 0;
+    const montoExento = indicadorFacturacion === '4' ? itemBaseAmount : 0;
+    const totalItbis1 = Math.round(montoGravadoI1 * 0.18 * 100) / 100;
+    const totalItbis2 = Math.round(montoGravadoI2 * 0.16 * 100) / 100;
+    const totalItbis3 = 0;
+    const totalItbis = Math.round((totalItbis1 + totalItbis2 + totalItbis3) * 100) / 100;
+    const montoGravadoTotal = Math.round((montoGravadoI1 + montoGravadoI2 + montoGravadoI3) * 100) / 100;
+    const xmlMontoTotal = Math.round((itemBaseAmount + totalItbis) * 100) / 100;
+
+    const calculatedTotals: Record<string, string> = {};
+    const setCalculatedTotal = (tag: string, amount: number, { allowZero = false }: { allowZero?: boolean } = {}) => {
+      if (!allowZero && amount === 0) return null;
+      const text = formatMoney(amount);
+      if (text) {
+        calculatedTotals[tag] = text;
+        pushTotalValue(tag, text);
+      }
+      return text;
+    };
+
+    setCalculatedTotal('MontoGravadoTotal', montoGravadoTotal, { allowZero: montoGravadoTotal === 0 && indicadorFacturacion !== '4' });
     if (tipoEcf !== '46') {
-      pushTotalValue('MontoGravadoI1', montoGravadoI1Text);
-      pushTotalValue('MontoGravadoI2', montoGravadoI2Text);
+      setCalculatedTotal('MontoGravadoI1', montoGravadoI1);
+      setCalculatedTotal('MontoGravadoI2', montoGravadoI2);
     }
-    pushTotalValue('MontoGravadoI3', montoGravadoI3Text);
-    if (tipoEcf !== '46' && indicadorFacturacion === '4' && montoTotalText && !montoExentoText) {
-      sourceFallback(reader, 'MontoExento', montoTotalText, 'certification.exentoFromMontoTotal', fallbackFieldsUsed);
-      pushTotalValue('MontoExento', montoTotalText);
-    } else if (tipoEcf !== '46') {
-      pushTotalValue('MontoExento', montoExentoText);
-    }
-    const itbis1Rate = integerText(readAny(reader, 'ITBIS1', ['itbis1', 'ITBIS1'])) ?? (indicadorFacturacion === '1' ? '18' : null);
-    const itbis2Rate = integerText(readAny(reader, 'ITBIS2', ['itbis2', 'ITBIS2'])) ?? (indicadorFacturacion === '2' ? '16' : null);
-    const itbis3Rate = integerText(readAny(reader, 'ITBIS3', ['itbis3', 'ITBIS3'])) ?? (indicadorFacturacion === '3' ? '0' : null);
-    if (tipoEcf !== '46') pushTotalValue('ITBIS1', itbis1Rate);
-    if (tipoEcf !== '46') pushTotalValue('ITBIS2', itbis2Rate);
-    pushTotalValue('ITBIS3', itbis3Rate);
-    pushTotalValue('TotalITBIS', totalItbisText);
+    setCalculatedTotal('MontoGravadoI3', montoGravadoI3, { allowZero: indicadorFacturacion === '3' });
     if (tipoEcf !== '46') {
-      pushTotalValue('TotalITBIS1', readMoney(reader, 'TotalITBIS1', ['totalITBIS1', 'total itbis 1']));
-      pushTotalValue('TotalITBIS2', readMoney(reader, 'TotalITBIS2', ['totalITBIS2', 'total itbis 2']));
+      setCalculatedTotal('MontoExento', montoExento, { allowZero: indicadorFacturacion === '4' });
     }
-    pushTotalValue('TotalITBIS3', readMoney(reader, 'TotalITBIS3', ['totalITBIS3', 'total itbis 3']));
+    if (tipoEcf !== '46' && montoGravadoI1 > 0) pushTotalValue('ITBIS1', '18');
+    if (tipoEcf !== '46' && montoGravadoI2 > 0) pushTotalValue('ITBIS2', '16');
+    if (montoGravadoI3 > 0) pushTotalValue('ITBIS3', '0');
+    setCalculatedTotal('TotalITBIS', totalItbis, { allowZero: totalItbis === 0 });
+    if (tipoEcf !== '46') {
+      setCalculatedTotal('TotalITBIS1', totalItbis1, { allowZero: totalItbis1 === 0 && montoGravadoI1 > 0 });
+      setCalculatedTotal('TotalITBIS2', totalItbis2, { allowZero: totalItbis2 === 0 && montoGravadoI2 > 0 });
+    }
+    if (montoGravadoI3 > 0) setCalculatedTotal('TotalITBIS3', totalItbis3, { allowZero: true });
     pushTotalValue('MontoImpuestoAdicional', readMoney(reader, 'MontoImpuestoAdicional', ['montoImpuestoAdicional', 'monto impuesto adicional']));
-    pushTotalValue('MontoTotal', montoTotalText);
+    setCalculatedTotal('MontoTotal', xmlMontoTotal, { allowZero: xmlMontoTotal === 0 });
     pushTotalValue('MontoPeriodo', readMoney(reader, 'MontoPeriodo', ['montoPeriodo', 'monto periodo']));
     pushTotalValue('SaldoAnterior', readMoney(reader, 'SaldoAnterior', ['saldoAnterior', 'saldo anterior']));
     pushTotalValue('MontoAvancePago', readMoney(reader, 'MontoAvancePago', ['montoAvancePago', 'monto avance pago']));
-    pushTotalValue('ValorPagar', readMoney(reader, 'ValorPagar', ['valorPagar', 'valor pagar']));
+    setCalculatedTotal('ValorPagar', xmlMontoTotal, { allowZero: xmlMontoTotal === 0 });
     const totalItbisRetenidoText = readMoney(reader, 'TotalITBISRetenido', ['totalITBISRetenido', 'total itbis retenido']);
     const totalIsrRetencionText = readMoney(reader, 'TotalISRRetencion', ['totalISRRetencion', 'total isr retencion']);
     pushTotalValue('TotalITBISRetenido', totalItbisRetenidoText);
@@ -739,6 +801,30 @@ export class DgiiCertificationXmlBuilderService {
     pushValue(itemLines, '      ', 'DescuentoMonto', descuentoMonto, itemValues);
     pushValue(itemLines, '      ', 'MontoItem', montoItemText, itemValues);
 
+    const differenceKeys = [
+      'MontoGravadoTotal',
+      'MontoGravadoI1',
+      'MontoGravadoI2',
+      'MontoGravadoI3',
+      'MontoExento',
+      'TotalITBIS',
+      'MontoTotal',
+    ];
+    const differences: Record<string, { source: string | null; calculated: string | null }> = {};
+    for (const key of differenceKeys) {
+      const source = sourceTotals[key] ?? null;
+      const calculated = calculatedTotals[key] ?? totalesValues[key] ?? null;
+      if (source == null || calculated == null || source === calculated) continue;
+      differences[key] = { source, calculated };
+    }
+    if (Object.keys(differences).length > 0) {
+      warnings.push(
+        `Source totals adjusted from DetallesItems: ${Object.entries(differences)
+          .map(([key, value]) => `${key} source=${value.source} calculated=${value.calculated}`)
+          .join('; ')}`,
+      );
+    }
+
     const informacionReferenciaLines: string[] = [];
     const informacionReferenciaValues: Record<string, string> = {};
     if (tipoEcf === '33' || tipoEcf === '34') {
@@ -779,6 +865,21 @@ export class DgiiCertificationXmlBuilderService {
         rawRowKeys: reader.rawRowKeys,
         humanReadableMessage: buildMissingMessage(missing),
         sourceFieldsUsed: reader.sourceFieldsUsed,
+        audit: {
+          fileName: encf ? `${encf}.xml` : null,
+          items: [{
+            numeroLinea: itemValues.NumeroLinea ?? '1',
+            indicadorFacturacion: itemValues.IndicadorFacturacion ?? null,
+            cantidadItem: itemValues.CantidadItem ?? null,
+            precioUnitarioItem: itemValues.PrecioUnitarioItem ?? null,
+            montoItem: itemValues.MontoItem ?? null,
+          }],
+          calculatedTotals,
+          xmlTotals: totalesValues,
+          sourceTotals,
+          differences,
+          readyForDgii: false,
+        },
       };
     }
 
@@ -812,6 +913,21 @@ export class DgiiCertificationXmlBuilderService {
       rawRowKeys: reader.rawRowKeys,
       humanReadableMessage: null,
       sourceFieldsUsed: reader.sourceFieldsUsed,
+      audit: {
+        fileName: encf ? `${encf}.xml` : null,
+        items: [{
+          numeroLinea: itemValues.NumeroLinea ?? '1',
+          indicadorFacturacion: itemValues.IndicadorFacturacion ?? null,
+          cantidadItem: itemValues.CantidadItem ?? null,
+          precioUnitarioItem: itemValues.PrecioUnitarioItem ?? null,
+          montoItem: itemValues.MontoItem ?? null,
+        }],
+        calculatedTotals,
+        xmlTotals: totalesValues,
+        sourceTotals,
+        differences,
+        readyForDgii: errors.length === 0,
+      },
     };
   }
 

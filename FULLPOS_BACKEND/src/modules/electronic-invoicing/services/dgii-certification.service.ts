@@ -874,6 +874,7 @@ export class DgiiCertificationService {
         missingFields: result.missingFields,
         validation,
         sourceFieldsUsed: result.sourceFieldsUsed,
+        audit: result.audit ?? null,
       });
 
       return {
@@ -885,6 +886,7 @@ export class DgiiCertificationService {
         extractedFields: result.extractedFields,
         fallbackFieldsUsed: result.fallbackFieldsUsed,
         rawRowKeys: result.rawRowKeys,
+        audit: result.audit ?? null,
       };
     } catch (error) {
       const message = (error as any)?.message ?? 'No se pudo generar XML para el caso de certificacion';

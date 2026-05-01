@@ -118,10 +118,14 @@ function summarizeRawBody(rawText?: string) {
 }
 
 function certificationXmlFileName(context?: { invoiceId?: number; ecf?: string }) {
-  const base = (context?.ecf ?? `document-${context?.invoiceId ?? Date.now()}`)
-    .replace(/[^A-Za-z0-9_-]+/g, '_')
-    .slice(0, 80);
-  return `${base || 'document'}.xml`;
+  const ecf = String(context?.ecf ?? '')
+    .trim()
+    .replace(/[^A-Za-z0-9]/g, '');
+  if (ecf) {
+    return `${ecf}.xml`.slice(0, 30);
+  }
+  const fallback = `DOC${String(context?.invoiceId ?? Date.now()).replace(/\D/g, '').slice(0, 20)}`;
+  return `${fallback}.xml`.slice(0, 30);
 }
 
 function extractMessageFromDetails(details: unknown): string | undefined {
