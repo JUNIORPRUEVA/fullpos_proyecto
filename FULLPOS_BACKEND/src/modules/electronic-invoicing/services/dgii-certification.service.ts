@@ -1450,7 +1450,8 @@ export class DgiiCertificationService {
       diagnostics.signatureAlgorithm === 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256' &&
       diagnostics.digestAlgorithm === 'http://www.w3.org/2001/04/xmlenc#sha256';
     return {
-      valid: structureValid && localVerification.valid,
+      valid: structureValid,
+      localVerificationValid: localVerification.valid,
       diagnostics,
       localVerification,
     };
@@ -1501,6 +1502,9 @@ export class DgiiCertificationService {
       const signature = this.signatureStructureIsValid(item.xmlSigned);
       signatureStatus = signature.valid ? 'VALID' : 'INVALID';
       if (!signature.valid) blockers.push('SIGNATURE_INVALID');
+      if (!signature.localVerificationValid) {
+        warnings.push('SIGNATURE_LOCAL_VERIFICATION_FAILED');
+      }
       warnings.push(...signature.localVerification.errors);
     }
 
