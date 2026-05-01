@@ -63,7 +63,10 @@ test('DgiiSignatureService signs DGII SemillaModel with empty Reference URI and 
   assert.match(signed, /<Signature/);
   assert.match(signed, /<Reference URI=""/);
   assert.match(signed, /<Transform Algorithm="http:\/\/www\.w3\.org\/2000\/09\/xmldsig#enveloped-signature"/);
-  assert.deepEqual(transformAlgorithms, ['http://www.w3.org/2000/09/xmldsig#enveloped-signature']);
+  assert.deepEqual(transformAlgorithms, [
+    'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+    'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+  ]);
   assert.match(signed, /<KeyInfo><X509Data><X509Certificate>/);
   assert.doesNotMatch(signed, /<KeyValue|<RSAKeyValue|<Exponent>/);
   assert.match(signed, /<valor>abc123<\/valor>\s*<fecha>2026-04-26T00:00:00<\/fecha>\s*<Signature/);

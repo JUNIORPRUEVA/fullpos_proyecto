@@ -384,6 +384,12 @@ function inspectDgiiSeedXsdStructure(xml: string) {
 
 function matchesOfficialDgiiSeedSignatureShape(xml: string, diagnostics: SignedXmlDiagnostics) {
   const transformAlgorithms = [...xml.matchAll(/<Transform\s+Algorithm="([^"]+)"/g)].map((match) => match[1]);
+  const transformShapeMatches =
+    transformAlgorithms.length === 1
+      ? transformAlgorithms[0] === 'http://www.w3.org/2000/09/xmldsig#enveloped-signature'
+      : transformAlgorithms.length === 2 &&
+        transformAlgorithms[0] === 'http://www.w3.org/2000/09/xmldsig#enveloped-signature' &&
+        transformAlgorithms[1] === 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
   return (
     diagnostics.signedXmlRoot === 'SemillaModel' &&
     diagnostics.signedXmlHasSignature &&
@@ -392,8 +398,7 @@ function matchesOfficialDgiiSeedSignatureShape(xml: string, diagnostics: SignedX
     diagnostics.canonicalizationAlgorithm === 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315' &&
     diagnostics.signatureAlgorithm === 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256' &&
     diagnostics.digestAlgorithm === 'http://www.w3.org/2001/04/xmlenc#sha256' &&
-    transformAlgorithms.length === 1 &&
-    transformAlgorithms[0] === 'http://www.w3.org/2000/09/xmldsig#enveloped-signature' &&
+    transformShapeMatches &&
     !/<KeyValue|<RSAKeyValue|<Exponent>/.test(xml)
   );
 }
