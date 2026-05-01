@@ -599,6 +599,37 @@ export class DgiiCertificationService {
     };
   }
 
+  private async dgiiAuthCacheDiagnostics(companyId: number | undefined, environment: DgiiEnvironment) {
+    if (!companyId) {
+      return {
+        dgiiAuthTokenValid: false,
+        dgiiAuthLastErrorCode: null as string | null,
+        dgiiAuthLastErrorMessage: null as string | null,
+        dgiiAuthLastErrorAt: null as Date | null,
+        dgiiAuthTokenExpiresAt: null as Date | null,
+      };
+    }
+    const cache = await this.prisma.electronicDgiiTokenCache.findUnique({
+      where: { companyId_environment: { companyId, environment } },
+      select: {
+        expiresAt: true,
+        updatedAt: true,
+        lastErrorCode: true,
+        lastErrorMessage: true,
+      },
+    }).catch(() => null);
+    const expiresAt = cache?.expiresAt ?? null;
+    const hasLiveToken = !!expiresAt && expiresAt.getTime() > Date.now() + 60_000;
+    const hasAuthError = !!cache?.lastErrorCode || !!cache?.lastErrorMessage;
+    return {
+      dgiiAuthTokenValid: hasLiveToken && !hasAuthError,
+      dgiiAuthLastErrorCode: cache?.lastErrorCode ?? null,
+      dgiiAuthLastErrorMessage: cache?.lastErrorMessage ?? null,
+      dgiiAuthLastErrorAt: hasAuthError ? cache?.updatedAt ?? null : null,
+      dgiiAuthTokenExpiresAt: expiresAt,
+    };
+  }
+
   async buildDiagnostics(companyId?: number) {
     const migrationWarning = 'La migración de certificación DGII no está aplicada en la base de datos real.';
     const db = await this.detectCertificationDbFields();
@@ -611,6 +642,7 @@ export class DgiiCertificationService {
       ? await this.getEnvironment(companyId)
       : normalizeDgiiEnvironmentAlias(env.DGII_DEFAULT_ENVIRONMENT) as DgiiEnvironment;
     const submitConfig = this.dgiiSubmitConfigDiagnostics(environment);
+    const authCache = await this.dgiiAuthCacheDiagnostics(companyId, environment);
     const activeCertificateExists = await this.hasActiveCertificationCertificate(companyId);
     const caseWhere = companyId ? { companyId } : {};
     const [totalCasesCount, signedCasesCount, signableCasesCount, lastSigningErrorCase] = await Promise.all([
@@ -648,6 +680,9 @@ export class DgiiCertificationService {
     if (!xsd.xsdValidationEngineAvailable) submitBlockers.push('XSD_ENGINE_MISSING:xmllint');
     if (!certificateConfigured) submitBlockers.push('CERTIFICATE_MISSING:active electronic certificate');
     if (signedCasesCount <= 0) submitBlockers.push('SIGNED_CASES_MISSING');
+    if (authCache.dgiiAuthLastErrorCode || authCache.dgiiAuthLastErrorMessage) {
+      submitBlockers.push(`DGII_AUTH_VALIDATION_FAILED:${authCache.dgiiAuthLastErrorCode ?? 'DGII_AUTH_LAST_ERROR'}`);
+    }
     const canSubmitToDgii = db.databaseHasNewFields === true &&
       xsd.xsdFilesFound > 0 &&
       xsd.xsdValidationEngineAvailable &&
@@ -655,6 +690,8 @@ export class DgiiCertificationService {
       rfceGenerationAvailable &&
       submitConfig.dgiiEndpointConfigExists &&
       submitConfig.dgiiAuthConfigExists &&
+      !authCache.dgiiAuthLastErrorCode &&
+      !authCache.dgiiAuthLastErrorMessage &&
       certificateConfigured &&
       signedCasesCount > 0;
 
@@ -675,6 +712,11 @@ export class DgiiCertificationService {
       rfceGenerationAvailable,
       dgiiEndpointConfigExists: submitConfig.dgiiEndpointConfigExists,
       dgiiAuthConfigExists: submitConfig.dgiiAuthConfigExists,
+      dgiiAuthTokenValid: authCache.dgiiAuthTokenValid,
+      dgiiAuthLastErrorCode: authCache.dgiiAuthLastErrorCode,
+      dgiiAuthLastErrorMessage: authCache.dgiiAuthLastErrorMessage,
+      dgiiAuthLastErrorAt: authCache.dgiiAuthLastErrorAt,
+      dgiiAuthTokenExpiresAt: authCache.dgiiAuthTokenExpiresAt,
       activeCertificateExists,
       signingEngineAvailable,
       certificateConfigured,
