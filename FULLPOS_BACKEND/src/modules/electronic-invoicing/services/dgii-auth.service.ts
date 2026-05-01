@@ -30,7 +30,7 @@ import {
 } from '../utils/credential-crypto.utils';
 import { DgiiEnvironment } from '../types/dgii.types';
 
-export type DgiiTokenSource = 'manual' | 'cache' | 'env' | 'auto';
+export type DgiiTokenSource = 'manual' | 'manual-cache' | 'cache' | 'env' | 'auto';
 
 function getRequiredFeMasterKey() {
   const key = env.FE_MASTER_ENCRYPTION_KEY?.trim();
@@ -861,6 +861,14 @@ export class DgiiAuthService {
     return { ...cached, token: decryptSecret(cached.tokenEncrypted) };
   }
 
+  private async readAnyCachedToken(companyId: number, environment: DgiiEnvironment) {
+    const cached = await this.prisma.electronicDgiiTokenCache.findUnique({
+      where: { companyId_environment: { companyId, environment } },
+    });
+    if (!cached?.tokenEncrypted) return null;
+    return { ...cached, token: decryptSecret(cached.tokenEncrypted) };
+  }
+
   async invalidateCompanyBearerToken(companyId: number, environment: DgiiEnvironment, reason?: string) {
     await this.prisma.electronicDgiiTokenCache.deleteMany({
       where: { companyId, environment },
@@ -1046,6 +1054,26 @@ export class DgiiAuthService {
       const cached = await this.readCachedToken(companyId, environment);
       if (cached?.token) {
         return { token: cached.token, source: 'cache' };
+      }
+    }
+
+    if (options?.forceRefresh) {
+      const cached = await this.readAnyCachedToken(companyId, environment);
+      const lastValidatedAt = cached?.lastValidatedAt?.getTime() ?? 0;
+      const hasManualToken = !!cached?.token && lastValidatedAt > 0;
+      if (hasManualToken) {
+        const ageMs = Date.now() - lastValidatedAt;
+        const maxManualTokenAgeMs = 23 * 60 * 60 * 1000;
+        if (ageMs <= maxManualTokenAgeMs) {
+          console.warn('[electronic-invoicing.dgii.auth] manual_cache.reused_on_force_refresh', {
+            requestId,
+            companyId,
+            environment,
+            lastValidatedAt: cached!.lastValidatedAt,
+            expiresAt: cached!.expiresAt,
+          });
+          return { token: cached!.token, source: 'manual-cache' };
+        }
       }
     }
 
