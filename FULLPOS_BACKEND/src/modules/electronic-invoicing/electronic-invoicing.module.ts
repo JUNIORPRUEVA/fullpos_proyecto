@@ -43,7 +43,9 @@ import {
   certificationResetSchema,
   createElectronicInvoicingCertificationController,
   uploadDgiiCertificationExcel,
+  uploadDgiiSignedSeedXml,
   validateDgiiCertificationExcelUpload,
+  validateDgiiSignedSeedXmlUpload,
 } from './controllers/electronic-invoicing-certification.controller';
 import {
   createElectronicInvoicingPublicController,
@@ -97,7 +99,7 @@ const electronicInvoicingService = new ElectronicInvoicingService(
 
 const adminController = createElectronicInvoicingAdminController(electronicInvoicingService);
 const dgiiController = createElectronicInvoicingDgiiController(electronicInvoicingService);
-const certificationController = createElectronicInvoicingCertificationController(certificationService);
+const certificationController = createElectronicInvoicingCertificationController(certificationService, authService);
 const publicController = createElectronicInvoicingPublicController(
   authService,
   receptionService,
@@ -493,6 +495,21 @@ posElectronicInvoicingRouter.get(
   '/certification/diagnostics',
   overrideKeyGuard,
   asyncHandler(certificationController.diagnostics),
+);
+
+posElectronicInvoicingRouter.get(
+  '/certification/dgii-auth/seed',
+  overrideKeyGuard,
+  validate(certificationLocatorSchema, 'query'),
+  asyncHandler(certificationController.downloadManualSeed),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/dgii-auth/signed-seed',
+  overrideKeyGuard,
+  uploadDgiiSignedSeedXml,
+  validateDgiiSignedSeedXmlUpload,
+  asyncHandler(certificationController.uploadManualSignedSeed),
 );
 
 posElectronicInvoicingRouter.get(

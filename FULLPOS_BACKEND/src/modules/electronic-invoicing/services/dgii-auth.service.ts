@@ -875,6 +875,152 @@ export class DgiiAuthService {
     });
   }
 
+  async requestManualSeedForSigning(
+    companyId: number,
+    environment: DgiiEnvironment,
+    requestId?: string,
+  ) {
+    const config = this.directory.getEnvironmentConfig(environment);
+    if (!config.authSeedUrl) {
+      throw {
+        status: 503,
+        message: `Configuración de semilla DGII incompleta para ambiente ${environment}`,
+        errorCode: 'DGII_AUTH_SEED_CONFIG_MISSING',
+      };
+    }
+
+    const seed = await this.requestDgiiSeed(
+      companyId,
+      environment,
+      config.authSeedUrl,
+      config.userAgent,
+      config.timeoutMs,
+    );
+
+    console.info('[electronic-invoicing.dgii.auth] manual_seed.downloaded', {
+      requestId,
+      companyId,
+      environment,
+      authSeedUrl: seed.meta.authSeedUrl,
+      methodUsed: seed.meta.methodUsed,
+      httpStatus: seed.meta.httpStatus,
+      rootElement: seed.meta.rootElement,
+      xmlSize: seed.meta.xmlSize,
+    });
+
+    return {
+      seedXml: seed.seedXml,
+      meta: seed.meta,
+    };
+  }
+
+  async validateManualSignedSeed(
+    companyId: number,
+    environment: DgiiEnvironment,
+    signedSeedXml: string,
+    requestId?: string,
+  ) {
+    const config = this.directory.getEnvironmentConfig(environment);
+    if (!config.authValidateUrl) {
+      throw {
+        status: 503,
+        message: `Configuración de validación DGII incompleta para ambiente ${environment}`,
+        errorCode: 'DGII_AUTH_VALIDATE_CONFIG_MISSING',
+      };
+    }
+
+    const diagnostics = this.signatureService.inspectSignedXml(signedSeedXml);
+    const root = diagnostics.signedXmlRoot ?? extractXmlRootName(signedSeedXml);
+    if (!root || !root.toLowerCase().endsWith('semillamodel')) {
+      throw {
+        status: 400,
+        message: 'El XML subido no parece ser una semilla DGII firmada. Descarga la semilla desde FULLPOS, fírmala con la app DGII y sube ese archivo.',
+        errorCode: 'DGII_SIGNED_SEED_XML_EXPECTED',
+        details: {
+          signedXmlRoot: root,
+          signedXmlHasSignature: diagnostics.signedXmlHasSignature,
+        },
+      };
+    }
+    if (!diagnostics.signedXmlHasSignature) {
+      throw {
+        status: 400,
+        message: 'La semilla DGII subida no contiene firma digital.',
+        errorCode: 'DGII_SIGNED_SEED_SIGNATURE_MISSING',
+        details: { signedXmlRoot: root },
+      };
+    }
+
+    const validated = await this.validateDgiiSeed(
+      companyId,
+      environment,
+      config.authValidateUrl,
+      config.userAgent,
+      config.timeoutMs,
+      signedSeedXml,
+    );
+
+    await this.prisma.electronicDgiiTokenCache.upsert({
+      where: { companyId_environment: { companyId, environment } },
+      update: {
+        tokenEncrypted: encryptSecret(validated.token),
+        issuedAt: validated.issuedAt,
+        expiresAt: validated.expiresAt,
+        lastValidatedAt: validated.validatedAt,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+      },
+      create: {
+        companyId,
+        environment,
+        tokenEncrypted: encryptSecret(validated.token),
+        issuedAt: validated.issuedAt,
+        expiresAt: validated.expiresAt,
+        lastValidatedAt: validated.validatedAt,
+      },
+    });
+
+    await this.audit.log({
+      companyId,
+      eventType: 'auth.dgii.token.manual_seed_validated',
+      eventSource: 'DGII',
+      message: `Token DGII obtenido con semilla firmada manualmente para ${environment}`,
+      payload: {
+        environment,
+        expiresAt: validated.expiresAt,
+        validateUrl: validated.meta.validateUrl,
+        signedXmlRoot: validated.meta.signedXmlRoot,
+      },
+      requestId,
+    });
+
+    console.info('[electronic-invoicing.dgii.auth] manual_seed.validated', {
+      requestId,
+      companyId,
+      environment,
+      validateUrl: validated.meta.validateUrl,
+      httpStatus: validated.meta.httpStatus,
+      tokenFound: !!validated.token,
+      expiresAt: validated.expiresAt.toISOString(),
+      signedXmlRoot: validated.meta.signedXmlRoot,
+      signedXmlHasSignature: validated.meta.signedXmlHasSignature,
+    });
+
+    return {
+      tokenAccepted: true,
+      environment,
+      issuedAt: validated.issuedAt.toISOString(),
+      expiresAt: validated.expiresAt.toISOString(),
+      validatedAt: validated.validatedAt.toISOString(),
+      signedXmlRoot: validated.meta.signedXmlRoot,
+      signedXmlHasSignature: validated.meta.signedXmlHasSignature,
+      validateUrl: validated.meta.validateUrl,
+      payloadMode: validated.meta.payloadMode,
+      fieldName: validated.meta.fieldName,
+      message: 'Semilla firmada validada por DGII. Token listo para enviar un caso de prueba.',
+    };
+  }
+
   async getCompanyBearerToken(
     companyId: number,
     environment: DgiiEnvironment,

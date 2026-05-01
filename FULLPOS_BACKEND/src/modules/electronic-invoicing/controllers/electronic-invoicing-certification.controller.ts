@@ -3,6 +3,7 @@ import multer from 'multer';
 import { Request, RequestHandler, Response } from 'express';
 import { z } from 'zod';
 import { DgiiCertificationService } from '../services/dgii-certification.service';
+import { DgiiAuthService } from '../services/dgii-auth.service';
 
 const excelUpload = multer({
   storage: multer.memoryStorage(),
@@ -10,6 +11,13 @@ const excelUpload = multer({
 });
 
 export const uploadDgiiCertificationExcel = excelUpload.single('file');
+
+const signedSeedUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+});
+
+export const uploadDgiiSignedSeedXml = signedSeedUpload.single('file');
 
 const certificationLocatorBaseSchema = z.object({
     companyRnc: z.string().trim().min(3).optional(),
@@ -83,7 +91,32 @@ export const validateDgiiCertificationExcelUpload: RequestHandler = (req, res, n
   return next();
 };
 
-export function createElectronicInvoicingCertificationController(service: DgiiCertificationService) {
+export const validateDgiiSignedSeedXmlUpload: RequestHandler = (req, res, next) => {
+  const file = requestFile(req);
+  if (!file) {
+    return res.status(400).json({
+      message: 'Archivo XML de semilla firmada requerido',
+      errorCode: 'DGII_SIGNED_SEED_FILE_REQUIRED',
+    });
+  }
+
+  if (path.extname(file.originalname).toLowerCase() !== '.xml') {
+    return res.status(400).json({
+      message: 'El archivo de semilla firmada debe tener extension .xml',
+      errorCode: 'DGII_SIGNED_SEED_INVALID_FILE',
+    });
+  }
+
+  const parsed = certificationLocatorSchema.safeParse(req.body);
+  if (!parsed.success) return next(parsed.error);
+  req.body = parsed.data;
+  return next();
+};
+
+export function createElectronicInvoicingCertificationController(
+  service: DgiiCertificationService,
+  authService: DgiiAuthService,
+) {
   const resolveCompany = (req: Request) => {
     const source = req.method === 'GET' || req.method === 'DELETE' ? req.query : req.body;
     const locators = source as { companyRnc?: string; companyCloudId?: string };
@@ -113,6 +146,34 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
         requestId: req.requestId,
       });
       res.status(201).json(result);
+    },
+
+    downloadManualSeed: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const environment = await service.getCompanyDgiiEnvironment(company.id);
+      const result = await authService.requestManualSeedForSigning(company.id, environment, req.requestId);
+      const safeRnc = String(company.rnc ?? 'dgii').replace(/[^0-9A-Za-z_-]/g, '');
+      const fileName = `dgii-semilla-${safeRnc || 'empresa'}.xml`;
+      res
+        .status(200)
+        .type('application/xml')
+        .set('Content-Disposition', `attachment; filename="${fileName}"`)
+        .set('X-DGII-Seed-Root', result.meta.rootElement ?? '')
+        .send(result.seedXml);
+    },
+
+    uploadManualSignedSeed: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const file = requestFile(req)!;
+      const environment = await service.getCompanyDgiiEnvironment(company.id);
+      const signedSeedXml = file.buffer.toString('utf8');
+      const result = await authService.validateManualSignedSeed(
+        company.id,
+        environment,
+        signedSeedXml,
+        req.requestId,
+      );
+      res.json(result);
     },
 
     listBatches: async (req: Request, res: Response) => {

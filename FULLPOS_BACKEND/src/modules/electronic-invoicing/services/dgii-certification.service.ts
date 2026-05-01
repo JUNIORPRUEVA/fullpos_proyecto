@@ -391,6 +391,10 @@ export class DgiiCertificationService {
     return normalizeDgiiEnvironmentAlias(config?.environment ?? env.DGII_DEFAULT_ENVIRONMENT) as DgiiEnvironment;
   }
 
+  async getCompanyDgiiEnvironment(companyId: number): Promise<DgiiEnvironment> {
+    return this.getEnvironment(companyId);
+  }
+
   private async loadActiveCertificate(companyId: number) {
     const certificate = await this.prisma.electronicCertificate.findFirst({
       where: { companyId, status: 'ACTIVE' },
