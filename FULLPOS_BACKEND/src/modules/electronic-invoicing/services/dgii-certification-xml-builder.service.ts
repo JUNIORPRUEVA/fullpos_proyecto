@@ -657,39 +657,88 @@ export class DgiiCertificationXmlBuilderService {
     const explicitCantidad = readField(reader, 'CantidadItem', ['cantidadItem', 'cantidad', 'qty'], quantityText);
     const descuentoMonto = readMoney(reader, 'DescuentoMonto', ['descuentoMonto', 'descuento monto', 'descuento']);
     const indicadorBienServicioRaw = integerText(readAny(reader, 'IndicadorBienoServicio', ['indicadorBienoServicio', 'indicador bien servicio', 'bienoservicio']));
-    const unitPriceBase = explicitPrecioUnitario ?? explicitMontoItem ?? montoTotalText;
-    let indicadorFacturacion = ['0', '1', '2', '3', '4'].includes(itemIndicatorRaw ?? '') ? itemIndicatorRaw : null;
-    let nombreItem = nombreItemRaw;
-    let cantidadItem = explicitCantidad;
-    let precioUnitarioItem = unitPriceBase;
-    let montoItemText = explicitMontoItem ?? montoTotalText;
-    let indicadorBienServicio = ['1', '2'].includes(indicadorBienServicioRaw ?? '') ? indicadorBienServicioRaw : null;
+    const sourceTotalItbis1Text = readMoney(reader, 'TotalITBIS1', ['totalITBIS1', 'total itbis 1']);
+    const sourceTotalItbis2Text = readMoney(reader, 'TotalITBIS2', ['totalITBIS2', 'total itbis 2']);
+    const sourceTotalItbis3Text = readMoney(reader, 'TotalITBIS3', ['totalITBIS3', 'total itbis 3']);
+    const sourceValorPagarText = readMoney(reader, 'ValorPagar', ['valorPagar', 'valor pagar']);
+    const sourceItbis1Rate = readAny(reader, 'ITBIS1', ['itbis1', 'ITBIS1']);
+    const sourceItbis2Rate = readAny(reader, 'ITBIS2', ['itbis2', 'ITBIS2']);
+    const sourceItbis3Rate = readAny(reader, 'ITBIS3', ['itbis3', 'ITBIS3']);
+    if (sourceTotalItbis1Text) sourceTotals.TotalITBIS1 = sourceTotalItbis1Text;
+    if (sourceTotalItbis2Text) sourceTotals.TotalITBIS2 = sourceTotalItbis2Text;
+    if (sourceTotalItbis3Text) sourceTotals.TotalITBIS3 = sourceTotalItbis3Text;
+    if (sourceValorPagarText) sourceTotals.ValorPagar = sourceValorPagarText;
+    if (sourceItbis1Rate) sourceTotals.ITBIS1 = sourceItbis1Rate;
+    if (sourceItbis2Rate) sourceTotals.ITBIS2 = sourceItbis2Rate;
+    if (sourceItbis3Rate) sourceTotals.ITBIS3 = sourceItbis3Rate;
 
-    if (!nombreItem && montoTotalText) {
-      const taxableFallback = (parseMoney(sourceTotalItbisText) ?? 0) > 0;
-      indicadorFacturacion = taxableFallback ? '1' : '4';
-      nombreItem = 'Servicio de prueba DGII';
-      indicadorBienServicio = '2';
-      cantidadItem = '1';
-      precioUnitarioItem = montoTotalText;
-      montoItemText = montoTotalText;
-      sourceFallback(reader, 'IndicadorFacturacion', indicadorFacturacion, 'certification.itemFallback', fallbackFieldsUsed);
-      sourceFallback(reader, 'NombreItem', nombreItem, 'certification.itemFallback', fallbackFieldsUsed);
-      sourceFallback(reader, 'IndicadorBienoServicio', indicadorBienServicio, 'certification.itemFallback', fallbackFieldsUsed);
-      sourceFallback(reader, 'CantidadItem', cantidadItem, 'certification.itemFallback', fallbackFieldsUsed);
-      sourceFallback(reader, 'PrecioUnitarioItem', precioUnitarioItem, 'certification.itemFallback', fallbackFieldsUsed);
-      sourceFallback(reader, 'MontoItem', montoItemText, 'certification.itemFallback', fallbackFieldsUsed);
-      warnings.push('Item fallback used for certification because workbook row does not include item detail.');
-    }
+    const syntheticBuckets = [
+      { indicador: '1', amountText: sourceMontoGravadoI1Text, name: 'Servicio gravado 18 DGII' },
+      { indicador: '2', amountText: sourceMontoGravadoI2Text, name: 'Servicio gravado 16 DGII' },
+      { indicador: '3', amountText: sourceMontoGravadoI3Text, name: 'Servicio gravado 0 DGII' },
+      { indicador: '4', amountText: sourceMontoExentoText, name: 'Servicio exento DGII' },
+    ].filter((bucket) => (parseMoney(bucket.amountText) ?? 0) > 0);
 
-    if (!montoItemText && explicitCantidad && explicitPrecioUnitario) {
-      const qtyNumber = parseQuantityNumber(explicitCantidad);
-      const unitPriceNumber = parseMoney(explicitPrecioUnitario);
-      if (qtyNumber != null && unitPriceNumber != null) {
-        montoItemText = formatMoney(qtyNumber * unitPriceNumber);
-        sourceFallback(reader, 'MontoItem', montoItemText, 'certification.calculatedFromQuantityAndUnitPrice', fallbackFieldsUsed);
-        warnings.push('MontoItem calculated from CantidadItem x PrecioUnitarioItem.');
+    const useSyntheticItems = syntheticBuckets.length > 0;
+    const builtItems: Array<Record<string, string>> = [];
+    const defaultBienServicio = ['1', '2'].includes(indicadorBienServicioRaw ?? '') ? indicadorBienServicioRaw! : '2';
+    if (useSyntheticItems) {
+      syntheticBuckets.forEach((bucket, index) => {
+        builtItems.push({
+          NumeroLinea: String(index + 1),
+          IndicadorFacturacion: bucket.indicador,
+          NombreItem: nombreItemRaw ?? bucket.name,
+          IndicadorBienoServicio: defaultBienServicio,
+          CantidadItem: explicitCantidad ?? '1.00',
+          PrecioUnitarioItem: bucket.amountText!,
+          MontoItem: bucket.amountText!,
+          ...(descuentoMonto ? { DescuentoMonto: descuentoMonto } : {}),
+        });
+      });
+      warnings.push('Certification strict mode: DetallesItems rebuilt from Excel totals to match DGII certification dataset.');
+    } else {
+      const unitPriceBase = explicitPrecioUnitario ?? explicitMontoItem ?? montoTotalText;
+      let indicadorFacturacion = ['0', '1', '2', '3', '4'].includes(itemIndicatorRaw ?? '') ? itemIndicatorRaw : null;
+      let nombreItem = nombreItemRaw;
+      let cantidadItem = explicitCantidad;
+      let precioUnitarioItem = unitPriceBase;
+      let montoItemText = explicitMontoItem ?? montoTotalText;
+      let indicadorBienServicio = ['1', '2'].includes(indicadorBienServicioRaw ?? '') ? indicadorBienServicioRaw : null;
+      if (!nombreItem && montoTotalText) {
+        const taxableFallback = (parseMoney(sourceTotalItbisText) ?? 0) > 0;
+        indicadorFacturacion = taxableFallback ? '1' : '4';
+        nombreItem = 'Servicio de prueba DGII';
+        indicadorBienServicio = '2';
+        cantidadItem = '1';
+        precioUnitarioItem = montoTotalText;
+        montoItemText = montoTotalText;
+        sourceFallback(reader, 'IndicadorFacturacion', indicadorFacturacion, 'certification.itemFallback', fallbackFieldsUsed);
+        sourceFallback(reader, 'NombreItem', nombreItem, 'certification.itemFallback', fallbackFieldsUsed);
+        sourceFallback(reader, 'IndicadorBienoServicio', indicadorBienServicio, 'certification.itemFallback', fallbackFieldsUsed);
+        sourceFallback(reader, 'CantidadItem', cantidadItem, 'certification.itemFallback', fallbackFieldsUsed);
+        sourceFallback(reader, 'PrecioUnitarioItem', precioUnitarioItem, 'certification.itemFallback', fallbackFieldsUsed);
+        sourceFallback(reader, 'MontoItem', montoItemText, 'certification.itemFallback', fallbackFieldsUsed);
+        warnings.push('Item fallback used for certification because workbook row does not include item detail.');
       }
+      if (!montoItemText && explicitCantidad && explicitPrecioUnitario) {
+        const qtyNumber = parseQuantityNumber(explicitCantidad);
+        const unitPriceNumber = parseMoney(explicitPrecioUnitario);
+        if (qtyNumber != null && unitPriceNumber != null) {
+          montoItemText = formatMoney(qtyNumber * unitPriceNumber);
+          sourceFallback(reader, 'MontoItem', montoItemText, 'certification.calculatedFromQuantityAndUnitPrice', fallbackFieldsUsed);
+          warnings.push('MontoItem calculated from CantidadItem x PrecioUnitarioItem.');
+        }
+      }
+      builtItems.push({
+        NumeroLinea: integerText(readAny(reader, 'NumeroLinea', ['numeroLinea', 'numero linea', 'linea'])) ?? '1',
+        IndicadorFacturacion: indicadorFacturacion ?? '4',
+        NombreItem: nombreItem ?? 'Servicio de prueba DGII',
+        IndicadorBienoServicio: indicadorBienServicio ?? '2',
+        CantidadItem: cantidadItem ?? '1.00',
+        PrecioUnitarioItem: precioUnitarioItem ?? (montoItemText ?? '0.00'),
+        MontoItem: montoItemText ?? '0.00',
+        ...(descuentoMonto ? { DescuentoMonto: descuentoMonto } : {}),
+      });
     }
 
     const requiredFields = [
@@ -704,102 +753,133 @@ export class DgiiCertificationXmlBuilderService {
       ...(BUYER_REQUIRED_BY_TYPE.has(tipoEcf ?? '') ? ['RNCComprador', 'RazonSocialComprador'] : []),
     ];
 
-    const montoItemNumber = parsePositiveMoney(montoItemText);
-    const itemBaseAmount = montoItemNumber ?? 0;
-    const montoGravadoI1 = indicadorFacturacion === '1' ? itemBaseAmount : 0;
-    const montoGravadoI2 = indicadorFacturacion === '2' ? itemBaseAmount : 0;
-    const montoGravadoI3 = indicadorFacturacion === '3' ? itemBaseAmount : 0;
-    const montoExento = indicadorFacturacion === '4' ? itemBaseAmount : 0;
-    const totalItbis1 = Math.round(montoGravadoI1 * 0.18 * 100) / 100;
-    const totalItbis2 = Math.round(montoGravadoI2 * 0.16 * 100) / 100;
-    const totalItbis3 = 0;
-    const totalItbis = Math.round((totalItbis1 + totalItbis2 + totalItbis3) * 100) / 100;
-    const montoGravadoTotal = Math.round((montoGravadoI1 + montoGravadoI2 + montoGravadoI3) * 100) / 100;
-    const xmlMontoTotal = Math.round((itemBaseAmount + totalItbis) * 100) / 100;
+    const calculatedAmounts = builtItems.reduce((acc, item) => {
+      const indicador = item.IndicadorFacturacion;
+      const monto = parseMoney(item.MontoItem) ?? 0;
+      if (indicador === '1') acc.i1 += monto;
+      else if (indicador === '2') acc.i2 += monto;
+      else if (indicador === '3') acc.i3 += monto;
+      else if (indicador === '4') acc.exento += monto;
+      return acc;
+    }, { i1: 0, i2: 0, i3: 0, exento: 0 });
+    const montoGravadoI1 = parseMoney(sourceMontoGravadoI1Text) ?? calculatedAmounts.i1;
+    const montoGravadoI2 = parseMoney(sourceMontoGravadoI2Text) ?? calculatedAmounts.i2;
+    const montoGravadoI3 = parseMoney(sourceMontoGravadoI3Text) ?? calculatedAmounts.i3;
+    const montoExento = parseMoney(sourceMontoExentoText) ?? calculatedAmounts.exento;
+    const totalItbis1 = parseMoney(sourceTotalItbis1Text) ?? Math.round(montoGravadoI1 * 0.18 * 100) / 100;
+    const totalItbis2 = parseMoney(sourceTotalItbis2Text) ?? Math.round(montoGravadoI2 * 0.16 * 100) / 100;
+    const totalItbis3 = parseMoney(sourceTotalItbis3Text) ?? 0;
+    const totalItbis = parseMoney(sourceTotalItbisText) ?? Math.round((totalItbis1 + totalItbis2 + totalItbis3) * 100) / 100;
+    const montoGravadoTotal = parseMoney(sourceMontoGravadoTotalText) ?? Math.round((montoGravadoI1 + montoGravadoI2 + montoGravadoI3) * 100) / 100;
+    const xmlMontoTotal = parseMoney(montoTotalText) ?? Math.round((montoGravadoTotal + montoExento + totalItbis) * 100) / 100;
+    const xmlValorPagar = parseMoney(sourceValorPagarText) ?? xmlMontoTotal;
 
     const calculatedTotals: Record<string, string> = {};
-    const setCalculatedTotal = (tag: string, amount: number, { allowZero = false }: { allowZero?: boolean } = {}) => {
-      if (!allowZero && amount === 0) return null;
-      const text = formatMoney(amount);
-      if (text) {
-        calculatedTotals[tag] = text;
-        pushTotalValue(tag, text);
-      }
+    const setCalculatedTotal = (tag: string, amount: number, sourceText?: string | null, { allowZero = false }: { allowZero?: boolean } = {}) => {
+      const text = sourceText ?? formatMoney(amount);
+      if (!text) return null;
+      if (!allowZero && (parseMoney(text) ?? 0) === 0) return null;
+      calculatedTotals[tag] = text;
+      pushTotalValue(tag, text);
       return text;
     };
 
-    setCalculatedTotal('MontoGravadoTotal', montoGravadoTotal, { allowZero: montoGravadoTotal === 0 && indicadorFacturacion !== '4' });
+    setCalculatedTotal('MontoGravadoTotal', montoGravadoTotal, sourceMontoGravadoTotalText, { allowZero: true });
     if (tipoEcf !== '46') {
-      setCalculatedTotal('MontoGravadoI1', montoGravadoI1);
-      setCalculatedTotal('MontoGravadoI2', montoGravadoI2);
+      setCalculatedTotal('MontoGravadoI1', montoGravadoI1, sourceMontoGravadoI1Text);
+      setCalculatedTotal('MontoGravadoI2', montoGravadoI2, sourceMontoGravadoI2Text);
     }
-    setCalculatedTotal('MontoGravadoI3', montoGravadoI3, { allowZero: indicadorFacturacion === '3' });
+    setCalculatedTotal('MontoGravadoI3', montoGravadoI3, sourceMontoGravadoI3Text, { allowZero: (parseMoney(sourceMontoGravadoI3Text) ?? montoGravadoI3) === 0 });
     if (tipoEcf !== '46') {
-      setCalculatedTotal('MontoExento', montoExento, { allowZero: indicadorFacturacion === '4' });
+      setCalculatedTotal('MontoExento', montoExento, sourceMontoExentoText, { allowZero: (parseMoney(sourceMontoExentoText) ?? montoExento) === 0 });
     }
-    if (tipoEcf !== '46' && montoGravadoI1 > 0) pushTotalValue('ITBIS1', '18');
-    if (tipoEcf !== '46' && montoGravadoI2 > 0) pushTotalValue('ITBIS2', '16');
-    if (montoGravadoI3 > 0) pushTotalValue('ITBIS3', '0');
-    setCalculatedTotal('TotalITBIS', totalItbis, { allowZero: totalItbis === 0 });
+    if (tipoEcf !== '46' && (parseMoney(sourceMontoGravadoI1Text) ?? montoGravadoI1) > 0) pushTotalValue('ITBIS1', sourceItbis1Rate ?? '18');
+    if (tipoEcf !== '46' && (parseMoney(sourceMontoGravadoI2Text) ?? montoGravadoI2) > 0) pushTotalValue('ITBIS2', sourceItbis2Rate ?? '16');
+    if ((parseMoney(sourceMontoGravadoI3Text) ?? montoGravadoI3) > 0) pushTotalValue('ITBIS3', sourceItbis3Rate ?? '0');
+    setCalculatedTotal('TotalITBIS', totalItbis, sourceTotalItbisText, { allowZero: true });
     if (tipoEcf !== '46') {
-      setCalculatedTotal('TotalITBIS1', totalItbis1, { allowZero: totalItbis1 === 0 && montoGravadoI1 > 0 });
-      setCalculatedTotal('TotalITBIS2', totalItbis2, { allowZero: totalItbis2 === 0 && montoGravadoI2 > 0 });
+      setCalculatedTotal('TotalITBIS1', totalItbis1, sourceTotalItbis1Text, { allowZero: true });
+      setCalculatedTotal('TotalITBIS2', totalItbis2, sourceTotalItbis2Text, { allowZero: true });
     }
-    if (montoGravadoI3 > 0) setCalculatedTotal('TotalITBIS3', totalItbis3, { allowZero: true });
+    if ((parseMoney(sourceMontoGravadoI3Text) ?? montoGravadoI3) > 0 || sourceTotalItbis3Text) {
+      setCalculatedTotal('TotalITBIS3', totalItbis3, sourceTotalItbis3Text ?? '0.00', { allowZero: true });
+    }
     pushTotalValue('MontoImpuestoAdicional', readMoney(reader, 'MontoImpuestoAdicional', ['montoImpuestoAdicional', 'monto impuesto adicional']));
-    setCalculatedTotal('MontoTotal', xmlMontoTotal, { allowZero: xmlMontoTotal === 0 });
+    setCalculatedTotal('MontoTotal', xmlMontoTotal, montoTotalText, { allowZero: true });
     pushTotalValue('MontoPeriodo', readMoney(reader, 'MontoPeriodo', ['montoPeriodo', 'monto periodo']));
     pushTotalValue('SaldoAnterior', readMoney(reader, 'SaldoAnterior', ['saldoAnterior', 'saldo anterior']));
     pushTotalValue('MontoAvancePago', readMoney(reader, 'MontoAvancePago', ['montoAvancePago', 'monto avance pago']));
-    setCalculatedTotal('ValorPagar', xmlMontoTotal, { allowZero: xmlMontoTotal === 0 });
+    setCalculatedTotal('ValorPagar', xmlValorPagar, sourceValorPagarText ?? montoTotalText, { allowZero: true });
     const totalItbisRetenidoText = readMoney(reader, 'TotalITBISRetenido', ['totalITBISRetenido', 'total itbis retenido']);
     const totalIsrRetencionText = readMoney(reader, 'TotalISRRetencion', ['totalISRRetencion', 'total isr retencion']);
     pushTotalValue('TotalITBISRetenido', totalItbisRetenidoText);
     pushTotalValue('TotalISRRetencion', totalIsrRetencionText);
 
-    pushValue(itemLines, '      ', 'NumeroLinea', integerText(readAny(reader, 'NumeroLinea', ['numeroLinea', 'numero linea', 'linea'])) ?? '1', itemValues);
-    pushValue(itemLines, '      ', 'IndicadorFacturacion', indicadorFacturacion, itemValues);
-    if (RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '')) {
-      let indicadorAgente = integerText(readAny(reader, 'IndicadorAgenteRetencionoPercepcion', [
-        'indicadorAgenteRetencionoPercepcion',
-        'indicador agente retencion',
-        'Indicador Agente Retencion o Percepcion',
-        'Indicador Agente Retencion Percepcion',
-        'Agente Retencion',
-        'indicador retencion',
-      ]));
-      let montoItbisRetenido = readMoney(reader, 'MontoITBISRetenido', ['montoITBISRetenido', 'monto itbis retenido', 'ITBIS Retenido', 'Monto ITBIS Retenido']);
-      let montoIsrRetenido = readMoney(reader, 'MontoISRRetenido', ['montoISRRetenido', 'monto isr retenido', 'ISR Retenido', 'Monto ISR Retenido', 'ISRRetenido']);
-      if (!montoItbisRetenido && tipoEcf === '41' && totalItbisRetenidoText) {
-        montoItbisRetenido = sourceFallback(reader, 'MontoITBISRetenido', totalItbisRetenidoText, 'certification.totalITBISRetenidoAsItemRetencion', fallbackFieldsUsed);
-        warnings.push('MontoITBISRetenido fallback used from TotalITBISRetenido for certification retention item.');
-      }
-      if (!montoIsrRetenido && totalIsrRetencionText) {
-        montoIsrRetenido = sourceFallback(reader, 'MontoISRRetenido', totalIsrRetencionText, 'certification.totalISRRetencionAsItemRetencion', fallbackFieldsUsed);
-        warnings.push('MontoISRRetenido fallback used from TotalISRRetencion for certification retention item.');
-      }
-      if (!indicadorAgente && (montoItbisRetenido || montoIsrRetenido)) {
-        indicadorAgente = sourceFallback(reader, 'IndicadorAgenteRetencionoPercepcion', '1', 'certification.retentionAmountDefaultAgent', fallbackFieldsUsed);
-        warnings.push('IndicadorAgenteRetencionoPercepcion default 1 used because the certification row includes retained amounts.');
-      }
-      if (indicadorAgente || tipoEcf === '47') {
-        itemLines.push('      <Retencion>');
-        pushValue(itemLines, '        ', 'IndicadorAgenteRetencionoPercepcion', indicadorAgente, itemValues);
-        if (tipoEcf === '41') {
-          pushValue(itemLines, '        ', 'MontoITBISRetenido', montoItbisRetenido, itemValues);
+    const auditItems: Array<{
+      numeroLinea: string;
+      indicadorFacturacion: string | null;
+      cantidadItem: string | null;
+      precioUnitarioItem: string | null;
+      montoItem: string | null;
+    }> = [];
+    builtItems.forEach((builtItem, index) => {
+      const currentItemLines: string[] = [];
+      const currentValues: Record<string, string> = {};
+      pushValue(currentItemLines, '      ', 'NumeroLinea', builtItem.NumeroLinea ?? String(index + 1), currentValues);
+      pushValue(currentItemLines, '      ', 'IndicadorFacturacion', builtItem.IndicadorFacturacion ?? null, currentValues);
+      if (RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '') && index === 0) {
+        let indicadorAgente = integerText(readAny(reader, 'IndicadorAgenteRetencionoPercepcion', [
+          'indicadorAgenteRetencionoPercepcion',
+          'indicador agente retencion',
+          'Indicador Agente Retencion o Percepcion',
+          'Indicador Agente Retencion Percepcion',
+          'Agente Retencion',
+          'indicador retencion',
+        ]));
+        let montoItbisRetenido = readMoney(reader, 'MontoITBISRetenido', ['montoITBISRetenido', 'monto itbis retenido', 'ITBIS Retenido', 'Monto ITBIS Retenido']);
+        let montoIsrRetenido = readMoney(reader, 'MontoISRRetenido', ['montoISRRetenido', 'monto isr retenido', 'ISR Retenido', 'Monto ISR Retenido', 'ISRRetenido']);
+        if (!montoItbisRetenido && tipoEcf === '41' && totalItbisRetenidoText) {
+          montoItbisRetenido = sourceFallback(reader, 'MontoITBISRetenido', totalItbisRetenidoText, 'certification.totalITBISRetenidoAsItemRetencion', fallbackFieldsUsed);
+          warnings.push('MontoITBISRetenido fallback used from TotalITBISRetenido for certification retention item.');
         }
-        pushValue(itemLines, '        ', 'MontoISRRetenido', montoIsrRetenido, itemValues);
-        itemLines.push('      </Retencion>');
-        itemValues.Retencion = 'present';
+        if (!montoIsrRetenido && totalIsrRetencionText) {
+          montoIsrRetenido = sourceFallback(reader, 'MontoISRRetenido', totalIsrRetencionText, 'certification.totalISRRetencionAsItemRetencion', fallbackFieldsUsed);
+          warnings.push('MontoISRRetenido fallback used from TotalISRRetencion for certification retention item.');
+        }
+        if (!indicadorAgente && (montoItbisRetenido || montoIsrRetenido)) {
+          indicadorAgente = sourceFallback(reader, 'IndicadorAgenteRetencionoPercepcion', '1', 'certification.retentionAmountDefaultAgent', fallbackFieldsUsed);
+          warnings.push('IndicadorAgenteRetencionoPercepcion default 1 used because the certification row includes retained amounts.');
+        }
+        if (indicadorAgente || tipoEcf === '47') {
+          currentItemLines.push('      <Retencion>');
+          pushValue(currentItemLines, '        ', 'IndicadorAgenteRetencionoPercepcion', indicadorAgente, currentValues);
+          if (tipoEcf === '41') {
+            pushValue(currentItemLines, '        ', 'MontoITBISRetenido', montoItbisRetenido, currentValues);
+          }
+          pushValue(currentItemLines, '        ', 'MontoISRRetenido', montoIsrRetenido, currentValues);
+          currentItemLines.push('      </Retencion>');
+          currentValues.Retencion = 'present';
+        }
       }
-    }
-    pushValue(itemLines, '      ', 'NombreItem', nombreItem, itemValues);
-    pushValue(itemLines, '      ', 'IndicadorBienoServicio', indicadorBienServicio, itemValues);
-    pushValue(itemLines, '      ', 'CantidadItem', cantidadItem, itemValues);
-    pushValue(itemLines, '      ', 'UnidadMedida', integerText(readAny(reader, 'UnidadMedida', ['unidadMedida', 'unidad medida', 'unidad'])), itemValues);
-    pushValue(itemLines, '      ', 'PrecioUnitarioItem', precioUnitarioItem, itemValues);
-    pushValue(itemLines, '      ', 'DescuentoMonto', descuentoMonto, itemValues);
-    pushValue(itemLines, '      ', 'MontoItem', montoItemText, itemValues);
+      pushValue(currentItemLines, '      ', 'NombreItem', builtItem.NombreItem ?? null, currentValues);
+      pushValue(currentItemLines, '      ', 'IndicadorBienoServicio', builtItem.IndicadorBienoServicio ?? null, currentValues);
+      pushValue(currentItemLines, '      ', 'CantidadItem', builtItem.CantidadItem ?? null, currentValues);
+      pushValue(currentItemLines, '      ', 'UnidadMedida', integerText(readAny(reader, 'UnidadMedida', ['unidadMedida', 'unidad medida', 'unidad'])), currentValues);
+      pushValue(currentItemLines, '      ', 'PrecioUnitarioItem', builtItem.PrecioUnitarioItem ?? null, currentValues);
+      pushValue(currentItemLines, '      ', 'DescuentoMonto', builtItem.DescuentoMonto ?? null, currentValues);
+      pushValue(currentItemLines, '      ', 'MontoItem', builtItem.MontoItem ?? null, currentValues);
+      itemLines.push('    <Item>');
+      itemLines.push(...currentItemLines);
+      itemLines.push('    </Item>');
+      auditItems.push({
+        numeroLinea: currentValues.NumeroLinea ?? String(index + 1),
+        indicadorFacturacion: currentValues.IndicadorFacturacion ?? null,
+        cantidadItem: currentValues.CantidadItem ?? null,
+        precioUnitarioItem: currentValues.PrecioUnitarioItem ?? null,
+        montoItem: currentValues.MontoItem ?? null,
+      });
+      if (index === 0) Object.assign(itemValues, currentValues);
+    });
 
     const differenceKeys = [
       'MontoGravadoTotal',
@@ -808,7 +888,11 @@ export class DgiiCertificationXmlBuilderService {
       'MontoGravadoI3',
       'MontoExento',
       'TotalITBIS',
+      'TotalITBIS1',
+      'TotalITBIS2',
+      'TotalITBIS3',
       'MontoTotal',
+      'ValorPagar',
     ];
     const differences: Record<string, { source: string | null; calculated: string | null }> = {};
     for (const key of differenceKeys) {
@@ -845,9 +929,9 @@ export class DgiiCertificationXmlBuilderService {
     }
 
     const montoTotal = parsePositiveMoney(montoTotalText);
-    const montoItem = parsePositiveMoney(montoItemText);
+    const montoItem = builtItems.reduce((sum, current) => sum + (parseMoney(current.MontoItem) ?? 0), 0);
     const descuento = parseMoney(descuentoMonto) ?? 0;
-    if (montoTotal != null && montoItem != null) {
+    if (montoTotal != null) {
       const calculated = Math.round((montoItem + totalItbis - descuento) * 100) / 100;
       if (Math.abs(calculated - montoTotal) > 0.01) {
         warnings.push(`MontoTotal (${montoTotal.toFixed(2)}) no coincide con MontoItem + ITBIS - descuentos (${calculated.toFixed(2)})`);
@@ -867,13 +951,7 @@ export class DgiiCertificationXmlBuilderService {
         sourceFieldsUsed: reader.sourceFieldsUsed,
         audit: {
           fileName: encf ? `${encf}.xml` : null,
-          items: [{
-            numeroLinea: itemValues.NumeroLinea ?? '1',
-            indicadorFacturacion: itemValues.IndicadorFacturacion ?? null,
-            cantidadItem: itemValues.CantidadItem ?? null,
-            precioUnitarioItem: itemValues.PrecioUnitarioItem ?? null,
-            montoItem: itemValues.MontoItem ?? null,
-          }],
+          items: auditItems,
           calculatedTotals,
           xmlTotals: totalesValues,
           sourceTotals,
@@ -894,9 +972,7 @@ export class DgiiCertificationXmlBuilderService {
       ...section('Totales', totalesLines, '    '),
       '  </Encabezado>',
       '  <DetallesItems>',
-      '    <Item>',
       ...itemLines,
-      '    </Item>',
       '  </DetallesItems>',
       ...section('InformacionReferencia', informacionReferenciaLines, '  '),
       `  <FechaHoraFirma>${xmlEscape(dominicanTimestamp())}</FechaHoraFirma>`,
@@ -915,13 +991,7 @@ export class DgiiCertificationXmlBuilderService {
       sourceFieldsUsed: reader.sourceFieldsUsed,
       audit: {
         fileName: encf ? `${encf}.xml` : null,
-        items: [{
-          numeroLinea: itemValues.NumeroLinea ?? '1',
-          indicadorFacturacion: itemValues.IndicadorFacturacion ?? null,
-          cantidadItem: itemValues.CantidadItem ?? null,
-          precioUnitarioItem: itemValues.PrecioUnitarioItem ?? null,
-          montoItem: itemValues.MontoItem ?? null,
-        }],
+        items: auditItems,
         calculatedTotals,
         xmlTotals: totalesValues,
         sourceTotals,

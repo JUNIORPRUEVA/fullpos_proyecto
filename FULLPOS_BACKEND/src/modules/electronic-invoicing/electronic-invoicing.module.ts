@@ -39,6 +39,7 @@ import {
   certificationBatchParamsSchema,
   certificationCaseParamsSchema,
   certificationCasesQuerySchema,
+  certificationAiAuditSchema,
   certificationLocatorSchema,
   certificationResetSchema,
   createElectronicInvoicingCertificationController,
@@ -603,6 +604,22 @@ posElectronicInvoicingRouter.post(
 );
 
 posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/audit',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.auditCase),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/ai-audit',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationAiAuditSchema),
+  asyncHandler(certificationController.aiAuditCase),
+);
+
+posElectronicInvoicingRouter.post(
   '/certification/cases/:id/preflight',
   overrideKeyGuard,
   validate(certificationCaseParamsSchema, 'params'),
@@ -616,6 +633,22 @@ posElectronicInvoicingRouter.post(
   validate(certificationBatchParamsSchema, 'params'),
   validate(certificationLocatorSchema),
   asyncHandler(certificationController.generateBatchXml),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/audit',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.auditBatch),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/ai-audit',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationAiAuditSchema),
+  asyncHandler(certificationController.aiAuditBatch),
 );
 
 posElectronicInvoicingRouter.post(

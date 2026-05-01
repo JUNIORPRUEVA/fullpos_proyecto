@@ -65,6 +65,14 @@ export const certificationResetSchema = certificationLocatorBaseSchema.extend({
   path: ['companyRnc'],
 });
 
+export const certificationAiAuditSchema = certificationLocatorBaseSchema.extend({
+  aiApiKey: z.string().trim().optional(),
+  aiModel: z.string().trim().optional(),
+}).strict().refine((value) => !!value.companyRnc || !!value.companyCloudId, {
+  message: 'RNC o ID interno requerido',
+  path: ['companyRnc'],
+});
+
 function requestFile(req: Request) {
   return (req as Request & {
     file?: {
@@ -269,6 +277,19 @@ export function createElectronicInvoicingCertificationController(
       res.json(await service.validateCaseXsd(company.id, params.id));
     },
 
+    auditCase: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      res.json(await service.auditCase(company.id, params.id));
+    },
+
+    aiAuditCase: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      const body = req.body as typeof certificationAiAuditSchema['_output'];
+      res.json(await service.aiAuditCase(company.id, params.id, body.aiApiKey ?? null, body.aiModel ?? null));
+    },
+
     preflightCase: async (req: Request, res: Response) => {
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
@@ -285,6 +306,19 @@ export function createElectronicInvoicingCertificationController(
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
       res.json(await service.preflightBatch(company.id, params.id));
+    },
+
+    auditBatch: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      res.json(await service.auditBatch(company.id, params.id));
+    },
+
+    aiAuditBatch: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      const body = req.body as typeof certificationAiAuditSchema['_output'];
+      res.json(await service.aiAuditBatch(company.id, params.id, body.aiApiKey ?? null, body.aiModel ?? null));
     },
 
     signCase: async (req: Request, res: Response) => {

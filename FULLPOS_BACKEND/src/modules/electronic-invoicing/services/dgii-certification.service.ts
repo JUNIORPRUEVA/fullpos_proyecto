@@ -26,6 +26,7 @@ import {
   isInlineCertificateReference,
 } from '../utils/credential-crypto.utils';
 import { deepFindFirstString } from '../utils/xml.utils';
+import { parseXml } from '../utils/xml.utils';
 
 type CertificationSheetName = 'ECF' | 'RFCE';
 
@@ -44,6 +45,22 @@ type CertificationCaseFilters = {
 
 const REQUIRED_SHEETS: CertificationSheetName[] = ['ECF', 'RFCE'];
 const FINAL_CERTIFICATION_STATUSES = new Set(['ACCEPTED', 'ACCEPTED_CONDITIONAL', 'REJECTED']);
+const DGII_AUDIT_TOTAL_FIELDS = [
+  'MontoGravadoTotal',
+  'MontoGravadoI1',
+  'MontoGravadoI2',
+  'MontoGravadoI3',
+  'MontoExento',
+  'ITBIS1',
+  'ITBIS2',
+  'ITBIS3',
+  'TotalITBIS',
+  'TotalITBIS1',
+  'TotalITBIS2',
+  'TotalITBIS3',
+  'MontoTotal',
+  'ValorPagar',
+] as const;
 const CERTIFICATION_DB_FIELDS = [
   'xmlGenerated',
   'xmlSigned',
@@ -78,7 +95,9 @@ function normalizeValue(value: unknown) {
 }
 
 function isEmptyRow(row: Record<string, unknown>) {
-  return Object.values(row).every((value) => normalizeValue(value) == null);
+  return Object.entries(row)
+    .filter(([key]) => !key.startsWith('__'))
+    .every(([, value]) => normalizeValue(value) == null);
 }
 
 function findField(row: Record<string, unknown>, aliases: string[]) {
@@ -218,14 +237,37 @@ export class DgiiCertificationService {
 
     for (const sheetName of REQUIRED_SHEETS) {
       const worksheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+      const matrix = XLSX.utils.sheet_to_json<Array<unknown>>(worksheet, {
+        header: 1,
         defval: null,
         raw: false,
       });
+      const headerRow = (matrix[0] ?? []) as Array<unknown>;
+      const headers = headerRow.map((value, index) => {
+        const base = normalizeValue(value) ?? `Column_${index + 1}`;
+        return base;
+      });
+      const rows = matrix.slice(1);
       sheetStats[sheetName].found = rows.length;
 
-      rows.forEach((rawRow, index) => {
+      rows.forEach((rowCells, index) => {
         const rowNumber = index + 2;
+        const rawRow: Record<string, unknown> = {};
+        const normalizedRow: Record<string, unknown> = {};
+        const headerUsage = new Map<string, number>();
+        headers.forEach((header, headerIndex) => {
+          const usage = (headerUsage.get(header) ?? 0) + 1;
+          headerUsage.set(header, usage);
+          const uniqueHeader = usage > 1 ? `${header}__${usage}` : header;
+          const cellValue = (rowCells as Array<unknown>)[headerIndex] ?? null;
+          rawRow[uniqueHeader] = cellValue;
+          normalizedRow[normalizeHeader(uniqueHeader)] = cellValue;
+        });
+        rawRow.__sheetName = sheetName;
+        rawRow.__rowNumber = rowNumber;
+        rawRow.__headers = headers;
+        rawRow.__cells = rowCells as Array<unknown>;
+        rawRow.__normalized = normalizedRow;
         if (isEmptyRow(rawRow)) {
           sheetStats[sheetName].skipped += 1;
           return;
@@ -496,6 +538,317 @@ export class DgiiCertificationService {
       sourceFieldsUsed: details?.sourceFieldsUsed ?? {},
       humanReadableMessage,
     };
+  }
+
+  private sourceRow(item: { rawRowJson: unknown }) {
+    return item.rawRowJson && typeof item.rawRowJson === 'object' && !Array.isArray(item.rawRowJson)
+      ? item.rawRowJson as Record<string, unknown>
+      : {};
+  }
+
+  private certificationFileName(encf: string | null | undefined) {
+    const clean = String(encf ?? '').trim().replace(/[^A-Za-z0-9]/g, '');
+    return clean ? `${clean}.xml` : null;
+  }
+
+  private fileNameIsValid(fileName: string | null) {
+    return !!fileName && fileName.length <= 30 && /^[A-Za-z0-9]+\.xml$/.test(fileName);
+  }
+
+  private certificationPlaceholderFound(payload: unknown): boolean {
+    if (payload == null) return false;
+    if (typeof payload === 'string') {
+      const normalized = payload.trim().toLowerCase();
+      return ['#e', '#n/a', 'n/a', 'null', 'undefined', ''].includes(normalized);
+    }
+    if (Array.isArray(payload)) return payload.some((item) => this.certificationPlaceholderFound(item));
+    if (typeof payload === 'object') return Object.values(payload as Record<string, unknown>).some((item) => this.certificationPlaceholderFound(item));
+    return false;
+  }
+
+  private auditValueText(value: unknown) {
+    if (value == null) return null;
+    const text = String(value).trim();
+    return text.length > 0 ? text : null;
+  }
+
+  private auditMoneyText(value: unknown) {
+    const parsed = parseMoney(value);
+    return parsed == null ? null : parsed.toFixed(2);
+  }
+
+  private auditNodeText(record: Record<string, unknown>, ...keys: string[]) {
+    for (const key of keys) {
+      const value = record[key];
+      const text = this.auditValueText(value);
+      if (text != null) return text;
+    }
+    return null;
+  }
+
+  private calculateTotalsFromParsedItems(items: Array<Record<string, unknown>>) {
+    let montoGravadoI1 = 0;
+    let montoGravadoI2 = 0;
+    let montoGravadoI3 = 0;
+    let montoExento = 0;
+    for (const item of items) {
+      const indicador = this.auditValueText(item.IndicadorFacturacion);
+      const monto = parseMoney(item.MontoItem);
+      if (monto == null) continue;
+      if (indicador === '1') montoGravadoI1 += monto;
+      else if (indicador === '2') montoGravadoI2 += monto;
+      else if (indicador === '3') montoGravadoI3 += monto;
+      else if (indicador === '4') montoExento += monto;
+    }
+    const totalItbis1 = Math.round(montoGravadoI1 * 0.18 * 100) / 100;
+    const totalItbis2 = Math.round(montoGravadoI2 * 0.16 * 100) / 100;
+    const totalItbis3 = 0;
+    const totalItbis = Math.round((totalItbis1 + totalItbis2 + totalItbis3) * 100) / 100;
+    const montoGravadoTotal = Math.round((montoGravadoI1 + montoGravadoI2 + montoGravadoI3) * 100) / 100;
+    const montoTotal = Math.round((montoGravadoTotal + montoExento + totalItbis) * 100) / 100;
+    return {
+      MontoGravadoTotal: montoGravadoTotal.toFixed(2),
+      MontoGravadoI1: montoGravadoI1.toFixed(2),
+      MontoGravadoI2: montoGravadoI2.toFixed(2),
+      MontoGravadoI3: montoGravadoI3.toFixed(2),
+      MontoExento: montoExento.toFixed(2),
+      ITBIS1: montoGravadoI1 > 0 ? '18' : null,
+      ITBIS2: montoGravadoI2 > 0 ? '16' : null,
+      ITBIS3: montoGravadoI3 > 0 ? '0' : null,
+      TotalITBIS: totalItbis.toFixed(2),
+      TotalITBIS1: totalItbis1.toFixed(2),
+      TotalITBIS2: totalItbis2.toFixed(2),
+      TotalITBIS3: totalItbis3.toFixed(2),
+      MontoTotal: montoTotal.toFixed(2),
+      ValorPagar: montoTotal.toFixed(2),
+    } satisfies Record<string, string | null>;
+  }
+
+  private auditSourceTotals(rawRowJson: unknown) {
+    const row = this.sourceRow({ rawRowJson });
+    const totals: Record<string, string | null> = {};
+    const aliases: Record<string, string[]> = {
+      MontoGravadoTotal: ['montoGravadoTotal', 'monto gravado total'],
+      MontoGravadoI1: ['montoGravadoI1', 'monto gravado i1'],
+      MontoGravadoI2: ['montoGravadoI2', 'monto gravado i2'],
+      MontoGravadoI3: ['montoGravadoI3', 'monto gravado i3'],
+      MontoExento: ['montoExento', 'monto exento'],
+      ITBIS1: ['ITBIS1', 'itbis1'],
+      ITBIS2: ['ITBIS2', 'itbis2'],
+      ITBIS3: ['ITBIS3', 'itbis3'],
+      TotalITBIS: ['totalITBIS', 'Total ITBIS', 'itbisTotal'],
+      TotalITBIS1: ['totalITBIS1', 'total itbis 1'],
+      TotalITBIS2: ['totalITBIS2', 'total itbis 2'],
+      TotalITBIS3: ['totalITBIS3', 'total itbis 3'],
+      MontoTotal: ['montoTotal', 'Monto Total', 'Total', 'TotalFactura'],
+      ValorPagar: ['valorPagar', 'valor pagar'],
+    };
+    for (const field of DGII_AUDIT_TOTAL_FIELDS) {
+      const raw = findField(row, aliases[field] ?? [field]);
+      totals[field] = field.startsWith('ITBIS') && field.length === 6
+        ? this.auditValueText(raw)
+        : this.auditMoneyText(raw);
+    }
+    return totals;
+  }
+
+  private parseXmlTotals(xml: string) {
+    const parsed = parseXml(xml) as Record<string, unknown>;
+    const root = (parsed.ECF ?? parsed.eCF ?? parsed.RFCE ?? parsed) as Record<string, unknown>;
+    const encabezado = (root.Encabezado ?? {}) as Record<string, unknown>;
+    const totales = (encabezado.Totales ?? {}) as Record<string, unknown>;
+    const detalles = (root.DetallesItems ?? {}) as Record<string, unknown>;
+    const rawItems = (detalles.Item ?? []) as unknown;
+    const items = Array.isArray(rawItems)
+      ? rawItems.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+      : rawItems && typeof rawItems === 'object'
+        ? [rawItems as Record<string, unknown>]
+        : [];
+    const xmlTotals: Record<string, string | null> = {};
+    for (const field of DGII_AUDIT_TOTAL_FIELDS) {
+      xmlTotals[field] = field.startsWith('ITBIS') && field.length === 6
+        ? this.auditNodeText(totales, field)
+        : this.auditMoneyText(totales[field]);
+    }
+    return {
+      parsed,
+      items,
+      xmlTotals,
+      calculatedTotals: this.calculateTotalsFromParsedItems(items),
+    };
+  }
+
+  private summarizeAuditStatus(aptoParaEnviar: boolean, errors: string[], warnings: string[]) {
+    if (aptoParaEnviar) return { status: 'APTO PARA ENVIAR', summary: 'La auditoría técnica no detectó bloqueos para DGII.' };
+    if (errors.length > 0) return { status: 'NO APTO PARA ENVIAR', summary: errors[0] };
+    if (warnings.length > 0) return { status: 'REQUIERE CORRECCIÓN', summary: warnings[0] };
+    return { status: 'NO APTO PARA ENVIAR', summary: 'La auditoría detectó inconsistencias.' };
+  }
+
+  private async runDeterministicAudit(item: {
+    id: number;
+    companyId: number;
+    encf: string | null;
+    tipoEcf: string | null;
+    xmlGenerated: string | null;
+    xmlSigned: string | null;
+    rawRowJson: unknown;
+    xmlValidationJson: unknown;
+  }) {
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    const mismatches: Array<{
+      field: string;
+      excelExpected: string | null;
+      xmlGenerated: string | null;
+      calculatedFromItems: string | null;
+      difference: string | null;
+      severity: 'ERROR' | 'WARNING';
+    }> = [];
+
+    const filename = this.certificationFileName(item.encf);
+    const filenameValid = this.fileNameIsValid(filename);
+    if (!filenameValid) {
+      errors.push('El nombre de archivo DGII no es válido.');
+    }
+
+    if (!item.xmlGenerated?.trim()) {
+      errors.push('El caso aún no tiene XML generado.');
+    }
+
+    const excelValues = this.auditSourceTotals(item.rawRowJson);
+    let xmlValues: Record<string, string | null> = {};
+    let calculatedValues: Record<string, string | null> = {};
+    let parsedXml: Record<string, unknown> = {};
+    let items: Array<Record<string, unknown>> = [];
+
+    let xsdValid = false;
+    if (item.xmlGenerated?.trim()) {
+      const validation = this.xmlValidationService.validate(item.xmlGenerated);
+      xsdValid = validation.xsdValidated && validation.valid;
+      if (!xsdValid) {
+        errors.push('El XML generado no valida contra el XSD DGII.');
+      }
+      const parsed = this.parseXmlTotals(item.xmlGenerated);
+      parsedXml = parsed.parsed;
+      items = parsed.items;
+      xmlValues = parsed.xmlTotals;
+      calculatedValues = parsed.calculatedTotals;
+    }
+
+    for (const field of DGII_AUDIT_TOTAL_FIELDS) {
+      const excelExpected = excelValues[field] ?? null;
+      const xmlGenerated = xmlValues[field] ?? null;
+      const calculatedFromItems = calculatedValues[field] ?? null;
+      const diff = excelExpected && calculatedFromItems
+        ? (() => {
+            const left = parseMoney(excelExpected);
+            const right = parseMoney(calculatedFromItems);
+            if (left == null || right == null) return excelExpected === calculatedFromItems ? null : `${excelExpected} vs ${calculatedFromItems}`;
+            const delta = Math.round((left - right) * 100) / 100;
+            return Math.abs(delta) > 0.0001 ? delta.toFixed(2) : null;
+          })()
+        : excelExpected === calculatedFromItems ? null : null;
+      if (excelExpected && xmlGenerated && excelExpected !== xmlGenerated) {
+        mismatches.push({ field, excelExpected, xmlGenerated, calculatedFromItems, difference: diff, severity: 'ERROR' });
+      }
+      if (excelExpected && calculatedFromItems && excelExpected !== calculatedFromItems) {
+        mismatches.push({ field, excelExpected, xmlGenerated, calculatedFromItems, difference: diff, severity: 'ERROR' });
+      }
+    }
+
+    if (mismatches.length > 0) {
+      errors.push('Los totales del XML no coinciden exactamente con los valores esperados del Excel.');
+    }
+
+    const requiredFieldsPresent = !this.certificationPlaceholderFound((item.xmlValidationJson as any)?.missingFields ?? null);
+    const noPlaceholders = !this.certificationPlaceholderFound(item.rawRowJson) && !this.certificationPlaceholderFound(item.xmlGenerated);
+    if (!noPlaceholders) {
+      errors.push('Se detectaron placeholders inválidos (#e, null, N/A, etc.).');
+    }
+
+    const totalsMatchExcel = mismatches.every((item) => item.severity !== 'ERROR');
+    const totalsMatchItems = mismatches.every((item) => item.field.startsWith('ITBIS') ? true : item.severity !== 'ERROR');
+    const aptoParaEnviar = filenameValid && xsdValid && requiredFieldsPresent && noPlaceholders && totalsMatchExcel && totalsMatchItems;
+    const summaryStatus = this.summarizeAuditStatus(aptoParaEnviar, errors, warnings);
+
+    return {
+      caseId: item.id,
+      eNCF: item.encf,
+      tipoEcf: item.tipoEcf,
+      filename,
+      filenameValid,
+      xsdValid,
+      requiredFieldsPresent,
+      noPlaceholders,
+      totalsMatchExcel,
+      totalsMatchItems,
+      aptoParaEnviar,
+      status: summaryStatus.status,
+      summary: summaryStatus.summary,
+      warnings,
+      errors,
+      mismatches,
+      excelValues,
+      xmlValues,
+      calculatedValues,
+      raw: {
+        parsedXml,
+        itemCount: items.length,
+        xmlValidationJson: item.xmlValidationJson ?? null,
+      },
+      signatureStatus: item.xmlSigned?.trim() ? 'SIGNED' : 'UNSIGNED',
+    };
+  }
+
+  private async maybeExplainAuditWithAi(
+    audit: Record<string, unknown>,
+    aiApiKey?: string | null,
+    aiModel?: string | null,
+  ) {
+    const key = aiApiKey?.trim();
+    if (!key) {
+      return {
+        providerConfigured: false,
+        message: 'IA no configurada, se mostró auditoría técnica.',
+      };
+    }
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model: aiModel?.trim() || 'gpt-4.1-mini',
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: 'Eres un auditor técnico de DGII e-CF. Responde JSON con: resumen, erroresCriticos, diferenciasExcelVsXml, diferenciasTotalesVsItems, camposFaltantes, riesgoDgii, recomendacionExacta, aptoParaEnviar.',
+            },
+            {
+              role: 'user',
+              content: JSON.stringify(audit),
+            },
+          ],
+        }),
+      });
+      const decoded = await response.json() as any;
+      const content = decoded?.choices?.[0]?.message?.content;
+      const parsed = typeof content === 'string' ? JSON.parse(content) : {};
+      return {
+        providerConfigured: true,
+        ...parsed,
+      };
+    } catch (error) {
+      return {
+        providerConfigured: true,
+        message: 'IA configurada, pero no se pudo generar la explicación. Se mostró auditoría técnica.',
+        providerError: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   private async detectCertificationDbFields() {
@@ -965,6 +1318,85 @@ export class DgiiCertificationService {
     };
   }
 
+  async auditCase(companyId: number, id: number) {
+    const item = await this.prisma.dgiiCertificationCase.findFirst({
+      where: { id, companyId },
+      select: {
+        id: true,
+        companyId: true,
+        encf: true,
+        tipoEcf: true,
+        xmlGenerated: true,
+        xmlSigned: true,
+        rawRowJson: true,
+        xmlValidationJson: true,
+      },
+    });
+    if (!item) {
+      throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
+    }
+    const audit = await this.runDeterministicAudit(item);
+    await this.prisma.dgiiCertificationCase.update({
+      where: { id: item.id },
+      data: {
+        xmlValidationJson: {
+          ...(item.xmlValidationJson && typeof item.xmlValidationJson === 'object' && !Array.isArray(item.xmlValidationJson)
+            ? item.xmlValidationJson as Prisma.InputJsonObject
+            : {}),
+          audit,
+        } as Prisma.InputJsonObject,
+        errorMessage: audit.aptoParaEnviar ? null : audit.summary,
+      },
+    }).catch(() => undefined);
+    return audit;
+  }
+
+  async aiAuditCase(companyId: number, id: number, aiApiKey?: string | null, aiModel?: string | null) {
+    const audit = await this.auditCase(companyId, id);
+    return {
+      ...audit,
+      ai: await this.maybeExplainAuditWithAi(audit as unknown as Record<string, unknown>, aiApiKey, aiModel),
+    };
+  }
+
+  async auditBatch(companyId: number, batchId: number) {
+    await this.getBatch(companyId, batchId);
+    const cases = await this.prisma.dgiiCertificationCase.findMany({
+      where: { companyId, batchId },
+      select: {
+        id: true,
+        companyId: true,
+        encf: true,
+        tipoEcf: true,
+        xmlGenerated: true,
+        xmlSigned: true,
+        rawRowJson: true,
+        xmlValidationJson: true,
+      },
+      orderBy: [{ sheetName: 'asc' }, { rowNumber: 'asc' }],
+    });
+    const audits = [];
+    for (const item of cases) {
+      audits.push(await this.runDeterministicAudit(item));
+    }
+    return {
+      batchId,
+      total: audits.length,
+      aptos: audits.filter((item) => item.aptoParaEnviar).length,
+      noAptos: audits.filter((item) => !item.aptoParaEnviar).length,
+      status: audits.every((item) => item.aptoParaEnviar) ? 'APTO PARA ENVIAR' : 'REQUIERE CORRECCIÓN',
+      cases: audits,
+    };
+  }
+
+  async aiAuditBatch(companyId: number, batchId: number, aiApiKey?: string | null, aiModel?: string | null) {
+    const audit = await this.auditBatch(companyId, batchId);
+    return {
+      ...audit,
+      ai: await this.maybeExplainAuditWithAi(audit as unknown as Record<string, unknown>, aiApiKey, aiModel),
+    };
+  }
+
   async getGeneratedXml(companyId: number, id: number) {
     const item = await this.prisma.dgiiCertificationCase.findFirst({
       where: { id, companyId },
@@ -1130,6 +1562,15 @@ export class DgiiCertificationService {
     this.assertMutableStatus(item);
     if (!item.xmlGenerated?.trim()) {
       throw { status: 409, message: 'Este caso no tiene XML generado para firmar', errorCode: 'DGII_CERTIFICATION_XML_NOT_FOUND' };
+    }
+    const audit = await this.auditCase(companyId, id);
+    if (!audit.aptoParaEnviar) {
+      throw {
+        status: 409,
+        message: audit.summary,
+        errorCode: 'DGII_CERTIFICATION_AUDIT_BLOCKED',
+        details: audit,
+      };
     }
     const xmlValidation = this.xmlValidationService.validate(item.xmlGenerated);
     if (!xmlValidation.canSign) {
@@ -1625,6 +2066,11 @@ export class DgiiCertificationService {
         },
       }).catch(() => undefined);
     }
+    const deterministicAudit = await this.runDeterministicAudit(item);
+    if (!deterministicAudit.aptoParaEnviar) {
+      blockers.push('CERTIFICATION_AUDIT_FAILED');
+      warnings.push(...deterministicAudit.warnings);
+    }
 
     if (!item.xmlSigned?.trim()) blockers.push('SIGNED_XML_MISSING');
     let signatureStatus = 'MISSING';
@@ -1693,6 +2139,7 @@ export class DgiiCertificationService {
       signatureStatus,
       referencedCaseId: referenceDependency.referencedCaseId,
       referencedEcf: referenceDependency.referencedEcf,
+      audit: deterministicAudit,
     };
   }
 
