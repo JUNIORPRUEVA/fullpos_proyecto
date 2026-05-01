@@ -988,6 +988,81 @@ export class DgiiCertificationService {
     return item.xmlSigned;
   }
 
+  async importManualSignedCaseXml(companyId: number, id: number, signedXml: string, fileName?: string, requestId?: string) {
+    const item = await this.prisma.dgiiCertificationCase.findFirst({ where: { id, companyId } });
+    if (!item) {
+      throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
+    }
+    this.assertMutableStatus(item);
+    if (!item.xmlGenerated?.trim()) {
+      throw { status: 409, message: 'Primero genera el XML del caso antes de importar la firma manual', errorCode: 'DGII_CERTIFICATION_XML_NOT_FOUND' };
+    }
+    if (item.trackId?.trim()) {
+      throw {
+        status: 409,
+        message: 'Este caso ya tiene TrackId. Limpia/reinicia el XML antes de importar una firma manual nueva.',
+        errorCode: 'DGII_CERTIFICATION_TRACK_ID_ALREADY_EXISTS',
+      };
+    }
+    const trimmedSignedXml = signedXml.trim();
+    if (!trimmedSignedXml || !trimmedSignedXml.includes('<')) {
+      throw { status: 400, message: 'El archivo XML firmado esta vacio o no parece XML', errorCode: 'DGII_CERTIFICATION_SIGNED_XML_INVALID_FILE' };
+    }
+
+    const validation = this.xmlValidationService.validate(trimmedSignedXml);
+    const diagnostics = this.signatureService.inspectSignedXml(trimmedSignedXml);
+    const localVerification = this.signatureService.verifySignedXml(trimmedSignedXml);
+    const requiredSignatureNodesPresent =
+      diagnostics.signedXmlHasSignature &&
+      diagnostics.signedXmlHasSignedInfo &&
+      diagnostics.signedXmlHasX509Certificate;
+
+    if (!validation.wellFormed || !requiredSignatureNodesPresent || (validation.xsdValidated && !validation.valid)) {
+      throw {
+        status: 409,
+        message: !requiredSignatureNodesPresent
+          ? 'El XML importado no contiene una firma XMLDSig completa'
+          : validation.xsdValidated && !validation.valid
+            ? 'El XML firmado importado no valida contra el XSD DGII'
+            : 'El XML firmado importado no esta bien formado',
+        errorCode: 'DGII_CERTIFICATION_IMPORTED_SIGNED_XML_INVALID',
+        details: { validation, diagnostics, localVerification },
+      };
+    }
+
+    const warnings = [
+      'XML firmado importado manualmente para prueba controlada.',
+      ...validation.warnings,
+      ...(localVerification.valid ? [] : localVerification.errors.map((message) => `Verificacion criptografica local: ${message}`)),
+    ];
+    const updated = await this.prisma.dgiiCertificationCase.update({
+      where: { id: item.id },
+      data: {
+        xmlSigned: trimmedSignedXml,
+        status: 'SIGNED',
+        signedAt: new Date(),
+        ...this.validationPersistenceData(validation),
+        errorMessage: warnings.length > 0 ? warnings.join('; ') : null,
+      },
+    });
+
+    console.warn('[electronic-invoicing.certification] signed_xml.imported_manual', {
+      requestId: requestId ?? null,
+      companyId,
+      batchId: item.batchId,
+      caseId: item.id,
+      encf: item.encf,
+      fileName: fileName ?? null,
+      signedXmlLength: trimmedSignedXml.length,
+      xsdValidated: validation.xsdValidated,
+      xsdValid: validation.xsdValidated ? validation.valid : null,
+      localSignatureValid: localVerification.valid,
+      diagnostics,
+    });
+
+    return { case: serializeCase(updated), warnings, diagnostics, localVerification };
+  }
+
   async generateXmlForBatch(companyId: number, batchId: number, requestId?: string) {
     await this.getBatch(companyId, batchId);
     const cases = await this.prisma.dgiiCertificationCase.findMany({
@@ -1078,10 +1153,13 @@ export class DgiiCertificationService {
         diagnostics.canonicalizationAlgorithm === 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315' &&
         diagnostics.signatureAlgorithm === 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256' &&
         diagnostics.digestAlgorithm === 'http://www.w3.org/2001/04/xmlenc#sha256';
-      if (!signedXmlValidation.wellFormed || !requiredSignatureNodesPresent || !localVerification.valid) {
+      const signedXmlXsdFailed = signedXmlValidation.xsdValidated && !signedXmlValidation.valid;
+      if (!signedXmlValidation.wellFormed || signedXmlXsdFailed || !requiredSignatureNodesPresent || !localVerification.valid) {
         throw {
           status: 409,
-          message: 'La firma XML local no cumple la estructura DGII esperada',
+          message: signedXmlXsdFailed
+            ? 'El XML firmado no valida contra el XSD DGII'
+            : 'La firma XML local no cumple la estructura DGII esperada',
           errorCode: 'DGII_CERTIFICATION_SIGNATURE_INVALID',
           details: {
             diagnostics,

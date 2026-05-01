@@ -19,6 +19,13 @@ const signedSeedUpload = multer({
 
 export const uploadDgiiSignedSeedXml = signedSeedUpload.single('file');
 
+const signedCaseXmlUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+});
+
+export const uploadDgiiCertificationSignedCaseXml = signedCaseXmlUpload.single('file');
+
 const certificationLocatorBaseSchema = z.object({
     companyRnc: z.string().trim().min(3).optional(),
     companyCloudId: z.string().trim().min(6).optional(),
@@ -104,6 +111,28 @@ export const validateDgiiSignedSeedXmlUpload: RequestHandler = (req, res, next) 
     return res.status(400).json({
       message: 'El archivo de semilla firmada debe tener extension .xml',
       errorCode: 'DGII_SIGNED_SEED_INVALID_FILE',
+    });
+  }
+
+  const parsed = certificationLocatorSchema.safeParse(req.body);
+  if (!parsed.success) return next(parsed.error);
+  req.body = parsed.data;
+  return next();
+};
+
+export const validateDgiiCertificationSignedCaseXmlUpload: RequestHandler = (req, res, next) => {
+  const file = requestFile(req);
+  if (!file) {
+    return res.status(400).json({
+      message: 'Archivo XML firmado requerido',
+      errorCode: 'DGII_CERTIFICATION_SIGNED_XML_FILE_REQUIRED',
+    });
+  }
+
+  if (path.extname(file.originalname).toLowerCase() !== '.xml') {
+    return res.status(400).json({
+      message: 'El archivo firmado debe tener extension .xml',
+      errorCode: 'DGII_CERTIFICATION_SIGNED_XML_INVALID_FILE',
     });
   }
 
@@ -218,6 +247,14 @@ export function createElectronicInvoicingCertificationController(
       const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
       const xml = await service.getSignedXml(company.id, params.id);
       res.type('application/xml').send(xml);
+    },
+
+    uploadManualSignedCaseXml: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      const file = requestFile(req)!;
+      const signedXml = file.buffer.toString('utf8');
+      res.json(await service.importManualSignedCaseXml(company.id, params.id, signedXml, file.originalname, req.requestId));
     },
 
     validateCaseXml: async (req: Request, res: Response) => {

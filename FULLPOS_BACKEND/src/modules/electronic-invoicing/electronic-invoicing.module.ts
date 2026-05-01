@@ -43,7 +43,9 @@ import {
   certificationResetSchema,
   createElectronicInvoicingCertificationController,
   uploadDgiiCertificationExcel,
+  uploadDgiiCertificationSignedCaseXml,
   uploadDgiiSignedSeedXml,
+  validateDgiiCertificationSignedCaseXmlUpload,
   validateDgiiCertificationExcelUpload,
   validateDgiiSignedSeedXmlUpload,
 } from './controllers/electronic-invoicing-certification.controller';
@@ -573,6 +575,15 @@ posElectronicInvoicingRouter.get(
   validate(certificationCaseParamsSchema, 'params'),
   validate(certificationLocatorSchema, 'query'),
   asyncHandler(certificationController.getCaseSignedXml),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/signed-xml/import',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  uploadDgiiCertificationSignedCaseXml,
+  validateDgiiCertificationSignedCaseXmlUpload,
+  asyncHandler(certificationController.uploadManualSignedCaseXml),
 );
 
 posElectronicInvoicingRouter.post(

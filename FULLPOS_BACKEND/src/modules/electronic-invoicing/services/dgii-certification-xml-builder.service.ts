@@ -218,6 +218,12 @@ function moneyText(value: string | null) {
   return parsed == null ? null : parsed.toFixed(2);
 }
 
+function quantityText(value: string | null) {
+  const parsed = parseMoney(value);
+  if (parsed == null) return null;
+  return Number.isInteger(parsed) ? String(parsed) : parsed.toFixed(2);
+}
+
 function integerText(value: string | null) {
   const clean = cleanDgiiValue(value);
   if (!clean) return null;
@@ -359,6 +365,12 @@ const EMISOR_FIELDS: FieldSpec[] = [
   { tag: 'CorreoEmisor', aliases: ['correoEmisor', 'emailEmisor', 'correo emisor'] },
   { tag: 'WebSite', aliases: ['website', 'web site', 'sitio web'] },
   { tag: 'ActividadEconomica', aliases: ['actividadEconomica', 'actividad economica'] },
+  { tag: 'CodigoVendedor', aliases: ['codigoVendedor', 'codigo vendedor', 'vendedor'] },
+  { tag: 'NumeroFacturaInterna', aliases: ['numeroFacturaInterna', 'numero factura interna', 'factura interna'] },
+  { tag: 'NumeroPedidoInterno', aliases: ['numeroPedidoInterno', 'numero pedido interno', 'pedido interno'], transform: integerText },
+  { tag: 'ZonaVenta', aliases: ['zonaVenta', 'zona venta'] },
+  { tag: 'RutaVenta', aliases: ['rutaVenta', 'ruta venta'] },
+  { tag: 'InformacionAdicionalEmisor', aliases: ['informacionAdicionalEmisor', 'informacion adicional emisor'] },
   { tag: 'FechaEmision', aliases: ['fechaEmision', 'Fecha Emision', 'FechaEmision', 'Fecha'], transform: parseDate },
 ];
 
@@ -371,6 +383,15 @@ const COMPRADOR_FIELDS: FieldSpec[] = [
   { tag: 'DireccionComprador', aliases: ['direccionComprador', 'direccion comprador'] },
   { tag: 'MunicipioComprador', aliases: ['municipioComprador', 'municipio comprador'], transform: (value) => normalizeProvinciaMunicipioCode(value, 'MunicipioComprador') },
   { tag: 'ProvinciaComprador', aliases: ['provinciaComprador', 'provincia comprador'], transform: (value) => normalizeProvinciaMunicipioCode(value, 'ProvinciaComprador') },
+  { tag: 'FechaEntrega', aliases: ['fechaEntrega', 'fecha entrega'], transform: parseDate },
+  { tag: 'ContactoEntrega', aliases: ['contactoEntrega', 'contacto entrega'] },
+  { tag: 'DireccionEntrega', aliases: ['direccionEntrega', 'direccion entrega'] },
+  { tag: 'TelefonoAdicional', aliases: ['telefonoAdicional', 'telefono adicional'] },
+  { tag: 'FechaOrdenCompra', aliases: ['fechaOrdenCompra', 'fecha orden compra'], transform: parseDate },
+  { tag: 'NumeroOrdenCompra', aliases: ['numeroOrdenCompra', 'numero orden compra', 'orden compra'] },
+  { tag: 'CodigoInternoComprador', aliases: ['codigoInternoComprador', 'codigo interno comprador'] },
+  { tag: 'ResponsablePago', aliases: ['responsablePago', 'responsable pago'] },
+  { tag: 'InformacionAdicionalComprador', aliases: ['informacionAdicionalComprador', 'informacion adicional comprador'] },
 ];
 
 const COMPRADOR_47_FIELDS: FieldSpec[] = [
@@ -391,6 +412,7 @@ const TOTALES_FIELDS: FieldSpec[] = [
   { tag: 'TotalITBIS1', aliases: ['totalITBIS1', 'total itbis 1'], transform: moneyText },
   { tag: 'TotalITBIS2', aliases: ['totalITBIS2', 'total itbis 2'], transform: moneyText },
   { tag: 'TotalITBIS3', aliases: ['totalITBIS3', 'total itbis 3'], transform: moneyText },
+  { tag: 'MontoImpuestoAdicional', aliases: ['montoImpuestoAdicional', 'monto impuesto adicional'], transform: moneyText },
   { tag: 'MontoTotal', aliases: ['montoTotal', 'Monto Total', 'Total', 'TotalFactura'], transform: moneyText },
   { tag: 'MontoPeriodo', aliases: ['montoPeriodo', 'monto periodo'], transform: moneyText },
   { tag: 'SaldoAnterior', aliases: ['saldoAnterior', 'saldo anterior'], transform: moneyText },
@@ -405,7 +427,7 @@ const ITEM_FIELDS: FieldSpec[] = [
   { tag: 'IndicadorFacturacion', aliases: ['indicadorFacturacion', 'indicador facturacion'] },
   { tag: 'NombreItem', aliases: ['nombreItem', 'Nombre Item', 'descripcion', 'Descripcion', 'Item', 'Concepto'] },
   { tag: 'IndicadorBienoServicio', aliases: ['indicadorBienoServicio', 'indicador bien servicio', 'bienoservicio'] },
-  { tag: 'CantidadItem', aliases: ['cantidadItem', 'cantidad', 'qty'] },
+  { tag: 'CantidadItem', aliases: ['cantidadItem', 'cantidad', 'qty'], transform: quantityText },
   { tag: 'UnidadMedida', aliases: ['unidadMedida', 'unidad medida', 'unidad'] },
   { tag: 'PrecioUnitarioItem', aliases: ['precioUnitarioItem', 'precio unitario', 'precio'], transform: moneyText },
   { tag: 'DescuentoMonto', aliases: ['descuentoMonto', 'descuento monto', 'descuento'], transform: moneyText },
@@ -420,6 +442,16 @@ const FECHA_VENCIMIENTO_REQUIRED_TYPES = new Set(['31', '33', '41', '43', '44', 
 const RETENCION_ITEM_REQUIRED_TYPES = new Set(['41', '47']);
 const ECF_XSD_ROOT_ELEMENT = 'ECF';
 const ECF_VERSION = '1.0';
+
+function emisorFieldsForType(tipoEcf: string | null) {
+  const fieldsNotDeclaredByType: Record<string, Set<string>> = {
+    '41': new Set(['CodigoVendedor', 'ZonaVenta', 'RutaVenta']),
+    '43': new Set(['CodigoVendedor', 'ZonaVenta', 'RutaVenta']),
+    '47': new Set(['CodigoVendedor', 'ZonaVenta', 'RutaVenta']),
+  };
+  const excluded = fieldsNotDeclaredByType[tipoEcf ?? ''];
+  return excluded ? EMISOR_FIELDS.filter((field) => !excluded.has(field.tag)) : EMISOR_FIELDS;
+}
 
 function allowedTotalFields(tipoEcf: string | null) {
   if (tipoEcf === '43') {
@@ -454,11 +486,11 @@ export class DgiiCertificationXmlBuilderService {
     };
 
     const fallbackFieldsUsed: Record<string, string> = {};
+    const tipoEcf = readAny(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
     const idDocLines: string[] = [];
     const idDocValues: Record<string, string> = {};
-    const emisor = buildFields(reader, EMISOR_FIELDS, '      ', emisorFallbacks);
+    const emisor = buildFields(reader, emisorFieldsForType(tipoEcf), '      ', emisorFallbacks);
     Object.assign(fallbackFieldsUsed, emisor.fallbackFieldsUsed);
-    const tipoEcf = readAny(reader, 'TipoeCF', ['tipoEcf', 'TipoCF', 'tipo e-CF', 'tipo comprobante', 'tipo']);
     const compradorSpecs = tipoEcf === '47'
       ? COMPRADOR_47_FIELDS
       : tipoEcf === '43'
@@ -523,6 +555,9 @@ export class DgiiCertificationXmlBuilderService {
     const terminoPagoRaw = readAny(reader, 'TerminoPago', ['terminoPago', 'termino pago']);
     const terminoPago = terminoPagoRaw && terminoPagoRaw.length <= 15 ? terminoPagoRaw : null;
     if (terminoPagoRaw && !terminoPago) warnings.push('TerminoPago omitted because it is longer than 15 characters or invalid.');
+    const tipoCuentaPago = integerText(readAny(reader, 'TipoCuentaPago', ['tipoCuentaPago', 'tipo cuenta pago']));
+    const numeroCuentaPago = readAny(reader, 'NumeroCuentaPago', ['numeroCuentaPago', 'numero cuenta pago', 'cuenta pago']);
+    const bancoPago = readAny(reader, 'BancoPago', ['bancoPago', 'banco pago', 'banco']);
 
     pushValue(idDocLines, '      ', 'TipoeCF', tipoEcf, idDocValues);
     pushValue(idDocLines, '      ', 'eNCF', encf, idDocValues);
@@ -562,6 +597,9 @@ export class DgiiCertificationXmlBuilderService {
     }
     pushValue(idDocLines, '      ', 'FechaLimitePago', fechaLimitePago, idDocValues);
     pushValue(idDocLines, '      ', 'TerminoPago', terminoPago, idDocValues);
+    if (tipoCuentaPago) pushValue(idDocLines, '      ', 'TipoCuentaPago', tipoCuentaPago, idDocValues);
+    pushValue(idDocLines, '      ', 'NumeroCuentaPago', numeroCuentaPago, idDocValues);
+    pushValue(idDocLines, '      ', 'BancoPago', bancoPago, idDocValues);
 
     const montoTotalText = readMoney(reader, 'MontoTotal', ['montoTotal', 'Monto Total', 'Total', 'TotalFactura']);
     const totalItbisText = readMoney(reader, 'TotalITBIS', ['totalITBIS', 'Total ITBIS', 'itbisTotal']);
@@ -575,7 +613,7 @@ export class DgiiCertificationXmlBuilderService {
     const nombreItemRaw = readAny(reader, 'NombreItem', ['nombreItem', 'Nombre Item', 'descripcion', 'Descripcion', 'Item', 'Concepto']);
     const explicitMontoItem = readMoney(reader, 'MontoItem', ['montoItem', 'monto item', 'totalLinea', 'total linea']);
     const explicitPrecioUnitario = readMoney(reader, 'PrecioUnitarioItem', ['precioUnitarioItem', 'precio unitario', 'precio']);
-    const explicitCantidad = readMoney(reader, 'CantidadItem', ['cantidadItem', 'cantidad', 'qty']);
+    const explicitCantidad = readField(reader, 'CantidadItem', ['cantidadItem', 'cantidad', 'qty'], quantityText);
     const descuentoMonto = readMoney(reader, 'DescuentoMonto', ['descuentoMonto', 'descuento monto', 'descuento']);
     const indicadorBienServicioRaw = integerText(readAny(reader, 'IndicadorBienoServicio', ['indicadorBienoServicio', 'indicador bien servicio', 'bienoservicio']));
     const unitPriceBase = explicitPrecioUnitario ?? explicitMontoItem ?? montoTotalText;
@@ -610,6 +648,8 @@ export class DgiiCertificationXmlBuilderService {
       'CantidadItem',
       'PrecioUnitarioItem',
       'MontoItem',
+      ...(RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '') ? ['Retencion', 'IndicadorAgenteRetencionoPercepcion'] : []),
+      ...(tipoEcf === '47' ? ['MontoISRRetenido'] : []),
       ...(BUYER_REQUIRED_BY_TYPE.has(tipoEcf ?? '') ? ['RNCComprador', 'RazonSocialComprador'] : []),
     ];
 
@@ -625,27 +665,33 @@ export class DgiiCertificationXmlBuilderService {
     } else if (tipoEcf !== '46') {
       pushTotalValue('MontoExento', montoExentoText);
     }
-    if (tipoEcf !== '46' && indicadorFacturacion === '1') pushTotalValue('ITBIS1', '18');
-    if (tipoEcf !== '46' && indicadorFacturacion === '2') pushTotalValue('ITBIS2', '16');
-    if (indicadorFacturacion === '3') pushTotalValue('ITBIS3', '0');
+    const itbis1Rate = integerText(readAny(reader, 'ITBIS1', ['itbis1', 'ITBIS1'])) ?? (indicadorFacturacion === '1' ? '18' : null);
+    const itbis2Rate = integerText(readAny(reader, 'ITBIS2', ['itbis2', 'ITBIS2'])) ?? (indicadorFacturacion === '2' ? '16' : null);
+    const itbis3Rate = integerText(readAny(reader, 'ITBIS3', ['itbis3', 'ITBIS3'])) ?? (indicadorFacturacion === '3' ? '0' : null);
+    if (tipoEcf !== '46') pushTotalValue('ITBIS1', itbis1Rate);
+    if (tipoEcf !== '46') pushTotalValue('ITBIS2', itbis2Rate);
+    pushTotalValue('ITBIS3', itbis3Rate);
     pushTotalValue('TotalITBIS', totalItbisText);
     if (tipoEcf !== '46') {
       pushTotalValue('TotalITBIS1', readMoney(reader, 'TotalITBIS1', ['totalITBIS1', 'total itbis 1']));
       pushTotalValue('TotalITBIS2', readMoney(reader, 'TotalITBIS2', ['totalITBIS2', 'total itbis 2']));
     }
     pushTotalValue('TotalITBIS3', readMoney(reader, 'TotalITBIS3', ['totalITBIS3', 'total itbis 3']));
+    pushTotalValue('MontoImpuestoAdicional', readMoney(reader, 'MontoImpuestoAdicional', ['montoImpuestoAdicional', 'monto impuesto adicional']));
     pushTotalValue('MontoTotal', montoTotalText);
     pushTotalValue('MontoPeriodo', readMoney(reader, 'MontoPeriodo', ['montoPeriodo', 'monto periodo']));
     pushTotalValue('SaldoAnterior', readMoney(reader, 'SaldoAnterior', ['saldoAnterior', 'saldo anterior']));
     pushTotalValue('MontoAvancePago', readMoney(reader, 'MontoAvancePago', ['montoAvancePago', 'monto avance pago']));
     pushTotalValue('ValorPagar', readMoney(reader, 'ValorPagar', ['valorPagar', 'valor pagar']));
-    pushTotalValue('TotalITBISRetenido', readMoney(reader, 'TotalITBISRetenido', ['totalITBISRetenido', 'total itbis retenido']));
-    pushTotalValue('TotalISRRetencion', readMoney(reader, 'TotalISRRetencion', ['totalISRRetencion', 'total isr retencion']));
+    const totalItbisRetenidoText = readMoney(reader, 'TotalITBISRetenido', ['totalITBISRetenido', 'total itbis retenido']);
+    const totalIsrRetencionText = readMoney(reader, 'TotalISRRetencion', ['totalISRRetencion', 'total isr retencion']);
+    pushTotalValue('TotalITBISRetenido', totalItbisRetenidoText);
+    pushTotalValue('TotalISRRetencion', totalIsrRetencionText);
 
     pushValue(itemLines, '      ', 'NumeroLinea', integerText(readAny(reader, 'NumeroLinea', ['numeroLinea', 'numero linea', 'linea'])) ?? '1', itemValues);
     pushValue(itemLines, '      ', 'IndicadorFacturacion', indicadorFacturacion, itemValues);
     if (RETENCION_ITEM_REQUIRED_TYPES.has(tipoEcf ?? '')) {
-      const indicadorAgente = integerText(readAny(reader, 'IndicadorAgenteRetencionoPercepcion', [
+      let indicadorAgente = integerText(readAny(reader, 'IndicadorAgenteRetencionoPercepcion', [
         'indicadorAgenteRetencionoPercepcion',
         'indicador agente retencion',
         'Indicador Agente Retencion o Percepcion',
@@ -653,9 +699,21 @@ export class DgiiCertificationXmlBuilderService {
         'Agente Retencion',
         'indicador retencion',
       ]));
-      const montoItbisRetenido = readMoney(reader, 'MontoITBISRetenido', ['montoITBISRetenido', 'monto itbis retenido', 'ITBIS Retenido', 'Monto ITBIS Retenido']);
-      const montoIsrRetenido = readMoney(reader, 'MontoISRRetenido', ['montoISRRetenido', 'monto isr retenido', 'ISR Retenido', 'Monto ISR Retenido', 'ISRRetenido']);
-      if (indicadorAgente) {
+      let montoItbisRetenido = readMoney(reader, 'MontoITBISRetenido', ['montoITBISRetenido', 'monto itbis retenido', 'ITBIS Retenido', 'Monto ITBIS Retenido']);
+      let montoIsrRetenido = readMoney(reader, 'MontoISRRetenido', ['montoISRRetenido', 'monto isr retenido', 'ISR Retenido', 'Monto ISR Retenido', 'ISRRetenido']);
+      if (!montoItbisRetenido && tipoEcf === '41' && totalItbisRetenidoText) {
+        montoItbisRetenido = sourceFallback(reader, 'MontoITBISRetenido', totalItbisRetenidoText, 'certification.totalITBISRetenidoAsItemRetencion', fallbackFieldsUsed);
+        warnings.push('MontoITBISRetenido fallback used from TotalITBISRetenido for certification retention item.');
+      }
+      if (!montoIsrRetenido && totalIsrRetencionText) {
+        montoIsrRetenido = sourceFallback(reader, 'MontoISRRetenido', totalIsrRetencionText, 'certification.totalISRRetencionAsItemRetencion', fallbackFieldsUsed);
+        warnings.push('MontoISRRetenido fallback used from TotalISRRetencion for certification retention item.');
+      }
+      if (!indicadorAgente && (montoItbisRetenido || montoIsrRetenido)) {
+        indicadorAgente = sourceFallback(reader, 'IndicadorAgenteRetencionoPercepcion', '1', 'certification.retentionAmountDefaultAgent', fallbackFieldsUsed);
+        warnings.push('IndicadorAgenteRetencionoPercepcion default 1 used because the certification row includes retained amounts.');
+      }
+      if (indicadorAgente || tipoEcf === '47') {
         itemLines.push('      <Retencion>');
         pushValue(itemLines, '        ', 'IndicadorAgenteRetencionoPercepcion', indicadorAgente, itemValues);
         if (tipoEcf === '41') {
