@@ -290,6 +290,19 @@ export function createElectronicInvoicingCertificationController(
       res.json(await service.aiAuditCase(company.id, params.id, body.aiApiKey ?? null, body.aiModel ?? null));
     },
 
+    aiFixSuggestionCase: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      const body = req.body as typeof certificationAiAuditSchema['_output'];
+      res.json(await service.aiFixSuggestionCase(company.id, params.id, body.aiApiKey ?? null, body.aiModel ?? null));
+    },
+
+    applyCertifiedFix: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
+      res.json(await service.applyCertifiedFix(company.id, params.id, req.requestId));
+    },
+
     preflightCase: async (req: Request, res: Response) => {
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];
@@ -319,6 +332,13 @@ export function createElectronicInvoicingCertificationController(
       const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
       const body = req.body as typeof certificationAiAuditSchema['_output'];
       res.json(await service.aiAuditBatch(company.id, params.id, body.aiApiKey ?? null, body.aiModel ?? null));
+    },
+
+    aiFixSuggestionBatch: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      const body = req.body as typeof certificationAiAuditSchema['_output'];
+      res.json(await service.aiFixSuggestionBatch(company.id, params.id, body.aiApiKey ?? null, body.aiModel ?? null));
     },
 
     signCase: async (req: Request, res: Response) => {

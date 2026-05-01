@@ -566,6 +566,13 @@ export class DgiiCertificationService {
     return false;
   }
 
+  private collectCertificationPlaceholderKeys(rawRowJson: unknown) {
+    const row = this.sourceRow({ rawRowJson });
+    return Object.entries(row)
+      .filter(([key, value]) => !key.startsWith('__') && this.certificationPlaceholderFound(value))
+      .map(([key]) => key);
+  }
+
   private auditValueText(value: unknown) {
     if (value == null) return null;
     const text = String(value).trim();
@@ -678,6 +685,98 @@ export class DgiiCertificationService {
     };
   }
 
+  private buildSuggestedItemsFromAuditTotals(excelValues: Record<string, string | null>) {
+    const suggestions: Array<Record<string, unknown>> = [];
+    const pushIfPositive = (field: string, indicador: string, nombre: string) => {
+      const amount = this.auditMoneyText(excelValues[field] ?? null);
+      if (!amount) return;
+      const parsed = parseMoney(amount);
+      if (parsed == null || parsed <= 0) return;
+      suggestions.push({
+        NumeroLinea: suggestions.length + 1,
+        IndicadorFacturacion: indicador,
+        NombreItem: nombre,
+        IndicadorBienoServicio: '2',
+        CantidadItem: '1.00',
+        PrecioUnitarioItem: amount,
+        MontoItem: amount,
+      });
+    };
+    pushIfPositive('MontoGravadoI1', '1', 'Ajuste gravado 18 DGII');
+    pushIfPositive('MontoGravadoI2', '2', 'Ajuste gravado 16 DGII');
+    pushIfPositive('MontoGravadoI3', '3', 'Ajuste gravado 0 DGII');
+    pushIfPositive('MontoExento', '4', 'Ajuste exento DGII');
+    return suggestions;
+  }
+
+  private buildDeterministicFixSuggestion(input: {
+    audit: Record<string, any>;
+    rawRowJson: unknown;
+    xmlValidationJson: unknown;
+  }) {
+    const audit = input.audit;
+    const xmlValidationJson = input.xmlValidationJson && typeof input.xmlValidationJson === 'object' && !Array.isArray(input.xmlValidationJson)
+      ? input.xmlValidationJson as Record<string, unknown>
+      : {};
+    const missingFields = Array.isArray(xmlValidationJson.missingFields)
+      ? xmlValidationJson.missingFields.map((value) => String(value))
+      : [];
+    const optionalPlaceholderKeys = this.collectCertificationPlaceholderKeys(input.rawRowJson)
+      .filter((key) => !missingFields.includes(key));
+    const itemsSugeridos = this.buildSuggestedItemsFromAuditTotals(audit.excelValues ?? {});
+    const mismatches = Array.isArray(audit.mismatches)
+      ? audit.mismatches as Array<Record<string, unknown>>
+      : [];
+    const diferenciasQueSeResolverian = mismatches
+      .map((item) => String(item.field ?? '').trim())
+      .filter((value) => value.length > 0);
+    const canAutoFix = audit.aptoParaEnviar !== true
+      && missingFields.length === 0
+      && itemsSugeridos.length > 0
+      && audit.filenameValid === true;
+
+    let causaPrincipal = 'No se detectó una causa principal bloqueante.';
+    if (audit.filenameValid !== true) {
+      causaPrincipal = 'El nombre del archivo no cumple el formato DGII.';
+    } else if (missingFields.length > 0 || audit.requiredFieldsPresent !== true) {
+      causaPrincipal = 'Faltan campos obligatorios para construir un XML certificable.';
+    } else if (audit.totalsMatchExcel !== true || audit.totalsMatchItems !== true) {
+      causaPrincipal = 'Los Totales y los DetallesItems no reproducen exactamente la fila oficial del Excel DGII.';
+    } else if (audit.xsdValid !== true) {
+      causaPrincipal = 'El XML no valida contra el XSD DGII.';
+    } else if (audit.noPlaceholders !== true) {
+      causaPrincipal = 'El XML generado conserva placeholders inválidos que DGII puede rechazar.';
+    }
+
+    const correccionRecomendada = canAutoFix
+      ? 'Reconstruir DetallesItems en modo certificación usando un item por bucket fiscal del Excel, regenerar XML, validar XSD y repetir la auditoría.'
+      : (missingFields.length > 0
+          ? 'Completar o mapear los campos obligatorios faltantes antes de regenerar el XML.'
+          : 'Revisar manualmente el mapeo de este caso antes de firmar o enviar.');
+
+    return {
+      modo: 'Sugerir corrección DGII',
+      aptoParaEnviar: audit.aptoParaEnviar === true,
+      puedeCorregirseAutomaticamente: canAutoFix,
+      causaPrincipal,
+      correccionRecomendada,
+      itemsSugeridos,
+      totalesSugeridos: audit.excelValues ?? {},
+      camposOpcionalesAOmitir: optionalPlaceholderKeys,
+      camposObligatoriosFaltantes: missingFields,
+      diferenciasQueSeResolverian,
+      riesgoDGII: audit.aptoParaEnviar === true ? 'BAJO' : (canAutoFix ? 'MEDIO' : 'ALTO'),
+      pasosParaCorregir: [
+        'Tomar los totales del Excel DGII como fuente oficial del caso.',
+        ...(itemsSugeridos.length > 0 ? ['Reconstruir DetallesItems usando los buckets MontoGravadoI1/I2/I3 y MontoExento.'] : []),
+        ...(optionalPlaceholderKeys.length > 0 ? ['Omitir del XML los campos opcionales cuyo valor original en Excel sea #e, #N/A, N/A, null o vacío.'] : []),
+        ...(missingFields.length > 0 ? ['Completar los campos obligatorios faltantes antes de intentar firmar.'] : []),
+        'Regenerar XML y validar contra XSD.',
+        'Comparar nuevamente Excel vs XML vs DetallesItems antes de firmar o enviar.',
+      ],
+    };
+  }
+
   private summarizeAuditStatus(aptoParaEnviar: boolean, errors: string[], warnings: string[]) {
     if (aptoParaEnviar) return { status: 'APTO PARA ENVIAR', summary: 'La auditoría técnica no detectó bloqueos para DGII.' };
     if (errors.length > 0) return { status: 'NO APTO PARA ENVIAR', summary: errors[0] };
@@ -762,7 +861,7 @@ export class DgiiCertificationService {
     }
 
     const requiredFieldsPresent = !this.certificationPlaceholderFound((item.xmlValidationJson as any)?.missingFields ?? null);
-    const noPlaceholders = !this.certificationPlaceholderFound(item.rawRowJson) && !this.certificationPlaceholderFound(item.xmlGenerated);
+    const noPlaceholders = !this.certificationPlaceholderFound(item.xmlGenerated);
     if (!noPlaceholders) {
       errors.push('Se detectaron placeholders inválidos (#e, null, N/A, etc.).');
     }
@@ -795,6 +894,7 @@ export class DgiiCertificationService {
       raw: {
         parsedXml,
         itemCount: items.length,
+        currentItems: items,
         xmlValidationJson: item.xmlValidationJson ?? null,
       },
       signatureStatus: item.xmlSigned?.trim() ? 'SIGNED' : 'UNSIGNED',
@@ -846,6 +946,65 @@ export class DgiiCertificationService {
       return {
         providerConfigured: true,
         message: 'IA configurada, pero no se pudo generar la explicación. Se mostró auditoría técnica.',
+        providerError: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private async maybeSuggestFixWithAi(
+    payload: Record<string, unknown>,
+    aiApiKey?: string | null,
+    aiModel?: string | null,
+  ) {
+    const deterministic = (payload.deterministicSuggestion ?? {}) as Record<string, unknown>;
+    const key = aiApiKey?.trim();
+    if (!key) {
+      return {
+        providerConfigured: false,
+        ...deterministic,
+        mensajeProveedor: 'IA no configurada, se mostró la sugerencia técnica determinística.',
+      };
+    }
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model: aiModel?.trim() || 'gpt-4.1-mini',
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: 'Eres un auditor técnico DGII e-CF. Responde SOLO JSON con estas claves exactas: aptoParaEnviar, causaPrincipal, correccionRecomendada, itemsSugeridos, totalesSugeridos, camposOpcionalesAOmitir, camposObligatoriosFaltantes, riesgoDGII, pasosParaCorregir. No modifiques XML ni inventes datos; solo recomienda corrección determinística.',
+            },
+            {
+              role: 'user',
+              content: JSON.stringify(payload),
+            },
+          ],
+        }),
+      });
+      const decoded = await response.json() as any;
+      const content = decoded?.choices?.[0]?.message?.content;
+      const parsed = typeof content === 'string' ? JSON.parse(content) as Record<string, unknown> : {};
+      return {
+        providerConfigured: true,
+        ...deterministic,
+        ...parsed,
+        itemsSugeridos: Array.isArray(parsed.itemsSugeridos) ? parsed.itemsSugeridos : deterministic.itemsSugeridos ?? [],
+        totalesSugeridos: parsed.totalesSugeridos && typeof parsed.totalesSugeridos === 'object' ? parsed.totalesSugeridos : deterministic.totalesSugeridos ?? {},
+        camposOpcionalesAOmitir: Array.isArray(parsed.camposOpcionalesAOmitir) ? parsed.camposOpcionalesAOmitir : deterministic.camposOpcionalesAOmitir ?? [],
+        camposObligatoriosFaltantes: Array.isArray(parsed.camposObligatoriosFaltantes) ? parsed.camposObligatoriosFaltantes : deterministic.camposObligatoriosFaltantes ?? [],
+        pasosParaCorregir: Array.isArray(parsed.pasosParaCorregir) ? parsed.pasosParaCorregir : deterministic.pasosParaCorregir ?? [],
+      };
+    } catch (error) {
+      return {
+        providerConfigured: true,
+        ...deterministic,
+        mensajeProveedor: 'IA configurada, pero no se pudo generar la sugerencia; se mostró la propuesta técnica determinística.',
         providerError: error instanceof Error ? error.message : String(error),
       };
     }
@@ -1359,6 +1518,58 @@ export class DgiiCertificationService {
     };
   }
 
+  async aiFixSuggestionCase(companyId: number, id: number, aiApiKey?: string | null, aiModel?: string | null) {
+    const item = await this.prisma.dgiiCertificationCase.findFirst({
+      where: { id, companyId },
+      select: {
+        id: true,
+        companyId: true,
+        encf: true,
+        tipoEcf: true,
+        xmlGenerated: true,
+        xmlSigned: true,
+        rawRowJson: true,
+        xmlValidationJson: true,
+      },
+    });
+    if (!item) {
+      throw { status: 404, message: 'Caso de certificacion no encontrado', errorCode: 'DGII_CERTIFICATION_CASE_NOT_FOUND' };
+    }
+    const audit = await this.runDeterministicAudit(item);
+    const deterministicSuggestion = this.buildDeterministicFixSuggestion({
+      audit,
+      rawRowJson: item.rawRowJson,
+      xmlValidationJson: item.xmlValidationJson,
+    });
+    const payload = {
+      mode: 'Sugerir corrección DGII',
+      eNCF: audit.eNCF,
+      tipoEcf: audit.tipoEcf,
+      excelValues: audit.excelValues,
+      xmlValues: audit.xmlValues,
+      calculatedItemTotals: audit.calculatedValues,
+      currentDetallesItems: (audit.raw as any)?.currentItems ?? [],
+      mismatches: audit.mismatches,
+      xsdStatus: {
+        xsdValid: audit.xsdValid,
+        requiredFieldsPresent: audit.requiredFieldsPresent,
+        noPlaceholders: audit.noPlaceholders,
+      },
+      filenameStatus: {
+        filename: audit.filename,
+        filenameValid: audit.filenameValid,
+      },
+      deterministicSuggestion,
+    };
+    return {
+      caseId: item.id,
+      eNCF: audit.eNCF,
+      tipoEcf: audit.tipoEcf,
+      audit,
+      suggestion: await this.maybeSuggestFixWithAi(payload, aiApiKey, aiModel),
+    };
+  }
+
   async auditBatch(companyId: number, batchId: number) {
     await this.getBatch(companyId, batchId);
     const cases = await this.prisma.dgiiCertificationCase.findMany({
@@ -1394,6 +1605,84 @@ export class DgiiCertificationService {
     return {
       ...audit,
       ai: await this.maybeExplainAuditWithAi(audit as unknown as Record<string, unknown>, aiApiKey, aiModel),
+    };
+  }
+
+  async aiFixSuggestionBatch(companyId: number, batchId: number, aiApiKey?: string | null, aiModel?: string | null) {
+    await this.getBatch(companyId, batchId);
+    const cases = await this.prisma.dgiiCertificationCase.findMany({
+      where: { companyId, batchId },
+      select: {
+        id: true,
+        companyId: true,
+        encf: true,
+        tipoEcf: true,
+        xmlGenerated: true,
+        xmlSigned: true,
+        rawRowJson: true,
+        xmlValidationJson: true,
+      },
+      orderBy: [{ sheetName: 'asc' }, { rowNumber: 'asc' }],
+    });
+    const details = [];
+    for (const item of cases) {
+      const audit = await this.runDeterministicAudit(item);
+      const suggestion = this.buildDeterministicFixSuggestion({
+        audit,
+        rawRowJson: item.rawRowJson,
+        xmlValidationJson: item.xmlValidationJson,
+      });
+      details.push({
+        caseId: item.id,
+        eNCF: audit.eNCF,
+        tipoEcf: audit.tipoEcf,
+        aptoParaEnviar: audit.aptoParaEnviar,
+        puedeCorregirseAutomaticamente: suggestion.puedeCorregirseAutomaticamente,
+        causaPrincipal: suggestion.causaPrincipal,
+        riesgoDGII: suggestion.riesgoDGII,
+        suggestion,
+      });
+    }
+    const repeatedCausesMap = new Map<string, number>();
+    for (const item of details) {
+      const cause = String(item.causaPrincipal ?? '').trim() || 'Sin causa principal';
+      repeatedCausesMap.set(cause, (repeatedCausesMap.get(cause) ?? 0) + 1);
+    }
+    const repeatedCauses = [...repeatedCausesMap.entries()]
+      .map(([cause, count]) => ({ cause, count }))
+      .sort((left, right) => right.count - left.count);
+    const summary = {
+      batchId,
+      total: details.length,
+      automaticFixable: details.filter((item) => item.puedeCorregirseAutomaticamente).length,
+      manualReview: details.filter((item) => !item.puedeCorregirseAutomaticamente && !item.aptoParaEnviar).length,
+      alreadyReady: details.filter((item) => item.aptoParaEnviar).length,
+      repeatedCauses,
+      mostCommonMappingProblems: repeatedCauses.slice(0, 5),
+      cases: details,
+    };
+    const ai = await this.maybeExplainAuditWithAi({
+      mode: 'Sugerir correcciones lote con IA',
+      ...summary,
+    }, aiApiKey, aiModel);
+    return {
+      ...summary,
+      ai,
+    };
+  }
+
+  async applyCertifiedFix(companyId: number, id: number, requestId?: string) {
+    const generated = await this.generateXmlForCase(companyId, id, requestId);
+    const validation = await this.validateCaseXml(companyId, id);
+    const audit = await this.auditCase(companyId, id);
+    const refreshed = await this.getCase(companyId, id);
+    return {
+      case: refreshed,
+      generated,
+      validation,
+      audit,
+      aptoParaEnviar: audit.aptoParaEnviar,
+      status: audit.aptoParaEnviar ? 'APTO PARA ENVIAR' : 'REQUIERE CORRECCIÓN',
     };
   }
 

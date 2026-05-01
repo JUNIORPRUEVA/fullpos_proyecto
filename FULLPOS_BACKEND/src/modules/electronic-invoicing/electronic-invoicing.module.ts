@@ -620,6 +620,22 @@ posElectronicInvoicingRouter.post(
 );
 
 posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/ai-fix-suggestion',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationAiAuditSchema),
+  asyncHandler(certificationController.aiFixSuggestionCase),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/cases/:id/apply-certified-fix',
+  overrideKeyGuard,
+  validate(certificationCaseParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.applyCertifiedFix),
+);
+
+posElectronicInvoicingRouter.post(
   '/certification/cases/:id/preflight',
   overrideKeyGuard,
   validate(certificationCaseParamsSchema, 'params'),
@@ -649,6 +665,14 @@ posElectronicInvoicingRouter.post(
   validate(certificationBatchParamsSchema, 'params'),
   validate(certificationAiAuditSchema),
   asyncHandler(certificationController.aiAuditBatch),
+);
+
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/ai-fix-suggestion',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationAiAuditSchema),
+  asyncHandler(certificationController.aiFixSuggestionBatch),
 );
 
 posElectronicInvoicingRouter.post(
