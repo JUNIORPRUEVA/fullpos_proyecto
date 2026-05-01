@@ -10,6 +10,9 @@ function optionalTrimmedString(value: unknown) {
 }
 
 const optionalUrl = z.preprocess(optionalTrimmedString, z.string().url().optional());
+const DGII_CERTIFICATION_RECEPCION_FC_URL = 'https://fc.dgii.gov.do/certecf/recepcionfc/api/recepcion/ecf';
+const urlWithBlankDefault = (defaultValue: string) =>
+  z.preprocess((value) => optionalTrimmedString(value) ?? defaultValue, z.string().url());
 
 export function normalizeDgiiEnvironmentAlias(value: unknown) {
   if (typeof value !== 'string') return value;
@@ -78,7 +81,7 @@ const envSchema = z.object({
   DGII_TOKEN_CACHE_SKEW_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
   DGII_PRECERT_SUBMIT_URL: optionalUrl,
   DGII_PRECERT_RECEPCION_ECF_URL: optionalUrl,
-  DGII_PRECERT_RECEPCION_FC_URL: optionalUrl,
+  DGII_PRECERT_RECEPCION_FC_URL: urlWithBlankDefault(DGII_CERTIFICATION_RECEPCION_FC_URL),
   DGII_PRECERT_RESULT_URL_TEMPLATE: z.string().optional(),
   DGII_PRECERT_AUTH_SEED_URL: optionalUrl,
   DGII_PRECERT_AUTH_VALIDATE_URL: optionalUrl,
