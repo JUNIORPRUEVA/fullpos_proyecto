@@ -658,6 +658,14 @@ posElectronicInvoicingRouter.post(
   asyncHandler(certificationController.sendBatch),
 );
 
+posElectronicInvoicingRouter.post(
+  '/certification/batches/:id/reprocess-and-send',
+  overrideKeyGuard,
+  validate(certificationBatchParamsSchema, 'params'),
+  validate(certificationLocatorSchema),
+  asyncHandler(certificationController.reprocessAndSendBatch),
+);
+
 posElectronicInvoicingRouter.get(
   '/certification/cases/:id/result',
   overrideKeyGuard,

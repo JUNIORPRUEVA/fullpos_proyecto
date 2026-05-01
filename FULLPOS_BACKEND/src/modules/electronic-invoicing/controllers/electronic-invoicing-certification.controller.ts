@@ -311,6 +311,12 @@ export function createElectronicInvoicingCertificationController(
       res.json(await service.sendBatch(company.id, params.id, req.requestId));
     },
 
+    reprocessAndSendBatch: async (req: Request, res: Response) => {
+      const company = await resolveCompany(req);
+      const params = req.params as unknown as typeof certificationBatchParamsSchema['_output'];
+      res.json(await service.reprocessAndSendBatch(company.id, params.id, req.requestId));
+    },
+
     queryCaseResult: async (req: Request, res: Response) => {
       const company = await resolveCompany(req);
       const params = req.params as unknown as typeof certificationCaseParamsSchema['_output'];

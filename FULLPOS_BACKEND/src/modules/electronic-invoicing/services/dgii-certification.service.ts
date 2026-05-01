@@ -1375,6 +1375,49 @@ export class DgiiCertificationService {
     return { total: orderedCases.length, sent, skipped, failed: errors.length, trackIds, errors };
   }
 
+  async reprocessAndSendBatch(companyId: number, batchId: number, requestId?: string) {
+    await this.getBatch(companyId, batchId);
+
+    const reset = await this.resetBatch(companyId, batchId, false, requestId);
+    const generation = await this.generateXmlForBatch(companyId, batchId, requestId);
+    const signing = await this.signBatch(companyId, batchId, requestId);
+    const preflight = await this.preflightBatch(companyId, batchId);
+    const send = await this.sendBatch(companyId, batchId, requestId);
+
+    const blockedCases = preflight.cases
+      .filter((item) => !item.canSend)
+      .map((item) => ({
+        caseId: item.caseId,
+        encf: item.encf ?? null,
+        blockers: item.blockers,
+        warnings: item.warnings,
+        referencedEcf: item.referencedEcf ?? null,
+      }));
+
+    return {
+      batchId,
+      total: preflight.total,
+      reset: reset.reset,
+      blockedFinal: reset.blockedFinal,
+      generated: generation.generated,
+      generationFailed: generation.failed,
+      generationErrors: generation.errors,
+      signed: signing.signed,
+      signingSkipped: signing.skipped,
+      signingFailed: signing.failed,
+      signingErrors: signing.errors,
+      readyToSend: preflight.readyToSend,
+      blocked: preflight.blocked,
+      preflightWarnings: preflight.warnings,
+      blockedCases,
+      sent: send.sent,
+      sendSkipped: send.skipped,
+      sendFailed: send.failed,
+      trackIds: send.trackIds,
+      sendErrors: send.errors,
+    };
+  }
+
   async queryCaseResult(companyId: number, id: number, requestId?: string) {
     const item = await this.prisma.dgiiCertificationCase.findFirst({ where: { id, companyId } });
     if (!item) {
