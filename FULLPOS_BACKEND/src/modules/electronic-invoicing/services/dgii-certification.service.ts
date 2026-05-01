@@ -92,6 +92,13 @@ function findField(row: Record<string, unknown>, aliases: string[]) {
   return null;
 }
 
+function extractCertificationReferenceEcf(rawRowJson: unknown) {
+  const row = rawRowJson && typeof rawRowJson === 'object' && !Array.isArray(rawRowJson)
+    ? rawRowJson as Record<string, unknown>
+    : {};
+  return findField(row, ['ncfModificado', 'NCF Modificado', 'NCFModificado', 'eNCFModificado']);
+}
+
 function parseDateValue(value: unknown) {
   if (value == null || value === '') return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
@@ -1339,14 +1346,15 @@ export class DgiiCertificationService {
         ],
       },
       orderBy: [{ sheetName: 'asc' }, { rowNumber: 'asc' }],
-      select: { id: true, xmlSigned: true },
+      select: { id: true, xmlSigned: true, rowNumber: true, tipoEcf: true, encf: true, rawRowJson: true },
     });
+    const orderedCases = this.sortCasesForCertificationSend(cases);
     const errors: Array<{ caseId: number; message: string; errorCode: string }> = [];
     const trackIds: Array<{ caseId: number; trackId: string }> = [];
     let sent = 0;
     let skipped = 0;
 
-    for (const item of cases) {
+    for (const item of orderedCases) {
       if (!item.xmlSigned?.trim()) {
         skipped += 1;
         continue;
@@ -1364,7 +1372,7 @@ export class DgiiCertificationService {
       }
     }
 
-    return { total: cases.length, sent, skipped, failed: errors.length, trackIds, errors };
+    return { total: orderedCases.length, sent, skipped, failed: errors.length, trackIds, errors };
   }
 
   async queryCaseResult(companyId: number, id: number, requestId?: string) {
@@ -1457,6 +1465,81 @@ export class DgiiCertificationService {
     };
   }
 
+  private async resolveReferenceDependencyBlockers(item: {
+    id: number;
+    companyId: number;
+    batchId: number;
+    tipoEcf: string | null;
+    rawRowJson: unknown;
+  }) {
+    const reference = extractCertificationReferenceEcf(item.rawRowJson)?.trim();
+    if (!reference || !['33', '34'].includes(item.tipoEcf ?? '')) {
+      return { blockers: [] as string[], referencedCaseId: null as number | null, referencedEcf: reference ?? null };
+    }
+
+    const referencedCase = await this.prisma.dgiiCertificationCase.findFirst({
+      where: {
+        companyId: item.companyId,
+        batchId: item.batchId,
+        encf: reference,
+      },
+      select: {
+        id: true,
+        status: true,
+        trackId: true,
+        sentAt: true,
+      },
+    });
+
+    if (!referencedCase) {
+      return { blockers: [] as string[], referencedCaseId: null as number | null, referencedEcf: reference };
+    }
+
+    const readyStatuses = new Set(['SENT', 'EN_PROCESO', 'ACCEPTED', 'ACCEPTED_CONDITIONAL']);
+    const isReady = readyStatuses.has(referencedCase.status) || !!referencedCase.trackId?.trim() || !!referencedCase.sentAt;
+    return {
+      blockers: isReady ? [] : ['REFERENCED_ECF_NOT_READY'],
+      referencedCaseId: referencedCase.id,
+      referencedEcf: reference,
+    };
+  }
+
+  private sortCasesForCertificationSend<T extends {
+    id: number;
+    rowNumber: number;
+    tipoEcf: string | null;
+    encf: string | null;
+    rawRowJson: unknown;
+  }>(cases: T[]) {
+    const byEcf = new Map<string, T>();
+    for (const item of cases) {
+      if (item.encf?.trim()) byEcf.set(item.encf.trim(), item);
+    }
+
+    const visiting = new Set<number>();
+    const visited = new Set<number>();
+    const ordered: T[] = [];
+
+    const visit = (item: T) => {
+      if (visited.has(item.id)) return;
+      if (visiting.has(item.id)) return;
+      visiting.add(item.id);
+      const reference = extractCertificationReferenceEcf(item.rawRowJson)?.trim();
+      if (reference && ['33', '34'].includes(item.tipoEcf ?? '')) {
+        const dependency = byEcf.get(reference);
+        if (dependency) visit(dependency);
+      }
+      visiting.delete(item.id);
+      visited.add(item.id);
+      ordered.push(item);
+    };
+
+    [...cases]
+      .sort((left, right) => left.rowNumber - right.rowNumber || left.id - right.id)
+      .forEach(visit);
+    return ordered;
+  }
+
   async preflightCase(companyId: number, id: number) {
     const blockers: string[] = [];
     const warnings: string[] = [];
@@ -1477,6 +1560,8 @@ export class DgiiCertificationService {
 
     if (FINAL_CERTIFICATION_STATUSES.has(item.status)) blockers.push('CASE_ALREADY_FINAL');
     if (!item.xmlGenerated?.trim()) blockers.push('XML_GENERATED_MISSING');
+    const referenceDependency = await this.resolveReferenceDependencyBlockers(item);
+    blockers.push(...referenceDependency.blockers);
 
     let xmlValidationStatus = item.xmlValidationStatus ?? 'NOT_VALIDATED';
     let validation: ReturnType<DgiiCertificationXmlValidationService['validate']> | null = null;
@@ -1561,6 +1646,8 @@ export class DgiiCertificationService {
       certificateStatus,
       xmlValidationStatus,
       signatureStatus,
+      referencedCaseId: referenceDependency.referencedCaseId,
+      referencedEcf: referenceDependency.referencedEcf,
     };
   }
 

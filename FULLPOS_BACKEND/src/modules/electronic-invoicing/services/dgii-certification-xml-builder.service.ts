@@ -219,9 +219,16 @@ function moneyText(value: string | null) {
 }
 
 function quantityText(value: string | null) {
-  const parsed = parseMoney(value);
-  if (parsed == null) return null;
-  return Number.isInteger(parsed) ? String(parsed) : parsed.toFixed(2);
+  const clean = cleanDgiiValue(value);
+  if (!clean) return null;
+  const normalized = clean.replace(/,/g, '').trim();
+  if (/^\d+$/.test(normalized)) return normalized;
+  if (/^\d+\.\d{1,2}$/.test(normalized)) {
+    const [integerPart, decimalPart] = normalized.split('.');
+    return `${integerPart}.${decimalPart.padEnd(2, '0')}`;
+  }
+  const parsed = parseMoney(normalized);
+  return parsed == null ? null : parsed.toFixed(2);
 }
 
 function integerText(value: string | null) {
