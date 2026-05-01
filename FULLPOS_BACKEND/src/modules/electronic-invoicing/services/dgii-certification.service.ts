@@ -791,6 +791,15 @@ export class DgiiCertificationService {
     return deepFindFirstString(raw, ['Mensaje', 'mensaje', 'Descripcion', 'descripcion', 'Message', 'message', 'Detalle', 'detalle']) ?? fallback ?? null;
   }
 
+  private submissionErrorMessage(result: Awaited<ReturnType<DgiiSubmissionService['submit']>>) {
+    if (result.message?.trim()) return result.message.trim();
+    if (result.rawText?.trim()) {
+      const text = result.rawText.trim().replace(/\s+/g, ' ');
+      return text.length > 240 ? `${text.slice(0, 240)}...` : text;
+    }
+    return 'DGII no devolvio TrackId ni respuesta valida';
+  }
+
   async generateXmlForCase(companyId: number, id: number, requestId?: string) {
     const item = await this.prisma.dgiiCertificationCase.findFirst({
       where: { id, companyId },
@@ -1217,7 +1226,7 @@ export class DgiiCertificationService {
         dgiiStatusMessage: result.message ?? null,
         rejectionCode,
         rejectionMessage,
-        errorMessage: nextStatus === 'ERROR' ? result.message ?? 'DGII no devolvio TrackId ni respuesta valida' : null,
+        errorMessage: nextStatus === 'ERROR' ? this.submissionErrorMessage(result) : null,
       },
     });
 

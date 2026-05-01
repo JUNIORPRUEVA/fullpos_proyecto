@@ -117,6 +117,13 @@ function summarizeRawBody(rawText?: string) {
   return trimmed.length > 1200 ? `${trimmed.slice(0, 1200)}...` : trimmed;
 }
 
+function certificationXmlFileName(context?: { invoiceId?: number; ecf?: string }) {
+  const base = (context?.ecf ?? `document-${context?.invoiceId ?? Date.now()}`)
+    .replace(/[^A-Za-z0-9_-]+/g, '_')
+    .slice(0, 80);
+  return `${base || 'document'}.xml`;
+}
+
 function extractMessageFromDetails(details: unknown): string | undefined {
   if (!details || typeof details !== 'object') return undefined;
   const obj = details as Record<string, unknown>;
@@ -208,15 +215,18 @@ export class DgiiSubmissionService {
         });
 
         lastPhase = 'submit';
+        const body = new FormData();
+        const xmlFileName = certificationXmlFileName(context);
+        body.append('xml', new Blob([signedXml], { type: 'text/xml' }), xmlFileName);
+
         const response = await fetch(submitUrl, {
           method: 'POST',
           headers: {
-            'content-type': 'application/xml; charset=utf-8',
             accept: 'application/json, application/xml, text/xml;q=0.9, */*;q=0.8',
             'user-agent': config.userAgent,
             authorization: `Bearer ${bearerToken}`,
           },
-          body: signedXml,
+          body,
           signal: controller.signal,
         });
         clearTimeout(timeout);
@@ -235,6 +245,9 @@ export class DgiiSubmissionService {
           ecf: context?.ecf ?? null,
           environment,
           endpoint: submitUrl,
+          requestBodyMode: 'multipart/form-data',
+          multipartField: 'xml',
+          xmlFileName,
           dgiiHttpStatus: response.status,
           contentType: parsed.contentType,
           headers: responseHeaders,
