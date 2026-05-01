@@ -258,10 +258,7 @@ export class DgiiSignatureService {
 
     signature.addReference({
       xpath: rootXpath,
-      transforms: [
-        ENVELOPED_SIGNATURE_TRANSFORM,
-        canonicalizationAlgorithm,
-      ],
+      transforms: [ENVELOPED_SIGNATURE_TRANSFORM],
       digestAlgorithm,
       isEmptyUri: options.emptyReferenceUri,
     });
