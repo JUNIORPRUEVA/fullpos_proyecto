@@ -541,6 +541,64 @@ export class DgiiCertificationService {
     }
   }
 
+  private dgiiSubmitConfigDiagnostics(environment: DgiiEnvironment) {
+    const production = environment === 'production';
+    const submitBlockers: string[] = [];
+    const configured = production
+      ? {
+          allowProduction: env.DGII_ALLOW_PRODUCTION === true,
+          ecfEndpoint: !!(env.DGII_PRODUCTION_RECEPCION_ECF_URL?.trim() || env.DGII_PRODUCTION_SUBMIT_URL?.trim()),
+          fcEndpoint: !!env.DGII_PRODUCTION_RECEPCION_FC_URL?.trim(),
+          resultEndpoint: !!env.DGII_PRODUCTION_RESULT_URL_TEMPLATE?.trim(),
+          authSeed: !!env.DGII_PRODUCTION_AUTH_SEED_URL?.trim(),
+          authValidate: !!env.DGII_PRODUCTION_AUTH_VALIDATE_URL?.trim(),
+          bearerToken: !!env.DGII_PRODUCTION_BEARER_TOKEN?.trim(),
+        }
+      : {
+          allowProduction: true,
+          ecfEndpoint: !!(env.DGII_PRECERT_RECEPCION_ECF_URL?.trim() || env.DGII_PRECERT_SUBMIT_URL?.trim()),
+          fcEndpoint: !!env.DGII_PRECERT_RECEPCION_FC_URL?.trim(),
+          resultEndpoint: !!env.DGII_PRECERT_RESULT_URL_TEMPLATE?.trim(),
+          authSeed: !!env.DGII_PRECERT_AUTH_SEED_URL?.trim(),
+          authValidate: !!env.DGII_PRECERT_AUTH_VALIDATE_URL?.trim(),
+          bearerToken: !!env.DGII_PRECERT_BEARER_TOKEN?.trim(),
+        };
+    const keys = production
+      ? {
+          allowProduction: 'DGII_ALLOW_PRODUCTION',
+          ecfEndpoint: 'DGII_PRODUCTION_RECEPCION_ECF_URL or DGII_PRODUCTION_SUBMIT_URL',
+          fcEndpoint: 'DGII_PRODUCTION_RECEPCION_FC_URL',
+          resultEndpoint: 'DGII_PRODUCTION_RESULT_URL_TEMPLATE',
+          authSeed: 'DGII_PRODUCTION_AUTH_SEED_URL',
+          authValidate: 'DGII_PRODUCTION_AUTH_VALIDATE_URL',
+          bearerToken: 'DGII_PRODUCTION_BEARER_TOKEN',
+        }
+      : {
+          allowProduction: 'DGII_ALLOW_PRODUCTION',
+          ecfEndpoint: 'DGII_PRECERT_RECEPCION_ECF_URL or DGII_PRECERT_SUBMIT_URL',
+          fcEndpoint: 'DGII_PRECERT_RECEPCION_FC_URL',
+          resultEndpoint: 'DGII_PRECERT_RESULT_URL_TEMPLATE',
+          authSeed: 'DGII_PRECERT_AUTH_SEED_URL',
+          authValidate: 'DGII_PRECERT_AUTH_VALIDATE_URL',
+          bearerToken: 'DGII_PRECERT_BEARER_TOKEN',
+        };
+    if (!configured.allowProduction) submitBlockers.push(`PRODUCTION_DISABLED:${keys.allowProduction}`);
+    if (!configured.ecfEndpoint) submitBlockers.push(`ECF_ENDPOINT_MISSING:${keys.ecfEndpoint}`);
+    if (!configured.fcEndpoint) submitBlockers.push(`RFCE_ENDPOINT_MISSING:${keys.fcEndpoint}`);
+    if (!configured.resultEndpoint) submitBlockers.push(`RESULT_ENDPOINT_MISSING:${keys.resultEndpoint}`);
+    const dgiiAuthConfigExists = configured.bearerToken || (configured.authSeed && configured.authValidate);
+    if (!dgiiAuthConfigExists) {
+      submitBlockers.push(`DGII_AUTH_CONFIG_MISSING:${keys.authSeed}, ${keys.authValidate} or ${keys.bearerToken}`);
+    }
+    return {
+      dgiiEndpointConfigExists: configured.allowProduction && configured.ecfEndpoint && configured.fcEndpoint && configured.resultEndpoint,
+      dgiiAuthConfigExists,
+      submitBlockers,
+      requiredEndpointConfigKeys: [keys.ecfEndpoint, keys.fcEndpoint, keys.resultEndpoint],
+      requiredAuthConfigKeys: [`${keys.authSeed} + ${keys.authValidate}`, keys.bearerToken],
+    };
+  }
+
   async buildDiagnostics() {
     const migrationWarning = 'La migración de certificación DGII no está aplicada en la base de datos real.';
     const db = await this.detectCertificationDbFields();
@@ -549,16 +607,50 @@ export class DgiiCertificationService {
     const rfceGenerationAvailable = true;
     const ecfGenerationAvailable = true;
     const pendingMigrationWarning = db.databaseHasNewFields === false ? migrationWarning : null;
-    let dgiiEndpointConfigExists = false;
-    let dgiiAuthConfigExists = false;
-    try {
-      const config = this.directory.getEnvironmentConfig(env.DGII_DEFAULT_ENVIRONMENT as DgiiEnvironment);
-      dgiiEndpointConfigExists = !!(config.recepcionEcfUrl || config.submitUrl) && !!config.recepcionFcUrl;
-      dgiiAuthConfigExists = !!(config.authSeedUrl && config.authValidateUrl);
-    } catch {
-      dgiiEndpointConfigExists = false;
-    }
+    const environment = normalizeDgiiEnvironmentAlias(env.DGII_DEFAULT_ENVIRONMENT) as DgiiEnvironment;
+    const submitConfig = this.dgiiSubmitConfigDiagnostics(environment);
     const activeCertificateExists = await this.hasActiveCertificationCertificate();
+    const [totalCasesCount, signedCasesCount, signableCasesCount, lastSigningErrorCase] = await Promise.all([
+      this.prisma.dgiiCertificationCase.count().catch(() => 0),
+      this.prisma.dgiiCertificationCase.count({
+        where: {
+          OR: [
+            { status: 'SIGNED' },
+            { xmlSigned: { not: null } },
+          ],
+        },
+      }).catch(() => 0),
+      this.prisma.dgiiCertificationCase.count({
+        where: {
+          xmlGenerated: { not: null },
+          xmlSigned: null,
+          xmlValidationStatus: 'XSD_VALID',
+        },
+      }).catch(() => 0),
+      this.prisma.dgiiCertificationCase.findFirst({
+        where: { status: 'ERROR', errorMessage: { not: null } },
+        orderBy: { updatedAt: 'desc' },
+        select: { errorMessage: true, encf: true, updatedAt: true },
+      }).catch(() => null),
+    ]);
+    const signingEngineAvailable = typeof this.signatureService.signXml === 'function';
+    const certificateConfigured = activeCertificateExists;
+    const canSignCertification = signingEngineAvailable && certificateConfigured && (signedCasesCount > 0 || signableCasesCount > 0);
+    const submitBlockers = [...submitConfig.submitBlockers];
+    if (db.databaseHasNewFields !== true) submitBlockers.push('DB_MIGRATION_NOT_APPLIED');
+    if (xsd.xsdFilesFound <= 0) submitBlockers.push('XSD_FILES_MISSING:resources/dgii/xsd/*.xsd');
+    if (!xsd.xsdValidationEngineAvailable) submitBlockers.push('XSD_ENGINE_MISSING:xmllint');
+    if (!certificateConfigured) submitBlockers.push('CERTIFICATE_MISSING:active electronic certificate');
+    if (signedCasesCount <= 0) submitBlockers.push('SIGNED_CASES_MISSING');
+    const canSubmitToDgii = db.databaseHasNewFields === true &&
+      xsd.xsdFilesFound > 0 &&
+      xsd.xsdValidationEngineAvailable &&
+      ecfGenerationAvailable &&
+      rfceGenerationAvailable &&
+      submitConfig.dgiiEndpointConfigExists &&
+      submitConfig.dgiiAuthConfigExists &&
+      certificateConfigured &&
+      signedCasesCount > 0;
 
     return {
       prismaClientHasNewFields: db.prismaClientHasNewFields,
@@ -575,17 +667,25 @@ export class DgiiCertificationService {
       xsdValidationEngine: xsd.xsdValidationEngine,
       ecfGenerationAvailable,
       rfceGenerationAvailable,
-      dgiiEndpointConfigExists,
-      dgiiAuthConfigExists,
+      dgiiEndpointConfigExists: submitConfig.dgiiEndpointConfigExists,
+      dgiiAuthConfigExists: submitConfig.dgiiAuthConfigExists,
       activeCertificateExists,
-      canSubmitToDgii: db.databaseHasNewFields === true &&
-        xsd.xsdFilesFound > 0 &&
-        xsd.xsdValidationEngineAvailable &&
-        ecfGenerationAvailable &&
-        rfceGenerationAvailable &&
-        dgiiEndpointConfigExists &&
-        dgiiAuthConfigExists &&
-        activeCertificateExists,
+      signingEngineAvailable,
+      certificateConfigured,
+      signedCasesCount,
+      totalCasesCount,
+      lastSigningError: lastSigningErrorCase
+        ? {
+            encf: lastSigningErrorCase.encf,
+            message: lastSigningErrorCase.errorMessage,
+            updatedAt: lastSigningErrorCase.updatedAt,
+          }
+        : null,
+      canSignCertification,
+      canSubmitToDgii,
+      submitBlockers,
+      requiredEndpointConfigKeys: submitConfig.requiredEndpointConfigKeys,
+      requiredAuthConfigKeys: submitConfig.requiredAuthConfigKeys,
     };
   }
 
