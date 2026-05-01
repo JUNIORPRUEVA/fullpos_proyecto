@@ -91,8 +91,14 @@ export function createElectronicInvoicingCertificationController(service: DgiiCe
   };
 
   return {
-    diagnostics: async (_req: Request, res: Response) => {
-      res.json(await service.buildDiagnostics());
+    diagnostics: async (req: Request, res: Response) => {
+      const parsed = certificationLocatorBaseSchema.safeParse(req.query);
+      let companyId: number | undefined;
+      if (parsed.success && (parsed.data.companyRnc || parsed.data.companyCloudId)) {
+        const company = await service.resolveCompany(parsed.data.companyRnc, parsed.data.companyCloudId, req.requestId);
+        companyId = company.id;
+      }
+      res.json(await service.buildDiagnostics(companyId));
     },
 
     importExcel: async (req: Request, res: Response) => {

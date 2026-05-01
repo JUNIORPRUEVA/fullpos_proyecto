@@ -527,10 +527,10 @@ export class DgiiCertificationService {
     return { prismaClientHasNewFields, databaseHasNewFields, databaseCheckError, dbColumnsFound, missingDbColumns };
   }
 
-  private async hasActiveCertificationCertificate() {
+  private async hasActiveCertificationCertificate(companyId?: number) {
     try {
       const certificate = await this.prisma.electronicCertificate.findFirst({
-        where: { status: 'ACTIVE' },
+        where: { status: 'ACTIVE', ...(companyId ? { companyId } : {}) },
         orderBy: { updatedAt: 'desc' },
         select: { id: true, validFrom: true, validTo: true },
       });
@@ -599,7 +599,7 @@ export class DgiiCertificationService {
     };
   }
 
-  async buildDiagnostics() {
+  async buildDiagnostics(companyId?: number) {
     const migrationWarning = 'La migración de certificación DGII no está aplicada en la base de datos real.';
     const db = await this.detectCertificationDbFields();
 
@@ -607,28 +607,34 @@ export class DgiiCertificationService {
     const rfceGenerationAvailable = true;
     const ecfGenerationAvailable = true;
     const pendingMigrationWarning = db.databaseHasNewFields === false ? migrationWarning : null;
-    const environment = normalizeDgiiEnvironmentAlias(env.DGII_DEFAULT_ENVIRONMENT) as DgiiEnvironment;
+    const environment = companyId
+      ? await this.getEnvironment(companyId)
+      : normalizeDgiiEnvironmentAlias(env.DGII_DEFAULT_ENVIRONMENT) as DgiiEnvironment;
     const submitConfig = this.dgiiSubmitConfigDiagnostics(environment);
-    const activeCertificateExists = await this.hasActiveCertificationCertificate();
+    const activeCertificateExists = await this.hasActiveCertificationCertificate(companyId);
+    const caseWhere = companyId ? { companyId } : {};
     const [totalCasesCount, signedCasesCount, signableCasesCount, lastSigningErrorCase] = await Promise.all([
-      this.prisma.dgiiCertificationCase.count().catch(() => 0),
+      this.prisma.dgiiCertificationCase.count({ where: caseWhere }).catch(() => 0),
       this.prisma.dgiiCertificationCase.count({
         where: {
+          ...caseWhere,
           OR: [
             { status: 'SIGNED' },
             { xmlSigned: { not: null } },
+            { signedAt: { not: null } },
           ],
         },
       }).catch(() => 0),
       this.prisma.dgiiCertificationCase.count({
         where: {
+          ...caseWhere,
           xmlGenerated: { not: null },
           xmlSigned: null,
           xmlValidationStatus: 'XSD_VALID',
         },
       }).catch(() => 0),
       this.prisma.dgiiCertificationCase.findFirst({
-        where: { status: 'ERROR', errorMessage: { not: null } },
+        where: { ...caseWhere, status: 'ERROR', errorMessage: { not: null } },
         orderBy: { updatedAt: 'desc' },
         select: { errorMessage: true, encf: true, updatedAt: true },
       }).catch(() => null),
