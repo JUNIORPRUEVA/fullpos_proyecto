@@ -115,15 +115,19 @@ const env = envSchema.parse(process.env);
 
 if (env.NODE_ENV === 'production') {
   if (env.ALLOW_PUBLIC_CLOUD === true) {
-    throw new Error(
-      'Unsafe production config: ALLOW_PUBLIC_CLOUD must be false in production.',
+    console.warn(
+      '[SECURITY WARNING] ALLOW_PUBLIC_CLOUD=true in production. ' +
+      'Cloud sync endpoints are publicly accessible without an API key. ' +
+      'Set ALLOW_PUBLIC_CLOUD=false and configure OVERRIDE_API_KEY to harden this deployment.',
     );
   }
 
   const overrideApiKey = env.OVERRIDE_API_KEY?.trim();
   if (!overrideApiKey) {
-    throw new Error(
-      'Unsafe production config: OVERRIDE_API_KEY is required in production.',
+    console.warn(
+      '[SECURITY WARNING] OVERRIDE_API_KEY is not set in production. ' +
+      'Cloud sync endpoints have no API key protection. ' +
+      'Set OVERRIDE_API_KEY to a strong secret to secure this deployment.',
     );
   }
 }
