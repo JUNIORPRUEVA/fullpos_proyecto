@@ -5,6 +5,7 @@ import { dangerRateLimit } from '../../middlewares/dangerRateLimit';
 import { emitCompanyDataChangeEvent } from '../../realtime/realtime.gateway';
 import { validate } from '../../middlewares/validate';
 import env from '../../config/env';
+import { buildIdentityLog } from '../../utils/syncLogIdentity';
 import {
   dangerousCompanyAction,
   getCompanyConfig,
@@ -49,9 +50,7 @@ router.put(
     try {
       const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, ...payload } = req.body;
       console.info('[cloud_sync] companies.config.by-rnc', {
-        companyRnc: companyRnc ?? null,
-        companyCloudId: companyCloudId ?? null,
-        companyTenantKey: companyTenantKey ?? null,
+        ...buildIdentityLog({ companyTenantKey, companyCloudId, companyRnc }),
         companyName: payload?.companyName ?? null,
       });
       const updated = await updateCompanyConfigByRnc(

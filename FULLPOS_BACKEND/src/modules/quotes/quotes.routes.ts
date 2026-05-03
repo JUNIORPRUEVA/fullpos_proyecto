@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
+import { buildIdentityLog } from '../../utils/syncLogIdentity';
 import { listQuotesSchema, syncQuotesByRncSchema } from './quotes.validation';
 import { listQuotes, syncQuotesByRnc } from './quotes.service';
 
@@ -12,9 +13,7 @@ router.post('/sync/by-rnc', overrideKeyGuard, validate(syncQuotesByRncSchema), a
   try {
     const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, quotes } = req.body;
     console.info('[cloud_sync] quotes.sync.by-rnc', {
-      companyRnc: companyRnc ?? null,
-      companyCloudId: companyCloudId ?? null,
-      companyTenantKey: companyTenantKey ?? null,
+      ...buildIdentityLog({ companyTenantKey, companyCloudId, companyRnc }),
       count: Array.isArray(quotes) ? quotes.length : 0,
     });
     const result = await syncQuotesByRnc({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId }, quotes ?? []);

@@ -7,6 +7,8 @@ import sharp from 'sharp';
 import env from '../../config/env';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { prisma } from '../../config/prisma';
+import { resolveCompanyIdentity } from '../companies/companyIdentity.service';
+import { buildIdentityLog } from '../../utils/syncLogIdentity';
 
 const router = Router();
 
@@ -65,40 +67,50 @@ const upload = multer({
   fileFilter: (_req, _file, cb) => cb(null, true),
 });
 
-function normalizeRnc(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+function firstString(value: unknown) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (Array.isArray(value) && value.length > 0) {
+    return firstString(value[0]);
+  }
+  return undefined;
 }
 
-async function resolveCompanyId(companyRnc?: string, companyCloudId?: string) {
-  const rnc = companyRnc?.trim() ?? '';
-  const cloudId = companyCloudId?.trim() ?? '';
-  if (!rnc && !cloudId) return null;
+function identityFromRequest(req: any) {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const query = (req.query ?? {}) as Record<string, unknown>;
+  return {
+    companyTenantKey:
+      firstString(body.companyTenantKey) ?? firstString(query.companyTenantKey),
+    companyRnc: firstString(body.companyRnc) ?? firstString(query.companyRnc),
+    companyCloudId:
+      firstString(body.companyCloudId) ?? firstString(query.companyCloudId),
+    businessId: firstString(body.businessId) ?? firstString(query.businessId),
+    deviceId: firstString(body.deviceId) ?? firstString(query.deviceId),
+    terminalId: firstString(body.terminalId) ?? firstString(query.terminalId),
+  };
+}
 
-  if (cloudId) {
-    const byCloud = await prisma.company.findFirst({
-      where: { cloudCompanyId: cloudId },
-      select: { id: true },
-    });
-    if (byCloud) return byCloud.id;
+async function resolveUploadCompany(req: any, source: string) {
+  const identity = identityFromRequest(req);
+  if (!identity.companyTenantKey) {
+    throw {
+      status: 400,
+      message: 'companyTenantKey requerido para uploads',
+      errorCode: 'COMPANY_TENANT_KEY_REQUIRED',
+    };
   }
 
-  if (!rnc) return null;
-  const byRnc = await prisma.company.findFirst({
-    where: { rnc },
-    select: { id: true },
+  const company = await resolveCompanyIdentity({
+    ...identity,
+    source,
   });
-  if (byRnc) return byRnc.id;
-
-  const normalized = normalizeRnc(rnc);
-  if (!normalized) return null;
-  const candidates = await prisma.company.findMany({
-    where: { rnc: { not: null } },
-    select: { id: true, rnc: true },
-  });
-  const match = candidates.find(
-    (item) => item.rnc != null && normalizeRnc(item.rnc) === normalized,
-  );
-  return match?.id ?? null;
+  return {
+    companyId: company.id,
+    identity,
+  };
 }
 
 router.post('/product-image', overrideKeyGuard, upload.single('file'), async (req, res, next) => {
@@ -106,22 +118,17 @@ router.post('/product-image', overrideKeyGuard, upload.single('file'), async (re
     const file = req.file;
     if (!file) return res.status(400).json({ message: 'Archivo requerido' });
 
+    const { companyId, identity } = await resolveUploadCompany(
+      req,
+      'uploads.product-image',
+    );
+
     console.info('[cloud_sync] uploads.product-image', {
       mimetype: file.mimetype,
       size: file.size,
-      companyRnc: req.body?.companyRnc ?? null,
-      companyCloudId: req.body?.companyCloudId ?? null,
+      ...buildIdentityLog(identity),
       hasOldImageUrl: typeof req.body?.oldImageUrl === 'string' && req.body.oldImageUrl.trim().length > 0,
     });
-
-    const companyId = await resolveCompanyId(req.body?.companyRnc, req.body?.companyCloudId);
-    if (!companyId) {
-      console.warn('[cloud_sync] uploads.product-image company not resolved', {
-        companyRnc: req.body?.companyRnc ?? null,
-        companyCloudId: req.body?.companyCloudId ?? null,
-      });
-      return res.status(400).json({ message: 'Empresa requerida' });
-    }
 
     const maxImages = env.MAX_PRODUCT_IMAGES_PER_COMPANY ?? 200;
     const oldImageUrl = req.body?.oldImageUrl;
@@ -152,7 +159,16 @@ router.post('/product-image', overrideKeyGuard, upload.single('file'), async (re
     await fs.promises.writeFile(fullPath, processed);
 
     if (typeof oldImageUrl === 'string' && oldImageUrl.trim().length > 0) {
-      safeDeleteUploadByUrl(oldImageUrl.trim());
+      const oldImageOwner = await prisma.product.findFirst({
+        where: {
+          companyId,
+          imageUrl: oldImageUrl.trim(),
+        },
+        select: { id: true },
+      });
+      if (oldImageOwner) {
+        safeDeleteUploadByUrl(oldImageUrl.trim());
+      }
     }
 
     const baseUrl = resolveBaseUrl(req);
@@ -163,18 +179,52 @@ router.post('/product-image', overrideKeyGuard, upload.single('file'), async (re
   }
 });
 
-router.delete('/product-image/:filename', overrideKeyGuard, (req, res) => {
-  const filename = (req.params.filename || '').trim();
-  if (!filename || filename.includes('/') || filename.includes('..')) {
-    return res.status(400).json({ message: 'Nombre inválido' });
-  }
+router.delete('/product-image/:filename', overrideKeyGuard, async (req, res, next) => {
+  try {
+    const filename = (req.params.filename || '').trim();
+    if (!filename || filename.includes('/') || filename.includes('..')) {
+      return res.status(400).json({ message: 'Nombre inválido' });
+    }
 
-  const full = path.join(productsDir, filename);
-  if (fs.existsSync(full)) {
-    fs.unlinkSync(full);
-  }
+    const { companyId, identity } = await resolveUploadCompany(
+      req,
+      'uploads.product-image.delete',
+    );
 
-  return res.json({ ok: true });
+    const imageInCompany = await prisma.product.findFirst({
+      where: {
+        companyId,
+        imageUrl: { endsWith: `/uploads/products/${filename}` },
+      },
+      select: { id: true },
+    });
+    if (!imageInCompany) {
+      console.warn('[cloud_sync] uploads.product-image.delete denied', {
+        filename,
+        ...buildIdentityLog(identity),
+      });
+      return res.status(404).json({
+        message: 'Imagen no encontrada para la empresa indicada',
+        errorCode: 'UPLOAD_IMAGE_NOT_FOUND_FOR_COMPANY',
+      });
+    }
+
+    const full = path.join(productsDir, filename);
+    if (fs.existsSync(full)) {
+      fs.unlinkSync(full);
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    const status = (err as any)?.status;
+    if (status && Number.isInteger(status)) {
+      return res.status(status).json({
+        message: (err as any)?.message ?? 'Error de validación de identidad',
+        errorCode: (err as any)?.errorCode ?? 'UPLOAD_COMPANY_IDENTITY_ERROR',
+      });
+    }
+    return next(err);
+  }
 });
 
 export default router;

@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import env from '../../config/env';
 import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
+import { buildIdentityLog } from '../../utils/syncLogIdentity';
 import {
   getNestedValue,
   normalizeSyncProductOperationsInput,
@@ -45,17 +47,33 @@ function summarizeProductSyncOperation(operation: Record<string, any>) {
 }
 
 function validateSyncProductOperationsRequest(req: any, res: any, next: any) {
-  const rawBody = req.body;
-  const normalizedBody = normalizeSyncProductOperationsInput(rawBody);
+  const rawBody = req.body as Record<string, any>;
+  const normalizedBody = normalizeSyncProductOperationsInput(
+    rawBody,
+  ) as Record<string, any>;
+  const debugPayloadLogs =
+    env.NODE_ENV !== 'production' && process.env.DEBUG_SYNC_PAYLOAD === 'true';
+
+  const identityLog = buildIdentityLog({
+    companyTenantKey:
+      normalizedBody?.companyTenantKey ?? rawBody?.companyTenantKey ?? null,
+    companyCloudId: normalizedBody?.companyCloudId ?? rawBody?.companyCloudId ?? null,
+    companyRnc: normalizedBody?.companyRnc ?? rawBody?.companyRnc ?? null,
+  });
+
+  const operationCount = Array.isArray(normalizedBody?.operations)
+    ? normalizedBody.operations.length
+    : 0;
 
   console.info('[products.sync.operations] request_received', {
-    rawBody,
-    normalizedBody,
-    rawSummary: Array.isArray(rawBody?.operations)
-      ? rawBody.operations.map((operation: Record<string, any>) =>
-          summarizeProductSyncOperation(operation),
-        )
-      : null,
+    ...identityLog,
+    operationCount,
+    rawSummary:
+      debugPayloadLogs && Array.isArray(rawBody?.operations)
+        ? rawBody.operations.map((operation: Record<string, any>) =>
+            summarizeProductSyncOperation(operation),
+          )
+        : undefined,
   });
 
   const parsed = syncProductOperationsSchema.safeParse(normalizedBody);
@@ -70,11 +88,13 @@ function validateSyncProductOperationsRequest(req: any, res: any, next: any) {
     }));
 
     console.warn('[products.sync.operations] validation_failed', {
-      normalizedBody,
+      ...identityLog,
+      operationCount,
       issues,
       failingPath: issues[0]?.path ?? null,
       failingValue: issues[0]?.value ?? null,
       failingNormalizedValue: issues[0]?.normalizedValue ?? null,
+      normalizedBody: debugPayloadLogs ? normalizedBody : undefined,
     });
     return res.status(400).json({
       message: 'Validation error',
@@ -89,10 +109,14 @@ function validateSyncProductOperationsRequest(req: any, res: any, next: any) {
 
   req.body = parsed.data;
   console.info('[products.sync.operations] validation_passed', {
-    parsedBody: parsed.data,
-    parsedSummary: parsed.data.operations.map((operation) =>
-      summarizeProductSyncOperation(operation as unknown as Record<string, any>),
-    ),
+    ...identityLog,
+    operationCount,
+    parsedSummary: debugPayloadLogs
+      ? parsed.data.operations.map((operation) =>
+          summarizeProductSyncOperation(operation as unknown as Record<string, any>),
+        )
+      : undefined,
+    parsedBody: debugPayloadLogs ? parsed.data : undefined,
   });
   next();
 }
@@ -109,10 +133,12 @@ router.post(
     try {
       const { companyId, companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, products, deletedProducts, mirrorProducts } = req.body;
       console.info('[cloud_sync] products.sync.by-rnc', {
+        ...buildIdentityLog({
+          companyTenantKey,
+          companyCloudId,
+          companyRnc,
+        }),
         companyId: companyId ?? null,
-        companyRnc: companyRnc ?? null,
-        companyCloudId: companyCloudId ?? null,
-        companyTenantKey: companyTenantKey ?? null,
         count: Array.isArray(products) ? products.length : 0,
         mirrorProducts: mirrorProducts ?? true,
       });

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
 import { emitCompanyDataChangeEvent } from '../../realtime/realtime.gateway';
+import { buildIdentityLog } from '../../utils/syncLogIdentity';
 import { syncClientsByRncSchema } from './clients.validation';
 import { syncClientsByRnc } from './clients.service';
 
@@ -11,9 +12,7 @@ router.post('/sync/by-rnc', overrideKeyGuard, validate(syncClientsByRncSchema), 
   try {
     const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, clients } = req.body;
     console.info('[cloud_sync] clients.sync.by-rnc', {
-      companyRnc: companyRnc ?? null,
-      companyCloudId: companyCloudId ?? null,
-      companyTenantKey: companyTenantKey ?? null,
+      ...buildIdentityLog({ companyTenantKey, companyCloudId, companyRnc }),
       count: Array.isArray(clients) ? clients.length : 0,
     });
     const result = await syncClientsByRnc({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId }, clients ?? []);

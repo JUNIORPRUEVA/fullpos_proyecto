@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
+import { buildIdentityLog } from '../../utils/syncLogIdentity';
 import { syncSalesByRncSchema } from './sales.validation';
 import { syncSalesByRnc } from './sales.service';
 
@@ -21,9 +22,7 @@ router.post('/sync/by-rnc', overrideKeyGuard, validate(syncSalesByRncSchema), as
         )
       : [];
     console.info('[cloud_sync] sales.sync.by-rnc', {
-      companyRnc: companyRnc ?? null,
-      companyCloudId: companyCloudId ?? null,
-      companyTenantKey: companyTenantKey ?? null,
+      ...buildIdentityLog({ companyTenantKey, companyCloudId, companyRnc }),
       count: Array.isArray(sales) ? sales.length : 0,
       uniqueLocalCodes: localCodes.length,
       localCodesSample: localCodes.slice(0, 6),

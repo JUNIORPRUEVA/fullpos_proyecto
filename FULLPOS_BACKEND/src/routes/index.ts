@@ -19,8 +19,13 @@ import clientsRoutes from '../modules/clients/clients.routes';
 import categoriesRoutes from '../modules/categories/categories.routes';
 import suppliersRoutes from '../modules/suppliers/suppliers.routes';
 import { adminElectronicInvoicingRouter, posElectronicInvoicingRouter } from '../modules/electronic-invoicing/electronic-invoicing.module';
+import { cloudSyncRateLimit } from '../middlewares/cloudSyncRateLimit';
+import { cloudSyncAuditLog } from '../middlewares/cloudSyncAuditLog';
 
 const router = Router();
+
+router.use(cloudSyncAuditLog);
+router.use(cloudSyncRateLimit);
 
 router.use('/auth', authRoutes);
 router.use('/reports', reportRoutes);

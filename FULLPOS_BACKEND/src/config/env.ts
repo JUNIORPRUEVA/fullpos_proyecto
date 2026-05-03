@@ -9,6 +9,15 @@ function optionalTrimmedString(value: unknown) {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function parseBooleanEnv(value: unknown) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off', ''].includes(normalized)) return false;
+  return value;
+}
+
 const optionalUrl = z.preprocess(optionalTrimmedString, z.string().url().optional());
 const DGII_CERTIFICATION_AUTH_SEED_URL = 'https://ecf.dgii.gov.do/certecf/autenticacion/api/autenticacion/semilla';
 const DGII_CERTIFICATION_AUTH_VALIDATE_URL = 'https://ecf.dgii.gov.do/certecf/autenticacion/api/autenticacion/validarsemilla';
@@ -54,7 +63,7 @@ const envSchema = z.object({
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   CORS_ORIGINS: z.string().optional(),
   OVERRIDE_API_KEY: z.string().optional(),
-  ALLOW_PUBLIC_CLOUD: z.coerce.boolean().optional(),
+  ALLOW_PUBLIC_CLOUD: z.preprocess(parseBooleanEnv, z.boolean().optional()),
   REDIS_URL: z.preprocess(optionalTrimmedString, z.string().url().optional()),
   // Optional pepper for hashing integration tokens (recommended in prod)
   INTEGRATION_TOKEN_PEPPER: z.string().optional(),
@@ -83,7 +92,7 @@ const envSchema = z.object({
   DGII_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(15000),
   DGII_REQUEST_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(2),
   DGII_HTTP_USER_AGENT: z.string().optional(),
-  DGII_ALLOW_PRODUCTION: z.coerce.boolean().default(false),
+  DGII_ALLOW_PRODUCTION: z.preprocess(parseBooleanEnv, z.boolean().default(false)),
   DGII_DEFAULT_ENVIRONMENT: dgiiDefaultEnvironmentSchema.default('precertification'),
   DGII_TOKEN_CACHE_SKEW_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
   DGII_PRECERT_SUBMIT_URL: urlWithBlankDefault(DGII_CERTIFICATION_RECEPCION_ECF_URL),
@@ -103,6 +112,21 @@ const envSchema = z.object({
 });
 
 const env = envSchema.parse(process.env);
+
+if (env.NODE_ENV === 'production') {
+  if (env.ALLOW_PUBLIC_CLOUD === true) {
+    throw new Error(
+      'Unsafe production config: ALLOW_PUBLIC_CLOUD must be false in production.',
+    );
+  }
+
+  const overrideApiKey = env.OVERRIDE_API_KEY?.trim();
+  if (!overrideApiKey) {
+    throw new Error(
+      'Unsafe production config: OVERRIDE_API_KEY is required in production.',
+    );
+  }
+}
 
 export const corsOrigins =
   env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) ?? ['*'];

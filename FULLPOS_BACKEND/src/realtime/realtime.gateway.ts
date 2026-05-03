@@ -8,6 +8,8 @@ import { Server } from 'socket.io';
 import env, { corsOrigins } from '../config/env';
 import { resolveCompanyIdentity } from '../modules/companies/companyIdentity.service';
 import { JwtUser } from '../modules/auth/auth.types';
+import { consumeCloudRateLimit } from '../utils/cloudRateLimit';
+import { redactIdentityValue } from '../utils/syncLogIdentity';
 
 type ProductEventType =
   | 'product.created'
@@ -153,11 +155,39 @@ export function attachRealtimeGateway(server: http.Server) {
         }
       }
 
+      const tenantKey =
+        typeof socket.handshake.auth?.companyTenantKey === 'string'
+          ? socket.handshake.auth.companyTenantKey
+          : undefined;
+      const cloudCompanyId =
+        typeof socket.handshake.auth?.companyCloudId === 'string'
+          ? socket.handshake.auth.companyCloudId
+          : undefined;
+
+      const rateKey = tenantKey
+        ? `tenant:${tenantKey.toLowerCase()}`
+        : cloudCompanyId
+          ? `cloud:${cloudCompanyId.toLowerCase()}`
+          : `ip:${socket.handshake.address || 'unknown'}`;
+      const realtimeRate = consumeCloudRateLimit({
+        bucket: 'realtime',
+        key: rateKey,
+      });
+      if (!realtimeRate.allowed) {
+        console.warn('[rate_limit.blocked.realtime]', {
+          keyType: tenantKey ? 'companyTenantKey' : cloudCompanyId ? 'companyCloudId' : 'ip',
+          keyValue: tenantKey
+            ? redactIdentityValue(tenantKey, 10)
+            : cloudCompanyId
+              ? redactIdentityValue(cloudCompanyId, 8)
+              : socket.handshake.address || 'unknown',
+          retryAfterMs: realtimeRate.retryAfterMs,
+        });
+        return next(new Error('Demasiadas reconexiones, intenta nuevamente en unos segundos'));
+      }
+
       const companyId = await resolveCompanyIdForSocket({
-        companyTenantKey:
-          typeof socket.handshake.auth?.companyTenantKey === 'string'
-            ? socket.handshake.auth.companyTenantKey
-            : undefined,
+        companyTenantKey: tenantKey,
         businessId:
           typeof socket.handshake.auth?.businessId === 'string'
             ? socket.handshake.auth.businessId
@@ -170,10 +200,7 @@ export function attachRealtimeGateway(server: http.Server) {
           typeof socket.handshake.auth?.terminalId === 'string'
             ? socket.handshake.auth.terminalId
             : undefined,
-        companyCloudId:
-          typeof socket.handshake.auth?.companyCloudId === 'string'
-            ? socket.handshake.auth.companyCloudId
-            : undefined,
+        companyCloudId: cloudCompanyId,
         companyRnc:
           typeof socket.handshake.auth?.companyRnc === 'string'
             ? socket.handshake.auth.companyRnc

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authGuard } from '../../middlewares/authGuard';
 import { overrideKeyGuard } from '../../middlewares/overrideKeyGuard';
 import { validate } from '../../middlewares/validate';
+import { buildIdentityLog } from '../../utils/syncLogIdentity';
 import {
   createPayment,
   listPayments,
@@ -45,9 +46,7 @@ router.post('/sync/by-rnc', overrideKeyGuard, validate(syncPaymentsByRncSchema),
   try {
     const { companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId, payments } = req.body;
     console.info('[cloud_sync] payments.sync.by-rnc', {
-      companyRnc: companyRnc ?? null,
-      companyCloudId: companyCloudId ?? null,
-      companyTenantKey: companyTenantKey ?? null,
+      ...buildIdentityLog({ companyTenantKey, companyCloudId, companyRnc }),
       count: Array.isArray(payments) ? payments.length : 0,
     });
     const result = await syncPaymentsByRnc({ companyRnc, companyCloudId, companyTenantKey, businessId, deviceId, terminalId }, payments ?? []);
