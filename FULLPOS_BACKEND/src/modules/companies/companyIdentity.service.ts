@@ -99,7 +99,38 @@ async function updateCompanyIdentityIfNeeded(
   const data: Prisma.CompanyUpdateInput = {};
 
   if (!company.rnc && input.companyRnc) data.rnc = input.companyRnc;
-  if (!company.normalizedRnc && input.normalizedRnc) data.normalizedRnc = input.normalizedRnc;
+
+  // Auto-repair: si el normalizedRnc almacenado es distinto al que resulta de
+  // normalizar el RNC del propio registro (indica dato corrupto al guardar),
+  // actualizar al valor correcto derivado del RNC real.
+  const expectedNormalizedRnc = normalizeRnc(company.rnc);
+  if (
+    expectedNormalizedRnc &&
+    company.normalizedRnc &&
+    company.normalizedRnc !== expectedNormalizedRnc
+  ) {
+    data.normalizedRnc = expectedNormalizedRnc;
+    // Si el tenantKey almacenado contiene el RNC incorrecto, corregirlo.
+    if (company.tenantKey && company.normalizedRnc) {
+      const repairedTenantKey = company.tenantKey.replace(
+        new RegExp(company.normalizedRnc, 'g'),
+        expectedNormalizedRnc,
+      );
+      if (repairedTenantKey !== company.tenantKey) {
+        data.tenantKey = repairedTenantKey;
+        console.warn('[companyIdentity] auto_repair_tenant_key', {
+          companyId: company.id,
+          oldNormalizedRnc: company.normalizedRnc,
+          newNormalizedRnc: expectedNormalizedRnc,
+          oldTenantKey: company.tenantKey,
+          newTenantKey: repairedTenantKey,
+        });
+      }
+    }
+  } else if (!company.normalizedRnc && input.normalizedRnc) {
+    data.normalizedRnc = input.normalizedRnc;
+  }
+
   if (!company.cloudCompanyId && input.companyCloudId) data.cloudCompanyId = input.companyCloudId;
   if (!company.tenantKey && input.tenantKey) data.tenantKey = input.tenantKey;
   if (!company.sourceBusinessId && input.businessId) data.sourceBusinessId = input.businessId;
@@ -244,16 +275,46 @@ export async function resolveCompanyIdentity(params: CompanyIdentityInput): Prom
   const companyByCloud = byCloud ? asRecord(byCloud) : null;
   if (companyByCloud) {
     if (tenantKey && companyByCloud.tenantKey && companyByCloud.tenantKey !== tenantKey) {
-      throw apiError(
-        409,
-        'companyCloudId pertenece a otra identidad de empresa',
-        'COMPANY_TENANT_LOCATOR_CONFLICT',
-        {
-          requestedTenantKey: tenantKey,
-          requestedCompanyCloudId: companyCloudId,
-          companyByCloud: diagnostic(companyByCloud),
-        },
-      );
+      // Verificar si la diferencia es solo un normalizedRnc incorrecto en el registro almacenado.
+      // Si el tenantKey almacenado, al corregir su normalizedRnc, coincide con el solicitado,
+      // permitir el auto-repair en vez de rechazar con 409.
+      const storedNormalizedRnc = companyByCloud.normalizedRnc ?? '';
+      const expectedNormalizedRncFromRnc = normalizeRnc(companyByCloud.rnc);
+      const isNormalizedRncMismatch =
+        storedNormalizedRnc &&
+        expectedNormalizedRncFromRnc &&
+        storedNormalizedRnc !== expectedNormalizedRncFromRnc;
+
+      let isSelfHealable = false;
+      if (isNormalizedRncMismatch && companyByCloud.tenantKey) {
+        const repairedTenantKey = companyByCloud.tenantKey.replace(
+          new RegExp(storedNormalizedRnc, 'g'),
+          expectedNormalizedRncFromRnc,
+        );
+        isSelfHealable = repairedTenantKey === tenantKey;
+      }
+
+      if (!isSelfHealable) {
+        throw apiError(
+          409,
+          'companyCloudId pertenece a otra identidad de empresa',
+          'COMPANY_TENANT_LOCATOR_CONFLICT',
+          {
+            requestedTenantKey: tenantKey,
+            requestedCompanyCloudId: companyCloudId,
+            companyByCloud: diagnostic(companyByCloud),
+          },
+        );
+      }
+
+      console.warn('[companyIdentity] tenant_key_self_heal_by_cloud_id', {
+        source,
+        companyId: companyByCloud.id,
+        storedNormalizedRnc,
+        expectedNormalizedRncFromRnc,
+        storedTenantKey: companyByCloud.tenantKey,
+        requestedTenantKey: tenantKey,
+      });
     }
     const resolved = await updateCompanyIdentityIfNeeded(companyByCloud, {
       companyRnc,
