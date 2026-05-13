@@ -98,6 +98,7 @@ class SaleRow with _$SaleRow {
     required int id,
     required String localCode,
     required double total,
+    @Default(<SaleRowItem>[]) List<SaleRowItem> items,
     String? paymentMethod,
     String? customerName,
     int? sessionId,
@@ -108,7 +109,132 @@ class SaleRow with _$SaleRow {
   }) = _SaleRow;
 
   factory SaleRow.fromJson(Map<String, dynamic> json) =>
-      _$SaleRowFromJson(json);
+      _$SaleRowFromJson(_normalizeSaleRowJson(json));
+}
+
+@freezed
+class SaleRowItem with _$SaleRowItem {
+  const factory SaleRowItem({
+    required int id,
+    int? productId,
+    String? productCodeSnapshot,
+    String? productNameSnapshot,
+    String? productCode,
+    String? productName,
+    @Default(0) double qty,
+    @Default(0) double quantity,
+    @Default(0) double unitPrice,
+  }) = _SaleRowItem;
+
+  factory SaleRowItem.fromJson(Map<String, dynamic> json) =>
+      _$SaleRowItemFromJson(_normalizeSaleRowItemJson(json));
+}
+
+Map<String, dynamic> _normalizeSaleRowJson(Map<String, dynamic> json) {
+  final normalized = Map<String, dynamic>.from(json);
+  final rawItems = _pickList(normalized, const [
+    'items',
+    'saleItems',
+    'saleDetails',
+    'details',
+    'lines',
+    'products',
+  ]);
+
+  if (rawItems != null) {
+    normalized['items'] = rawItems
+        .whereType<Map>()
+        .map(
+          (item) => _normalizeSaleRowItemJson(Map<String, dynamic>.from(item)),
+        )
+        .toList(growable: false);
+  }
+
+  return normalized;
+}
+
+Map<String, dynamic> _normalizeSaleRowItemJson(Map<String, dynamic> json) {
+  final normalized = Map<String, dynamic>.from(json);
+  final product = normalized['product'] is Map
+      ? Map<String, dynamic>.from(normalized['product'] as Map)
+      : const <String, dynamic>{};
+
+  final productName =
+      _pickString(normalized, const [
+        'productNameSnapshot',
+        'productName',
+        'name',
+        'description',
+        'itemName',
+      ]) ??
+      _pickString(product, const ['name', 'productName']);
+  final productCode =
+      _pickString(normalized, const [
+        'productCodeSnapshot',
+        'productCode',
+        'code',
+        'sku',
+      ]) ??
+      _pickString(product, const ['code', 'sku', 'productCode']);
+  final quantity = _pickNumber(normalized, const ['qty', 'quantity', 'amount']);
+  final unitPrice = _pickNumber(normalized, const [
+    'unitPrice',
+    'price',
+    'unit_price',
+  ]);
+  final productId =
+      _pickNumber(normalized, const ['productId']) ??
+      _pickNumber(product, const ['id', 'productId']);
+  final id =
+      _pickNumber(normalized, const ['id', 'saleItemId', 'lineId']) ??
+      productId ??
+      0;
+
+  normalized['id'] = id.toInt();
+  if (productId != null) normalized['productId'] = productId.toInt();
+  if (productName != null) {
+    normalized['productNameSnapshot'] ??= productName;
+    normalized['productName'] ??= productName;
+  }
+  if (productCode != null) {
+    normalized['productCodeSnapshot'] ??= productCode;
+    normalized['productCode'] ??= productCode;
+  }
+  if (quantity != null) {
+    normalized['qty'] = quantity;
+    normalized['quantity'] = quantity;
+  }
+  if (unitPrice != null) normalized['unitPrice'] = unitPrice;
+
+  return normalized;
+}
+
+List<dynamic>? _pickList(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key];
+    if (value is List) return value;
+  }
+  return null;
+}
+
+String? _pickString(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key]?.toString().trim();
+    if (value != null && value.isNotEmpty) return value;
+  }
+  return null;
+}
+
+num? _pickNumber(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key];
+    if (value is num) return value;
+    if (value is String) {
+      final parsed = num.tryParse(value.replaceAll(',', '').trim());
+      if (parsed != null) return parsed;
+    }
+  }
+  return null;
 }
 
 @freezed

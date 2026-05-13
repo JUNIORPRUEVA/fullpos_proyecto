@@ -1,4 +1,3 @@
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -8,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/theme_provider.dart';
 import '../core/config/app_router.dart';
 import '../features/auth/data/auth_repository.dart';
+import '../features/reports/application/sales_date_filter_controller.dart';
 
 class OwnerApp extends ConsumerStatefulWidget {
   const OwnerApp({super.key});
@@ -27,6 +27,17 @@ class _OwnerAppState extends ConsumerState<OwnerApp> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<bool>(
+      authRepositoryProvider.select(
+        (authState) => authState.accessToken?.trim().isNotEmpty ?? false,
+      ),
+      (previous, next) {
+        if (previous == true && !next) {
+          ref.read(salesDateFilterProvider.notifier).reset();
+        }
+      },
+    );
+
     final router = ref.watch(appRouterProvider);
     final theme = ref.watch(themeDataProvider);
     final darkTheme = ref.watch(darkThemeDataProvider);

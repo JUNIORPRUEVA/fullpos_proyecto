@@ -6,13 +6,15 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/utils/accounting_format.dart';
+import '../application/sales_date_filter_controller.dart';
+import '../application/sales_financial_summary.dart';
 import '../data/report_data.dart';
 import '../data/report_realtime_projection.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
+import 'widgets/sales_date_filter_bar.dart';
 
-const _salesHorizontalGap = 8.0;
 const _maxSalesRangeDays = 365;
 const _maxSalesRangeOffsetDays = _maxSalesRangeDays - 1;
 
@@ -42,17 +44,18 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    final todayStart = DateTime(now.year, now.month, now.day);
-    final defaultFrom = todayStart.subtract(
-      const Duration(days: _maxSalesRangeOffsetDays),
-    );
-    final normalizedRange = _normalizeSalesRange(
-      widget.initialFrom ?? defaultFrom,
-      widget.initialTo ?? now,
-    );
-    _from = normalizedRange.start;
-    _to = normalizedRange.end;
+    if (widget.initialFrom != null || widget.initialTo != null) {
+      final current = ref.read(salesDateFilterProvider).range;
+      ref
+          .read(salesDateFilterProvider.notifier)
+          .applyCustomRange(
+            widget.initialFrom ?? current.start,
+            widget.initialTo ?? current.end,
+          );
+    }
+    final range = ref.read(salesDateFilterProvider).range;
+    _from = range.start;
+    _to = range.end;
     WidgetsBinding.instance.addObserver(this);
     _load(page: 1, showLoading: true);
     _saleRealtimeSubscription = ref
@@ -79,13 +82,7 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
   }
 
   void _setRange(DateTime from, DateTime to) {
-    final normalizedRange = _normalizeSalesRange(from, to);
-    setState(() {
-      _from = normalizedRange.start;
-      _to = normalizedRange.end;
-      _currentPage = 1;
-    });
-    _load(page: 1, showLoading: true);
+    ref.read(salesDateFilterProvider.notifier).applyCustomRange(from, to);
   }
 
   Future<void> _pickCustomRange() async {
@@ -113,6 +110,9 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
       });
     }
     final repo = ref.read(reportsRepositoryProvider);
+    final activeRange = ref.read(salesDateFilterProvider).range;
+    _from = activeRange.start;
+    _to = activeRange.end;
     try {
       final report = await repo.getReportData(
         DateFilter(start: _from, end: _to),
@@ -164,6 +164,17 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<SalesDateFilterState>(salesDateFilterProvider, (previous, next) {
+      if (previous != null && previous.hasSameRangeAs(next)) return;
+      final range = next.range;
+      setState(() {
+        _from = range.start;
+        _to = range.end;
+        _currentPage = 1;
+      });
+      unawaited(_load(page: 1, showLoading: true));
+    });
+
     ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
       if (previous?.revision == next.revision) return;
       if (!next.appliesTo('/sales/list')) return;
@@ -172,6 +183,10 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
 
     final report = _reportData;
     final allSales = report?.sales ?? const <SaleRow>[];
+    final financialSummary = SalesFinancialSummary.fromSales(
+      allSales,
+      totalProfit: report?.profit ?? 0,
+    );
     const pageSize = 20;
     final totalPages = math.max(1, (allSales.length / pageSize).ceil());
     final startIndex = (_currentPage - 1) * pageSize;
@@ -180,289 +195,547 @@ class _SalesListPageState extends ConsumerState<SalesListPage>
         ? const <SaleRow>[]
         : allSales.sublist(startIndex, endIndex);
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _SalesFilters(
-            from: _from,
-            to: _to,
-            onPickRange: () => unawaited(_pickCustomRange()),
-            onChange: (from, to) {
-              _setRange(from, to);
-            },
-            onQuickRange: (days) {
-              final now = DateTime.now();
-              final end = now;
-              final start = days == 0
-                  ? DateTime(now.year, now.month, now.day)
-                  : DateTime(
-                      now.year,
-                      now.month,
-                      now.day,
-                    ).subtract(Duration(days: days - 1));
-              _setRange(start, end);
-            },
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                ? _SalesLoadErrorState(
+    final rangeLabel = _formatSalesDateRange(_from, _to);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showSidePanel = constraints.maxWidth >= 1100;
+        final panelWidth = constraints.maxWidth >= 1280 ? 340.0 : 312.0;
+        final showFloatingSummary =
+            !showSidePanel && !_loading && _error == null;
+
+        final content = Padding(
+          padding: const EdgeInsets.all(16),
+          child: _loading
+              ? _buildSalesStatusContent(
+                  const Center(child: CircularProgressIndicator()),
+                )
+              : _error != null
+              ? _buildSalesStatusContent(
+                  _SalesLoadErrorState(
                     message: _error!,
-                    rangeLabel: _formatSalesDateRange(_from, _to),
+                    rangeLabel: rangeLabel,
                     onRetry: () => _load(page: 1, showLoading: true),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Ventas',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          Row(
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.chevron_left),
-                                onPressed: _currentPage > 1
-                                    ? () => _load(
-                                        page: _currentPage - 1,
-                                        showLoading: true,
-                                      )
-                                    : null,
-                              ),
-                              Text('Página $_currentPage de $totalPages'),
-                              IconButton(
-                                icon: const Icon(Icons.chevron_right),
-                                onPressed: _currentPage < totalPages
-                                    ? () => _load(
-                                        page: _currentPage + 1,
-                                        showLoading: true,
-                                      )
-                                    : null,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _SalesMetric(
-                              title: 'Total vendido',
-                              value: report != null
-                                  ? formatAccountingAmount(report.totalSales)
-                                  : '--',
-                              icon: Icons.payments_outlined,
-                            ),
-                          ),
-                          const SizedBox(width: _salesHorizontalGap),
-                          Expanded(
-                            child: _SalesMetric(
-                              title: 'Costo',
-                              value: report != null
-                                  ? formatAccountingAmount(report.totalCost)
-                                  : '--',
-                              icon: Icons.inventory_2_outlined,
-                            ),
-                          ),
-                          const SizedBox(width: _salesHorizontalGap),
-                          Expanded(
-                            child: _SalesMetric(
-                              title: 'Ganancia',
-                              value: report != null
-                                  ? formatAccountingAmount(report.profit)
-                                  : '--',
-                              icon: Icons.trending_up_outlined,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: allSales.isEmpty
-                            ? _SalesNoDataState(
-                                rangeLabel: _formatSalesDateRange(_from, _to),
-                                onChangeRange: () =>
-                                    unawaited(_pickCustomRange()),
-                              )
-                            : Card(
-                                child: ListView.separated(
-                                  itemCount: visibleSales.length,
-                                  separatorBuilder: (context, separatorIndex) =>
-                                      const Divider(height: 1),
-                                  itemBuilder: (context, index) {
-                                    final sale = visibleSales[index];
-                                    return _CompactSaleRow(
-                                      sale: sale,
-                                      onTap: () => context.go(
-                                        '/sales/detail/${sale.id}',
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                      ),
-                    ],
                   ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+                )
+              : showSidePanel
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _buildSalesListContent(
+                        context: context,
+                        allSales: allSales,
+                        visibleSales: visibleSales,
+                        totalPages: totalPages,
+                        rangeLabel: rangeLabel,
+                        listBottomPadding: 0,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    SizedBox(
+                      width: panelWidth,
+                      child: _FinancialSummaryPanel(
+                        summary: financialSummary,
+                        rangeLabel: rangeLabel,
+                      ),
+                    ),
+                  ],
+                )
+              : _buildSalesListContent(
+                  context: context,
+                  allSales: allSales,
+                  visibleSales: visibleSales,
+                  totalPages: totalPages,
+                  rangeLabel: rangeLabel,
+                  listBottomPadding: 92,
+                ),
+        );
 
-class _SalesFilters extends StatelessWidget {
-  const _SalesFilters({
-    required this.from,
-    required this.to,
-    required this.onPickRange,
-    required this.onChange,
-    required this.onQuickRange,
-  });
-
-  final DateTime from;
-  final DateTime to;
-  final VoidCallback onPickRange;
-  final void Function(DateTime, DateTime) onChange;
-  final ValueChanged<int> onQuickRange;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _RangeChip(label: _salesRangeLabel(from, to)),
-          const SizedBox(width: _salesHorizontalGap),
-          ActionChip(
-            label: const Text('Hoy'),
-            onPressed: () => onQuickRange(0),
-          ),
-          const SizedBox(width: _salesHorizontalGap),
-          ActionChip(
-            label: const Text('7 dias'),
-            onPressed: () => onQuickRange(7),
-          ),
-          const SizedBox(width: _salesHorizontalGap),
-          ActionChip(
-            label: const Text('30 dias'),
-            onPressed: () => onQuickRange(30),
-          ),
-          const SizedBox(width: _salesHorizontalGap),
-          ActionChip(
-            label: const Text('365 dias'),
-            onPressed: () => onQuickRange(_maxSalesRangeDays),
-          ),
-          const SizedBox(width: _salesHorizontalGap),
-          IconButton.filledTonal(
-            tooltip: 'Elegir rango',
-            onPressed: onPickRange,
-            icon: const Icon(Icons.calendar_month_outlined),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RangeChip extends StatelessWidget {
-  const _RangeChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.calendar_today_outlined,
-            size: 16,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SalesMetric extends StatelessWidget {
-  const _SalesMetric({
-    required this.title,
-    required this.value,
-    required this.icon,
-  });
-
-  final String title;
-  final String value;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 17),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.72),
+        return Stack(
+          children: [
+            Positioned.fill(child: content),
+            if (showFloatingSummary)
+              Positioned(
+                right: 18,
+                bottom: 18,
+                child: _FloatingSummaryButton(
+                  onPressed: () => _showFinancialSummarySheet(
+                    context,
+                    summary: financialSummary,
+                    rangeLabel: rangeLabel,
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSalesStatusContent(Widget child) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SalesDateFilterBar(),
+        const SizedBox(height: 12),
+        Expanded(child: child),
+      ],
+    );
+  }
+
+  Widget _buildSalesListContent({
+    required BuildContext context,
+    required List<SaleRow> allSales,
+    required List<SaleRow> visibleSales,
+    required int totalPages,
+    required String rangeLabel,
+    required double listBottomPadding,
+  }) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SalesDateFilterBar(),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Ventas', style: theme.textTheme.titleMedium),
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: _currentPage > 1
+                      ? () => _load(page: _currentPage - 1, showLoading: true)
+                      : null,
+                ),
+                Text('Página $_currentPage de $totalPages'),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: _currentPage < totalPages
+                      ? () => _load(page: _currentPage + 1, showLoading: true)
+                      : null,
                 ),
               ],
             ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: allSales.isEmpty
+              ? _SalesNoDataState(
+                  rangeLabel: rangeLabel,
+                  onChangeRange: () => unawaited(_pickCustomRange()),
+                )
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                  ),
+                  child: ListView.separated(
+                    padding: EdgeInsets.only(bottom: listBottomPadding),
+                    itemCount: visibleSales.length,
+                    separatorBuilder: (context, separatorIndex) =>
+                        const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final sale = visibleSales[index];
+                      return _CompactSaleRow(
+                        sale: sale,
+                        onTap: () => context.go('/sales/detail/${sale.id}'),
+                      );
+                    },
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FinancialSummaryPanel extends StatelessWidget {
+  const _FinancialSummaryPanel({
+    required this.summary,
+    required this.rangeLabel,
+  });
+
+  final SalesFinancialSummary summary;
+  final String rangeLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: SingleChildScrollView(
+        child: _FinancialSummaryContent(
+          summary: summary,
+          rangeLabel: rangeLabel,
+          showSheetHeader: false,
+        ),
+      ),
+    );
+  }
+}
+
+class _FinancialSummaryContent extends StatelessWidget {
+  const _FinancialSummaryContent({
+    required this.summary,
+    required this.rangeLabel,
+    required this.showSheetHeader,
+  });
+
+  final SalesFinancialSummary summary;
+  final String rangeLabel;
+  final bool showSheetHeader;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dividerColor = theme.colorScheme.outlineVariant.withValues(
+      alpha: 0.75,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (showSheetHeader) ...[
+          Center(
+            child: Container(
+              width: 44,
+              height: 4,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.outlineVariant,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+        ],
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.account_balance_wallet_outlined,
+                size: 20,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Resumen financiero',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    rangeLabel,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.58),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Total vendido',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer.withValues(
+                    alpha: 0.76,
+                  ),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _formatDominicanAmount(summary.totalSold),
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: theme.colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _FinancialAmountRow(
+          icon: Icons.attach_money_rounded,
+          label: 'Efectivo',
+          amount: summary.totalCash,
+          total: summary.totalSold,
+        ),
+        _FinancialAmountRow(
+          icon: Icons.credit_card_outlined,
+          label: 'Tarjeta',
+          amount: summary.totalCard,
+          total: summary.totalSold,
+        ),
+        _FinancialAmountRow(
+          icon: Icons.account_balance_outlined,
+          label: 'Transferencia',
+          amount: summary.totalTransfer,
+          total: summary.totalSold,
+        ),
+        _FinancialAmountRow(
+          icon: Icons.pending_actions_outlined,
+          label: 'Crédito',
+          amount: summary.totalCredit,
+          total: summary.totalSold,
+        ),
+        _FinancialAmountRow(
+          icon: Icons.bookmark_border_rounded,
+          label: 'Apartado',
+          amount: summary.totalLayaway,
+          total: summary.totalSold,
+        ),
+        _FinancialAmountRow(
+          icon: Icons.more_horiz_rounded,
+          label: 'Otros',
+          amount: summary.totalOther,
+          total: summary.totalSold,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Divider(height: 1, color: dividerColor),
+        ),
+        _FinancialMetricRow(
+          icon: Icons.trending_up_outlined,
+          label: 'Ganancia',
+          value: _formatDominicanAmount(summary.totalProfit),
+        ),
+        _FinancialMetricRow(
+          icon: Icons.receipt_long_outlined,
+          label: 'Cantidad de ventas',
+          value: '${summary.salesCount}',
+        ),
+        _FinancialMetricRow(
+          icon: Icons.show_chart_rounded,
+          label: 'Promedio por venta',
+          value: _formatDominicanAmount(summary.averageSale),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Calculado con las ventas del rango filtrado.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FinancialAmountRow extends StatelessWidget {
+  const _FinancialAmountRow({
+    required this.icon,
+    required this.label,
+    required this.amount,
+    required this.total,
+  });
+
+  final IconData icon;
+  final String label;
+  final double amount;
+  final double total;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final ratio = total <= 0 ? 0.0 : (amount / total).clamp(0.0, 1.0);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  _formatDominicanAmount(amount),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 4,
+              backgroundColor: theme.colorScheme.surfaceContainerHighest,
+            ),
           ),
         ],
       ),
     );
   }
+}
+
+class _FinancialMetricRow extends StatelessWidget {
+  const _FinancialMetricRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FloatingSummaryButton extends StatelessWidget {
+  const _FloatingSummaryButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return FloatingActionButton.extended(
+      heroTag: 'sales-financial-summary',
+      onPressed: onPressed,
+      icon: const Icon(Icons.account_balance_wallet_outlined),
+      label: const Text('Resumen'),
+    );
+  }
+}
+
+void _showFinancialSummarySheet(
+  BuildContext context, {
+  required SalesFinancialSummary summary,
+  required String rangeLabel,
+}) {
+  showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    isScrollControlled: true,
+    showDragHandle: false,
+    builder: (context) {
+      return Padding(
+        padding: EdgeInsets.fromLTRB(
+          18,
+          14,
+          18,
+          18 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SingleChildScrollView(
+          child: _FinancialSummaryContent(
+            summary: summary,
+            rangeLabel: rangeLabel,
+            showSheetHeader: true,
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _SalesLoadErrorState extends StatelessWidget {
@@ -546,7 +819,7 @@ class _SalesNoDataState extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Sin ventas en este rango',
+              'No hay ventas en este rango de fechas.',
               textAlign: TextAlign.center,
               style: theme.textTheme.titleSmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -584,45 +857,116 @@ class _CompactSaleRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dateLabel = sale.createdAt != null
-        ? DateFormat('yyyy-MM-dd HH:mm').format(sale.createdAt!)
-        : 'Fecha N/D';
     final paymentLabel = _translatePaymentMethod(sale.paymentMethod);
     final primaryLabel = _buildSalePrimaryLabel(sale);
+    final productLabel = _buildSaleProductLabel(sale);
+    final dateLabel = _formatSaleRowDate(sale.createdAt);
+    final detailsLabel = [
+      primaryLabel,
+      dateLabel,
+      paymentLabel,
+    ].where((value) => value.trim().isNotEmpty).join(' • ');
 
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: [
-            Icon(
-              Icons.receipt_long_outlined,
-              size: 18,
-              color: theme.colorScheme.primary,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 720;
+          return Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: isWide ? 16 : 12,
+              vertical: isWide ? 12 : 10,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                '$primaryLabel • $paymentLabel • $dateLabel',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.receipt_long_outlined,
+                  size: 18,
+                  color: theme.colorScheme.primary,
                 ),
-              ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: isWide
+                      ? Row(
+                          children: [
+                            Expanded(
+                              flex: 5,
+                              child: _SaleRowProductText(productLabel),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              flex: 4,
+                              child: _SaleRowMetaText(detailsLabel),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _SaleRowProductText(productLabel),
+                            const SizedBox(height: 3),
+                            _SaleRowMetaText(detailsLabel),
+                          ],
+                        ),
+                ),
+                const SizedBox(width: 10),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 140),
+                  child: Text(
+                    _formatDominicanAmount(sale.total),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 10),
-            Text(
-              formatAccountingAmount(sale.total),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ],
-        ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SaleRowProductText extends StatelessWidget {
+  const _SaleRowProductText(this.value);
+
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      value,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        fontWeight: FontWeight.w900,
+        color: theme.colorScheme.onSurface,
+      ),
+    );
+  }
+}
+
+class _SaleRowMetaText extends StatelessWidget {
+  const _SaleRowMetaText(this.value);
+
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      value,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+        fontWeight: FontWeight.w700,
       ),
     );
   }
@@ -827,7 +1171,40 @@ String _buildSalePrimaryLabel(SaleRow sale) {
   if (customer != null && customer.isNotEmpty) {
     return customer;
   }
-  return 'Venta sin cliente';
+  return 'Cliente general';
+}
+
+String _buildSaleProductLabel(SaleRow sale) {
+  final names = sale.items
+      .map(_saleRowItemProductName)
+      .where((name) => name.isNotEmpty)
+      .toList(growable: false);
+  if (names.isEmpty) return 'Producto no disponible';
+
+  final uniqueNames = <String>[];
+  for (final name in names) {
+    if (!uniqueNames.contains(name)) uniqueNames.add(name);
+  }
+  if (uniqueNames.length == 1) return uniqueNames.first;
+  return '${uniqueNames.first} +${uniqueNames.length - 1} más';
+}
+
+String _saleRowItemProductName(SaleRowItem item) {
+  final candidates = [item.productNameSnapshot, item.productName];
+  for (final candidate in candidates) {
+    final value = candidate?.trim();
+    if (value != null && value.isNotEmpty) return value;
+  }
+  return '';
+}
+
+String _formatSaleRowDate(DateTime? value) {
+  if (value == null) return 'Fecha no disponible';
+  return DateFormat('dd/MM/yyyy hh:mm a').format(value.toLocal());
+}
+
+String _formatDominicanAmount(num value) {
+  return 'RD\$${formatAccountingAmount(value)}';
 }
 
 String _translatePaymentMethod(String? value) {
@@ -850,42 +1227,13 @@ String _translatePaymentMethod(String? value) {
     default:
       final normalized = value?.trim();
       return normalized == null || normalized.isEmpty
-          ? 'No especificado'
+          ? 'Método no especificado'
           : normalized;
   }
 }
 
-bool _sameSalesDate(DateTime left, DateTime right) {
-  return left.year == right.year &&
-      left.month == right.month &&
-      left.day == right.day;
-}
-
 DateTime _salesDateOnly(DateTime value) {
   return DateTime(value.year, value.month, value.day);
-}
-
-DateTime _clampSalesDate(
-  DateTime value,
-  DateTime firstDate,
-  DateTime lastDate,
-) {
-  if (value.isBefore(firstDate)) return firstDate;
-  if (value.isAfter(lastDate)) return lastDate;
-  return value;
-}
-
-DateTimeRange _normalizeSalesRange(DateTime from, DateTime to) {
-  final today = _salesDateOnly(DateTime.now());
-  final firstDate = today.subtract(
-    const Duration(days: _maxSalesRangeOffsetDays),
-  );
-  var normalizedFrom = _clampSalesDate(_salesDateOnly(from), firstDate, today);
-  var normalizedTo = _clampSalesDate(_salesDateOnly(to), firstDate, today);
-  if (normalizedFrom.isAfter(normalizedTo)) {
-    normalizedFrom = normalizedTo;
-  }
-  return DateTimeRange(start: normalizedFrom, end: normalizedTo);
 }
 
 String _formatSalesDateRange(DateTime from, DateTime to) {
@@ -907,29 +1255,4 @@ String _friendlySalesLoadError(Object error) {
   }
   if (raw.isEmpty) return 'No se pudieron cargar las ventas.';
   return 'No se pudieron cargar las ventas: $raw';
-}
-
-String _salesRangeLabel(DateTime from, DateTime to) {
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final fromDay = DateTime(from.year, from.month, from.day);
-  final toDay = DateTime(to.year, to.month, to.day);
-  if (_sameSalesDate(fromDay, today) && _sameSalesDate(toDay, today)) {
-    return 'Hoy';
-  }
-  if (_sameSalesDate(toDay, today) &&
-      fromDay == today.subtract(const Duration(days: 6))) {
-    return '7 dias';
-  }
-  if (_sameSalesDate(toDay, today) &&
-      fromDay == today.subtract(const Duration(days: 29))) {
-    return '30 dias';
-  }
-  if (_sameSalesDate(toDay, today) &&
-      fromDay ==
-          today.subtract(const Duration(days: _maxSalesRangeOffsetDays))) {
-    return '365 dias';
-  }
-  final fmt = DateFormat('dd/MM/yyyy');
-  return '${fmt.format(fromDay)} - ${fmt.format(toDay)}';
 }

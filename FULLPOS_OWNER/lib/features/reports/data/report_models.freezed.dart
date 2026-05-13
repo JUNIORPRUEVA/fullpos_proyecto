@@ -487,6 +487,7 @@ mixin _$SaleRow {
   int get id => throw _privateConstructorUsedError;
   String get localCode => throw _privateConstructorUsedError;
   double get total => throw _privateConstructorUsedError;
+  List<SaleRowItem> get items => throw _privateConstructorUsedError;
   String? get paymentMethod => throw _privateConstructorUsedError;
   String? get customerName => throw _privateConstructorUsedError;
   int? get sessionId => throw _privateConstructorUsedError;
@@ -513,6 +514,7 @@ abstract class $SaleRowCopyWith<$Res> {
     int id,
     String localCode,
     double total,
+    List<SaleRowItem> items,
     String? paymentMethod,
     String? customerName,
     int? sessionId,
@@ -543,6 +545,7 @@ class _$SaleRowCopyWithImpl<$Res, $Val extends SaleRow>
     Object? id = null,
     Object? localCode = null,
     Object? total = null,
+    Object? items = null,
     Object? paymentMethod = freezed,
     Object? customerName = freezed,
     Object? sessionId = freezed,
@@ -565,6 +568,10 @@ class _$SaleRowCopyWithImpl<$Res, $Val extends SaleRow>
                 ? _value.total
                 : total // ignore: cast_nullable_to_non_nullable
                       as double,
+            items: null == items
+                ? _value.items
+                : items // ignore: cast_nullable_to_non_nullable
+                      as List<SaleRowItem>,
             paymentMethod: freezed == paymentMethod
                 ? _value.paymentMethod
                 : paymentMethod // ignore: cast_nullable_to_non_nullable
@@ -625,6 +632,7 @@ abstract class _$$SaleRowImplCopyWith<$Res> implements $SaleRowCopyWith<$Res> {
     int id,
     String localCode,
     double total,
+    List<SaleRowItem> items,
     String? paymentMethod,
     String? customerName,
     int? sessionId,
@@ -655,6 +663,7 @@ class __$$SaleRowImplCopyWithImpl<$Res>
     Object? id = null,
     Object? localCode = null,
     Object? total = null,
+    Object? items = null,
     Object? paymentMethod = freezed,
     Object? customerName = freezed,
     Object? sessionId = freezed,
@@ -677,6 +686,10 @@ class __$$SaleRowImplCopyWithImpl<$Res>
             ? _value.total
             : total // ignore: cast_nullable_to_non_nullable
                   as double,
+        items: null == items
+            ? _value._items
+            : items // ignore: cast_nullable_to_non_nullable
+                  as List<SaleRowItem>,
         paymentMethod: freezed == paymentMethod
             ? _value.paymentMethod
             : paymentMethod // ignore: cast_nullable_to_non_nullable
@@ -717,6 +730,7 @@ class _$SaleRowImpl implements _SaleRow {
     required this.id,
     required this.localCode,
     required this.total,
+    final List<SaleRowItem> items = const <SaleRowItem>[],
     this.paymentMethod,
     this.customerName,
     this.sessionId,
@@ -724,7 +738,7 @@ class _$SaleRowImpl implements _SaleRow {
     this.sessionOpenedAt,
     this.createdAt,
     this.user,
-  });
+  }) : _items = items;
 
   factory _$SaleRowImpl.fromJson(Map<String, dynamic> json) =>
       _$$SaleRowImplFromJson(json);
@@ -735,6 +749,15 @@ class _$SaleRowImpl implements _SaleRow {
   final String localCode;
   @override
   final double total;
+  final List<SaleRowItem> _items;
+  @override
+  @JsonKey()
+  List<SaleRowItem> get items {
+    if (_items is EqualUnmodifiableListView) return _items;
+    // ignore: implicit_dynamic_type
+    return EqualUnmodifiableListView(_items);
+  }
+
   @override
   final String? paymentMethod;
   @override
@@ -752,7 +775,7 @@ class _$SaleRowImpl implements _SaleRow {
 
   @override
   String toString() {
-    return 'SaleRow(id: $id, localCode: $localCode, total: $total, paymentMethod: $paymentMethod, customerName: $customerName, sessionId: $sessionId, sessionStatus: $sessionStatus, sessionOpenedAt: $sessionOpenedAt, createdAt: $createdAt, user: $user)';
+    return 'SaleRow(id: $id, localCode: $localCode, total: $total, items: $items, paymentMethod: $paymentMethod, customerName: $customerName, sessionId: $sessionId, sessionStatus: $sessionStatus, sessionOpenedAt: $sessionOpenedAt, createdAt: $createdAt, user: $user)';
   }
 
   @override
@@ -764,6 +787,7 @@ class _$SaleRowImpl implements _SaleRow {
             (identical(other.localCode, localCode) ||
                 other.localCode == localCode) &&
             (identical(other.total, total) || other.total == total) &&
+            const DeepCollectionEquality().equals(other._items, _items) &&
             (identical(other.paymentMethod, paymentMethod) ||
                 other.paymentMethod == paymentMethod) &&
             (identical(other.customerName, customerName) ||
@@ -786,6 +810,7 @@ class _$SaleRowImpl implements _SaleRow {
     id,
     localCode,
     total,
+    const DeepCollectionEquality().hash(_items),
     paymentMethod,
     customerName,
     sessionId,
@@ -814,6 +839,7 @@ abstract class _SaleRow implements SaleRow {
     required final int id,
     required final String localCode,
     required final double total,
+    final List<SaleRowItem> items,
     final String? paymentMethod,
     final String? customerName,
     final int? sessionId,
@@ -831,6 +857,8 @@ abstract class _SaleRow implements SaleRow {
   String get localCode;
   @override
   double get total;
+  @override
+  List<SaleRowItem> get items;
   @override
   String? get paymentMethod;
   @override
@@ -851,6 +879,350 @@ abstract class _SaleRow implements SaleRow {
   @override
   @JsonKey(includeFromJson: false, includeToJson: false)
   _$$SaleRowImplCopyWith<_$SaleRowImpl> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
+SaleRowItem _$SaleRowItemFromJson(Map<String, dynamic> json) {
+  return _SaleRowItem.fromJson(json);
+}
+
+/// @nodoc
+mixin _$SaleRowItem {
+  int get id => throw _privateConstructorUsedError;
+  int? get productId => throw _privateConstructorUsedError;
+  String? get productCodeSnapshot => throw _privateConstructorUsedError;
+  String? get productNameSnapshot => throw _privateConstructorUsedError;
+  String? get productCode => throw _privateConstructorUsedError;
+  String? get productName => throw _privateConstructorUsedError;
+  double get qty => throw _privateConstructorUsedError;
+  double get quantity => throw _privateConstructorUsedError;
+  double get unitPrice => throw _privateConstructorUsedError;
+
+  /// Serializes this SaleRowItem to a JSON map.
+  Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
+
+  /// Create a copy of SaleRowItem
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  $SaleRowItemCopyWith<SaleRowItem> get copyWith =>
+      throw _privateConstructorUsedError;
+}
+
+/// @nodoc
+abstract class $SaleRowItemCopyWith<$Res> {
+  factory $SaleRowItemCopyWith(
+    SaleRowItem value,
+    $Res Function(SaleRowItem) then,
+  ) = _$SaleRowItemCopyWithImpl<$Res, SaleRowItem>;
+  @useResult
+  $Res call({
+    int id,
+    int? productId,
+    String? productCodeSnapshot,
+    String? productNameSnapshot,
+    String? productCode,
+    String? productName,
+    double qty,
+    double quantity,
+    double unitPrice,
+  });
+}
+
+/// @nodoc
+class _$SaleRowItemCopyWithImpl<$Res, $Val extends SaleRowItem>
+    implements $SaleRowItemCopyWith<$Res> {
+  _$SaleRowItemCopyWithImpl(this._value, this._then);
+
+  // ignore: unused_field
+  final $Val _value;
+  // ignore: unused_field
+  final $Res Function($Val) _then;
+
+  /// Create a copy of SaleRowItem
+  /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? id = null,
+    Object? productId = freezed,
+    Object? productCodeSnapshot = freezed,
+    Object? productNameSnapshot = freezed,
+    Object? productCode = freezed,
+    Object? productName = freezed,
+    Object? qty = null,
+    Object? quantity = null,
+    Object? unitPrice = null,
+  }) {
+    return _then(
+      _value.copyWith(
+            id: null == id
+                ? _value.id
+                : id // ignore: cast_nullable_to_non_nullable
+                      as int,
+            productId: freezed == productId
+                ? _value.productId
+                : productId // ignore: cast_nullable_to_non_nullable
+                      as int?,
+            productCodeSnapshot: freezed == productCodeSnapshot
+                ? _value.productCodeSnapshot
+                : productCodeSnapshot // ignore: cast_nullable_to_non_nullable
+                      as String?,
+            productNameSnapshot: freezed == productNameSnapshot
+                ? _value.productNameSnapshot
+                : productNameSnapshot // ignore: cast_nullable_to_non_nullable
+                      as String?,
+            productCode: freezed == productCode
+                ? _value.productCode
+                : productCode // ignore: cast_nullable_to_non_nullable
+                      as String?,
+            productName: freezed == productName
+                ? _value.productName
+                : productName // ignore: cast_nullable_to_non_nullable
+                      as String?,
+            qty: null == qty
+                ? _value.qty
+                : qty // ignore: cast_nullable_to_non_nullable
+                      as double,
+            quantity: null == quantity
+                ? _value.quantity
+                : quantity // ignore: cast_nullable_to_non_nullable
+                      as double,
+            unitPrice: null == unitPrice
+                ? _value.unitPrice
+                : unitPrice // ignore: cast_nullable_to_non_nullable
+                      as double,
+          )
+          as $Val,
+    );
+  }
+}
+
+/// @nodoc
+abstract class _$$SaleRowItemImplCopyWith<$Res>
+    implements $SaleRowItemCopyWith<$Res> {
+  factory _$$SaleRowItemImplCopyWith(
+    _$SaleRowItemImpl value,
+    $Res Function(_$SaleRowItemImpl) then,
+  ) = __$$SaleRowItemImplCopyWithImpl<$Res>;
+  @override
+  @useResult
+  $Res call({
+    int id,
+    int? productId,
+    String? productCodeSnapshot,
+    String? productNameSnapshot,
+    String? productCode,
+    String? productName,
+    double qty,
+    double quantity,
+    double unitPrice,
+  });
+}
+
+/// @nodoc
+class __$$SaleRowItemImplCopyWithImpl<$Res>
+    extends _$SaleRowItemCopyWithImpl<$Res, _$SaleRowItemImpl>
+    implements _$$SaleRowItemImplCopyWith<$Res> {
+  __$$SaleRowItemImplCopyWithImpl(
+    _$SaleRowItemImpl _value,
+    $Res Function(_$SaleRowItemImpl) _then,
+  ) : super(_value, _then);
+
+  /// Create a copy of SaleRowItem
+  /// with the given fields replaced by the non-null parameter values.
+  @pragma('vm:prefer-inline')
+  @override
+  $Res call({
+    Object? id = null,
+    Object? productId = freezed,
+    Object? productCodeSnapshot = freezed,
+    Object? productNameSnapshot = freezed,
+    Object? productCode = freezed,
+    Object? productName = freezed,
+    Object? qty = null,
+    Object? quantity = null,
+    Object? unitPrice = null,
+  }) {
+    return _then(
+      _$SaleRowItemImpl(
+        id: null == id
+            ? _value.id
+            : id // ignore: cast_nullable_to_non_nullable
+                  as int,
+        productId: freezed == productId
+            ? _value.productId
+            : productId // ignore: cast_nullable_to_non_nullable
+                  as int?,
+        productCodeSnapshot: freezed == productCodeSnapshot
+            ? _value.productCodeSnapshot
+            : productCodeSnapshot // ignore: cast_nullable_to_non_nullable
+                  as String?,
+        productNameSnapshot: freezed == productNameSnapshot
+            ? _value.productNameSnapshot
+            : productNameSnapshot // ignore: cast_nullable_to_non_nullable
+                  as String?,
+        productCode: freezed == productCode
+            ? _value.productCode
+            : productCode // ignore: cast_nullable_to_non_nullable
+                  as String?,
+        productName: freezed == productName
+            ? _value.productName
+            : productName // ignore: cast_nullable_to_non_nullable
+                  as String?,
+        qty: null == qty
+            ? _value.qty
+            : qty // ignore: cast_nullable_to_non_nullable
+                  as double,
+        quantity: null == quantity
+            ? _value.quantity
+            : quantity // ignore: cast_nullable_to_non_nullable
+                  as double,
+        unitPrice: null == unitPrice
+            ? _value.unitPrice
+            : unitPrice // ignore: cast_nullable_to_non_nullable
+                  as double,
+      ),
+    );
+  }
+}
+
+/// @nodoc
+@JsonSerializable()
+class _$SaleRowItemImpl implements _SaleRowItem {
+  const _$SaleRowItemImpl({
+    required this.id,
+    this.productId,
+    this.productCodeSnapshot,
+    this.productNameSnapshot,
+    this.productCode,
+    this.productName,
+    this.qty = 0,
+    this.quantity = 0,
+    this.unitPrice = 0,
+  });
+
+  factory _$SaleRowItemImpl.fromJson(Map<String, dynamic> json) =>
+      _$$SaleRowItemImplFromJson(json);
+
+  @override
+  final int id;
+  @override
+  final int? productId;
+  @override
+  final String? productCodeSnapshot;
+  @override
+  final String? productNameSnapshot;
+  @override
+  final String? productCode;
+  @override
+  final String? productName;
+  @override
+  @JsonKey()
+  final double qty;
+  @override
+  @JsonKey()
+  final double quantity;
+  @override
+  @JsonKey()
+  final double unitPrice;
+
+  @override
+  String toString() {
+    return 'SaleRowItem(id: $id, productId: $productId, productCodeSnapshot: $productCodeSnapshot, productNameSnapshot: $productNameSnapshot, productCode: $productCode, productName: $productName, qty: $qty, quantity: $quantity, unitPrice: $unitPrice)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        (other.runtimeType == runtimeType &&
+            other is _$SaleRowItemImpl &&
+            (identical(other.id, id) || other.id == id) &&
+            (identical(other.productId, productId) ||
+                other.productId == productId) &&
+            (identical(other.productCodeSnapshot, productCodeSnapshot) ||
+                other.productCodeSnapshot == productCodeSnapshot) &&
+            (identical(other.productNameSnapshot, productNameSnapshot) ||
+                other.productNameSnapshot == productNameSnapshot) &&
+            (identical(other.productCode, productCode) ||
+                other.productCode == productCode) &&
+            (identical(other.productName, productName) ||
+                other.productName == productName) &&
+            (identical(other.qty, qty) || other.qty == qty) &&
+            (identical(other.quantity, quantity) ||
+                other.quantity == quantity) &&
+            (identical(other.unitPrice, unitPrice) ||
+                other.unitPrice == unitPrice));
+  }
+
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  int get hashCode => Object.hash(
+    runtimeType,
+    id,
+    productId,
+    productCodeSnapshot,
+    productNameSnapshot,
+    productCode,
+    productName,
+    qty,
+    quantity,
+    unitPrice,
+  );
+
+  /// Create a copy of SaleRowItem
+  /// with the given fields replaced by the non-null parameter values.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  @override
+  @pragma('vm:prefer-inline')
+  _$$SaleRowItemImplCopyWith<_$SaleRowItemImpl> get copyWith =>
+      __$$SaleRowItemImplCopyWithImpl<_$SaleRowItemImpl>(this, _$identity);
+
+  @override
+  Map<String, dynamic> toJson() {
+    return _$$SaleRowItemImplToJson(this);
+  }
+}
+
+abstract class _SaleRowItem implements SaleRowItem {
+  const factory _SaleRowItem({
+    required final int id,
+    final int? productId,
+    final String? productCodeSnapshot,
+    final String? productNameSnapshot,
+    final String? productCode,
+    final String? productName,
+    final double qty,
+    final double quantity,
+    final double unitPrice,
+  }) = _$SaleRowItemImpl;
+
+  factory _SaleRowItem.fromJson(Map<String, dynamic> json) =
+      _$SaleRowItemImpl.fromJson;
+
+  @override
+  int get id;
+  @override
+  int? get productId;
+  @override
+  String? get productCodeSnapshot;
+  @override
+  String? get productNameSnapshot;
+  @override
+  String? get productCode;
+  @override
+  String? get productName;
+  @override
+  double get qty;
+  @override
+  double get quantity;
+  @override
+  double get unitPrice;
+
+  /// Create a copy of SaleRowItem
+  /// with the given fields replaced by the non-null parameter values.
+  @override
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  _$$SaleRowItemImplCopyWith<_$SaleRowItemImpl> get copyWith =>
       throw _privateConstructorUsedError;
 }
 

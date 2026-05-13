@@ -10,11 +10,13 @@ import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/accounting_format.dart';
 import '../../auth/data/auth_repository.dart';
+import '../application/sales_date_filter_controller.dart';
 import '../data/report_data.dart';
 import '../data/report_models.dart';
 import '../data/report_realtime_projection.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
+import 'widgets/sales_date_filter_bar.dart';
 
 const _maxReportRangeDays = 365;
 const _maxReportRangeOffsetDays = _maxReportRangeDays - 1;
@@ -41,13 +43,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    _from = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).subtract(const Duration(days: _maxReportRangeOffsetDays));
-    _to = now;
+    final range = ref.read(salesDateFilterProvider).range;
+    _from = range.start;
+    _to = range.end;
     WidgetsBinding.instance.addObserver(this);
     _load(showLoading: true);
     _saleRealtimeSubscription = ref
@@ -89,6 +87,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     }
 
     final repo = ref.read(reportsRepositoryProvider);
+    final activeRange = ref.read(salesDateFilterProvider).range;
+    _from = activeRange.start;
+    _to = activeRange.end;
     final warnings = <String>[];
 
     try {
@@ -179,7 +180,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
   }
 
   String _formatReportAmount(num value) {
-    return 'RD\$ ${formatAccountingAmount(value)}';
+    return 'RD\$${formatAccountingAmount(value)}';
   }
 
   String _friendlyLoadError(Object error) {
@@ -367,27 +368,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
 
     if (selected == null || !mounted) return;
     await _applyPresetRange(selected);
-  }
-
-  String _rangeOptionLabel(
-    _ReportRangeOption option, {
-    required DateTime from,
-    required DateTime to,
-  }) {
-    switch (option) {
-      case _ReportRangeOption.today:
-        return 'Hoy';
-      case _ReportRangeOption.yesterday:
-        return 'Ayer';
-      case _ReportRangeOption.week:
-        return 'Semana';
-      case _ReportRangeOption.fortnight:
-        return 'Quincena';
-      case _ReportRangeOption.year:
-        return '365 días';
-      case _ReportRangeOption.custom:
-        return _formatDashboardRange(from, to);
-    }
   }
 
   Future<void> _openCustomRangeSheet() async {
@@ -636,6 +616,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<SalesDateFilterState>(salesDateFilterProvider, (previous, next) {
+      if (previous != null && previous.hasSameRangeAs(next)) return;
+      final range = next.range;
+      setState(() {
+        _from = range.start;
+        _to = range.end;
+      });
+      unawaited(_load(showLoading: true));
+    });
+
     ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
       if (previous?.revision == next.revision) return;
       if (!next.appliesTo('/dashboard')) return;
@@ -680,7 +670,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
             : width >= 700
             ? 250.0
             : 290.0;
-        final activeRange = _currentRangeOption();
         final metricItems = [
           _MetricInfo(
             title: 'Ventas',
@@ -705,25 +694,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           ),
         ];
 
-        final filterLabel = _rangeOptionLabel(
-          activeRange,
-          from: _from,
-          to: _to,
-        );
-
         return SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: _CenteredFilterButton(
-                  label: filterLabel,
-                  compact: isPhone,
-                  onTap: () => unawaited(_openRangeOptionsSheet()),
-                ),
-              ),
+              const SalesDateFilterBar(),
               const SizedBox(height: 12),
               if (_loading)
                 const Padding(
@@ -800,7 +776,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                   peakDay: peakDay,
                   formatAmount: _formatReportAmount,
                   onOpenDetails: () {
-                    context.go('/sales/list?from=$fromStr&to=$toStr');
+                    context.go('/sales/list');
                   },
                 ),
               ],
@@ -808,86 +784,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           ),
         );
       },
-    );
-  }
-}
-
-class _CenteredFilterButton extends StatelessWidget {
-  const _CenteredFilterButton({
-    required this.label,
-    required this.compact,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool compact;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Ink(
-          padding: EdgeInsets.symmetric(
-            horizontal: compact ? 10 : 12,
-            vertical: compact ? 6 : 7,
-          ),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.82),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: compact ? 24 : 26,
-                height: compact ? 24 : 26,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  Icons.tune_rounded,
-                  color: theme.colorScheme.primary,
-                  size: 15,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: theme.colorScheme.onSurface,
-                  fontWeight: FontWeight.w700,
-                  fontSize: compact ? 11 : 11.5,
-                  letterSpacing: -0.1,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.keyboard_arrow_down_rounded,
-                color: theme.colorScheme.onSurfaceVariant,
-                size: 18,
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1357,7 +1253,7 @@ class _SimpleNoDataState extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                'Sin ventas en este rango',
+                'No hay ventas en este rango de fechas.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,

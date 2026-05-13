@@ -7,11 +7,13 @@ import 'package:intl/intl.dart';
 
 import '../../../core/providers/sync_request_provider.dart';
 import '../../../core/utils/accounting_format.dart';
+import '../application/sales_date_filter_controller.dart';
 import '../data/report_data.dart';
 import '../data/report_realtime_projection.dart';
 import '../data/report_models.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
+import 'widgets/sales_date_filter_bar.dart';
 
 DateTime _dateOnly(DateTime value) =>
     DateTime(value.year, value.month, value.day);
@@ -51,14 +53,18 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    final today = _dateOnly(DateTime.now());
-    final normalizedRange = _normalizeSalesByDayRange(
-      widget.initialFrom ??
-          today.subtract(const Duration(days: _maxSalesByDayRangeOffsetDays)),
-      widget.initialTo ?? today,
-    );
-    _from = normalizedRange.start;
-    _to = normalizedRange.end;
+    if (widget.initialFrom != null || widget.initialTo != null) {
+      final current = ref.read(salesDateFilterProvider).range;
+      ref
+          .read(salesDateFilterProvider.notifier)
+          .applyCustomRange(
+            widget.initialFrom ?? current.start,
+            widget.initialTo ?? current.end,
+          );
+    }
+    final range = ref.read(salesDateFilterProvider).range;
+    _from = range.start;
+    _to = range.end;
     _saleRealtimeSubscription = ref
         .read(saleRealtimeServiceProvider)
         .stream
@@ -88,12 +94,7 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
   }
 
   void _setRange(DateTime from, DateTime to) {
-    final normalizedRange = _normalizeSalesByDayRange(from, to);
-    setState(() {
-      _from = normalizedRange.start;
-      _to = normalizedRange.end;
-    });
-    _load(showLoading: true);
+    ref.read(salesDateFilterProvider.notifier).applyCustomRange(from, to);
   }
 
   Future<void> _load({required bool showLoading}) async {
@@ -112,6 +113,9 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
     }
 
     final repo = ref.read(reportsRepositoryProvider);
+    final activeRange = ref.read(salesDateFilterProvider).range;
+    _from = activeRange.start;
+    _to = activeRange.end;
 
     try {
       final report = await repo.getReportData(
@@ -487,6 +491,16 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<SalesDateFilterState>(salesDateFilterProvider, (previous, next) {
+      if (previous != null && previous.hasSameRangeAs(next)) return;
+      final range = next.range;
+      setState(() {
+        _from = range.start;
+        _to = range.end;
+      });
+      unawaited(_load(showLoading: true));
+    });
+
     ref.listen<SyncRequest>(syncRequestProvider, (previous, next) {
       if (previous?.revision == next.revision) return;
       if (!next.appliesTo('/sales/by-day')) return;
@@ -503,6 +517,8 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const SalesDateFilterBar(),
+          const SizedBox(height: 8),
           _TopInfoStrip(
             rangeLabel: _rangeLabel(),
             salesCount: filtered.length,
@@ -607,7 +623,7 @@ class _SalesByDayPageState extends ConsumerState<SalesByDayPage>
               Text(
                 _hasActiveFilters
                     ? 'No hay ventas para los filtros seleccionados.'
-                    : 'No hay ventas registradas en el rango actual.',
+                    : 'No hay ventas en este rango de fechas.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.titleSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -1010,25 +1026,6 @@ bool _sameDate(DateTime left, DateTime right) {
   return left.year == right.year &&
       left.month == right.month &&
       left.day == right.day;
-}
-
-DateTime _clampDate(DateTime value, DateTime firstDate, DateTime lastDate) {
-  if (value.isBefore(firstDate)) return firstDate;
-  if (value.isAfter(lastDate)) return lastDate;
-  return value;
-}
-
-DateTimeRange _normalizeSalesByDayRange(DateTime from, DateTime to) {
-  final today = _dateOnly(DateTime.now());
-  final firstAllowedDate = today.subtract(
-    const Duration(days: _maxSalesByDayRangeOffsetDays),
-  );
-  var normalizedFrom = _clampDate(_dateOnly(from), firstAllowedDate, today);
-  var normalizedTo = _clampDate(_dateOnly(to), firstAllowedDate, today);
-  if (normalizedFrom.isAfter(normalizedTo)) {
-    normalizedFrom = normalizedTo;
-  }
-  return DateTimeRange(start: normalizedFrom, end: normalizedTo);
 }
 
 String _formatSalesByDayDate(DateTime value) {

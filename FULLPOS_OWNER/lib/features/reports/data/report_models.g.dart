@@ -45,6 +45,11 @@ _$SaleRowImpl _$$SaleRowImplFromJson(Map<String, dynamic> json) =>
       id: (json['id'] as num).toInt(),
       localCode: json['localCode'] as String,
       total: (json['total'] as num).toDouble(),
+      items:
+          (json['items'] as List<dynamic>?)
+              ?.map((e) => SaleRowItem.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const <SaleRowItem>[],
       paymentMethod: json['paymentMethod'] as String?,
       customerName: json['customerName'] as String?,
       sessionId: (json['sessionId'] as num?)?.toInt(),
@@ -65,6 +70,7 @@ Map<String, dynamic> _$$SaleRowImplToJson(_$SaleRowImpl instance) =>
       'id': instance.id,
       'localCode': instance.localCode,
       'total': instance.total,
+      'items': instance.items,
       'paymentMethod': instance.paymentMethod,
       'customerName': instance.customerName,
       'sessionId': instance.sessionId,
@@ -72,6 +78,32 @@ Map<String, dynamic> _$$SaleRowImplToJson(_$SaleRowImpl instance) =>
       'sessionOpenedAt': instance.sessionOpenedAt?.toIso8601String(),
       'createdAt': instance.createdAt?.toIso8601String(),
       'user': instance.user,
+    };
+
+_$SaleRowItemImpl _$$SaleRowItemImplFromJson(Map<String, dynamic> json) =>
+    _$SaleRowItemImpl(
+      id: (json['id'] as num).toInt(),
+      productId: (json['productId'] as num?)?.toInt(),
+      productCodeSnapshot: json['productCodeSnapshot'] as String?,
+      productNameSnapshot: json['productNameSnapshot'] as String?,
+      productCode: json['productCode'] as String?,
+      productName: json['productName'] as String?,
+      qty: (json['qty'] as num?)?.toDouble() ?? 0,
+      quantity: (json['quantity'] as num?)?.toDouble() ?? 0,
+      unitPrice: (json['unitPrice'] as num?)?.toDouble() ?? 0,
+    );
+
+Map<String, dynamic> _$$SaleRowItemImplToJson(_$SaleRowItemImpl instance) =>
+    <String, dynamic>{
+      'id': instance.id,
+      'productId': instance.productId,
+      'productCodeSnapshot': instance.productCodeSnapshot,
+      'productNameSnapshot': instance.productNameSnapshot,
+      'productCode': instance.productCode,
+      'productName': instance.productName,
+      'qty': instance.qty,
+      'quantity': instance.quantity,
+      'unitPrice': instance.unitPrice,
     };
 
 _$UserInfoImpl _$$UserInfoImplFromJson(Map<String, dynamic> json) =>

@@ -17,3 +17,14 @@ FULLPOS_OWNER/.flutter-plugins
 FULLPOS_OWNER/.flutter-plugins-dependencies
 FULLPOS_OWNER/.packages
 FULLPOS_OWNER/build_verbose_owner*.txt
+
+# Do not commit generated installers or binary release artifacts.
+FULLPOS_OWNER/installer/
+FULLPOS_OWNER/installer/output/
+FULLPOS_OWNER/installer/redist/
+FULLPOS_OWNER/release/
+FULLPOS_OWNER/assets/imagen/
+FULLPOS_OWNER/**/*.exe
+FULLPOS_OWNER/**/*.msi
+FULLPOS_OWNER/**/*.zip
+FULLPOS_OWNER/**/*.apk

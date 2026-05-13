@@ -75,6 +75,8 @@ SaleRow? _buildSaleRow(Map<String, dynamic> payload, {SaleRow? previous}) {
     id: id,
     localCode: localCode,
     total: _readDouble(payload['total']) ?? previous?.total ?? 0,
+    items:
+        _readSaleRowItems(payload) ?? previous?.items ?? const <SaleRowItem>[],
     paymentMethod: _readNullableString(
       payload['paymentMethod'],
       fallback: previous?.paymentMethod,
@@ -176,6 +178,31 @@ double? _readDouble(Object? value) {
   if (value is double) return value;
   if (value is num) return value.toDouble();
   if (value is String) return double.tryParse(value.trim());
+  return null;
+}
+
+List<SaleRowItem>? _readSaleRowItems(Map<String, dynamic> payload) {
+  final rawItems = _readRawItems(payload);
+  if (rawItems == null) return null;
+  return rawItems
+      .whereType<Map>()
+      .map((item) => SaleRowItem.fromJson(Map<String, dynamic>.from(item)))
+      .toList(growable: false);
+}
+
+List<dynamic>? _readRawItems(Map<String, dynamic> payload) {
+  const keys = [
+    'items',
+    'saleItems',
+    'saleDetails',
+    'details',
+    'lines',
+    'products',
+  ];
+  for (final key in keys) {
+    final value = payload[key];
+    if (value is List) return value;
+  }
   return null;
 }
 

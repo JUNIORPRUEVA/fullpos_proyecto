@@ -634,18 +634,39 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
         ? IndexedStack(index: routeIndex, children: _pages)
         : widget.child;
 
-    final body = Column(
-      children: [
-        Expanded(child: mainBody),
-        _FooterNavigationBar(
-          items: _mainNavItems,
-          selectedRoute: selectedMainRoute,
-          onSelected: (route) {
-            if (route == selectedMainRoute) return;
-            context.go(route);
-          },
-        ),
-      ],
+    final body = LayoutBuilder(
+      builder: (context, constraints) {
+        final useSideNavigation = constraints.maxWidth >= 900;
+        void selectRoute(String route) {
+          if (route == selectedMainRoute) return;
+          context.go(route);
+        }
+
+        if (useSideNavigation) {
+          return Row(
+            children: [
+              _CollapsedSideNavigation(
+                items: _mainNavItems,
+                selectedRoute: selectedMainRoute,
+                onSelected: selectRoute,
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: mainBody),
+            ],
+          );
+        }
+
+        return Column(
+          children: [
+            Expanded(child: mainBody),
+            _FooterNavigationBar(
+              items: _mainNavItems,
+              selectedRoute: selectedMainRoute,
+              onSelected: selectRoute,
+            ),
+          ],
+        );
+      },
     );
 
     return AppShellScaffold(
@@ -1310,6 +1331,128 @@ Widget _buildSessionDetailRow({
       if (!isLast) const Divider(height: 1),
     ],
   );
+}
+
+class _CollapsedSideNavigation extends StatelessWidget {
+  const _CollapsedSideNavigation({
+    required this.items,
+    required this.selectedRoute,
+    required this.onSelected,
+  });
+
+  final List<_MainNavItem> items;
+  final String? selectedRoute;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: 72,
+      height: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.72),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Text(
+              'FP',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          for (final item in items) ...[
+            _SideNavButton(
+              item: item,
+              selected: item.route == selectedRoute,
+              onTap: () => onSelected(item.route),
+            ),
+            const SizedBox(height: 8),
+          ],
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+}
+
+class _SideNavButton extends StatelessWidget {
+  const _SideNavButton({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _MainNavItem item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = selected ? theme.colorScheme.primary : AppColors.ink;
+
+    return Tooltip(
+      message: item.label,
+      waitDuration: const Duration(milliseconds: 350),
+      child: Material(
+        color: selected
+            ? theme.colorScheme.primary.withValues(alpha: 0.12)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            width: 48,
+            height: 48,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(item.icon, color: color, size: 23),
+                Positioned(
+                  left: 4,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 3,
+                    height: selected ? 22 : 0,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _FooterNavigationBar extends StatelessWidget {
