@@ -127,6 +127,13 @@ async function listReportSales(companyId: number, fromDate: Date, toDate: Date) 
       totalCost,
       profit: total - totalCost,
       paymentMethod: sale.paymentMethod,
+      items: sale.items.map((item) => ({
+        id: item.id,
+        productId: item.productId,
+        productCodeSnapshot: item.productCodeSnapshot ?? item.product?.code ?? null,
+        productNameSnapshot: item.productNameSnapshot ?? item.product?.name ?? null,
+        qty: toNumber(item.qty),
+      })),
       sessionId: sale.sessionId,
       sessionStatus: sale.session?.status,
       sessionOpenedAt: sale.session?.openedAt,
