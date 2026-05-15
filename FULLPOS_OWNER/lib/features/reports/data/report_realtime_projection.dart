@@ -81,6 +81,18 @@ SaleRow? _buildSaleRow(Map<String, dynamic> payload, {SaleRow? previous}) {
       payload['paymentMethod'],
       fallback: previous?.paymentMethod,
     ),
+    paymentCashAmount:
+        _readDouble(payload['paymentCashAmount']) ??
+        previous?.paymentCashAmount ??
+        0,
+    paymentCardAmount:
+        _readDouble(payload['paymentCardAmount']) ??
+        previous?.paymentCardAmount ??
+        0,
+    paymentTransferAmount:
+        _readDouble(payload['paymentTransferAmount']) ??
+        previous?.paymentTransferAmount ??
+        0,
     customerName: _readNullableString(
       payload['customerName'],
       fallback: previous?.customerName,

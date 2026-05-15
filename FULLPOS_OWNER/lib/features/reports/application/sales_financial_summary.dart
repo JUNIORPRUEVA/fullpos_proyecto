@@ -43,6 +43,19 @@ class SalesFinancialSummary {
       final total = sale.total;
       totalSold += total;
 
+      final breakdown = _explicitPaymentBreakdownFor(sale);
+      if (breakdown != null) {
+        totalCash += breakdown.cash;
+        totalCard += breakdown.card;
+        totalTransfer += breakdown.transfer;
+        final allocated = breakdown.cash + breakdown.card + breakdown.transfer;
+        final remainder = total - allocated;
+        if (remainder.abs() > 0.009) {
+          totalOther += remainder;
+        }
+        continue;
+      }
+
       switch (paymentCategoryFor(sale.paymentMethod)) {
         case SalesPaymentCategory.cash:
           totalCash += total;
@@ -80,6 +93,16 @@ class SalesFinancialSummary {
 }
 
 enum SalesPaymentCategory { cash, card, transfer, credit, layaway, other }
+
+_PaymentBreakdown? _explicitPaymentBreakdownFor(SaleRow sale) {
+  final cash = sale.paymentCashAmount;
+  final card = sale.paymentCardAmount;
+  final transfer = sale.paymentTransferAmount;
+  if (cash.abs() <= 0.009 && card.abs() <= 0.009 && transfer.abs() <= 0.009) {
+    return null;
+  }
+  return _PaymentBreakdown(cash: cash, card: card, transfer: transfer);
+}
 
 SalesPaymentCategory paymentCategoryFor(String? rawMethod) {
   final method = _normalizePaymentMethod(rawMethod);
@@ -123,4 +146,16 @@ String _normalizePaymentMethod(String? rawMethod) {
       .replaceAll('_', ' ')
       .replaceAll('-', ' ')
       .replaceAll(RegExp(r'\s+'), ' ');
+}
+
+class _PaymentBreakdown {
+  const _PaymentBreakdown({
+    required this.cash,
+    required this.card,
+    required this.transfer,
+  });
+
+  final double cash;
+  final double card;
+  final double transfer;
 }

@@ -489,6 +489,9 @@ mixin _$SaleRow {
   double get total => throw _privateConstructorUsedError;
   List<SaleRowItem> get items => throw _privateConstructorUsedError;
   String? get paymentMethod => throw _privateConstructorUsedError;
+  double get paymentCashAmount => throw _privateConstructorUsedError;
+  double get paymentCardAmount => throw _privateConstructorUsedError;
+  double get paymentTransferAmount => throw _privateConstructorUsedError;
   String? get customerName => throw _privateConstructorUsedError;
   int? get sessionId => throw _privateConstructorUsedError;
   String? get sessionStatus => throw _privateConstructorUsedError;
@@ -516,6 +519,9 @@ abstract class $SaleRowCopyWith<$Res> {
     double total,
     List<SaleRowItem> items,
     String? paymentMethod,
+    double paymentCashAmount,
+    double paymentCardAmount,
+    double paymentTransferAmount,
     String? customerName,
     int? sessionId,
     String? sessionStatus,
@@ -547,6 +553,9 @@ class _$SaleRowCopyWithImpl<$Res, $Val extends SaleRow>
     Object? total = null,
     Object? items = null,
     Object? paymentMethod = freezed,
+    Object? paymentCashAmount = null,
+    Object? paymentCardAmount = null,
+    Object? paymentTransferAmount = null,
     Object? customerName = freezed,
     Object? sessionId = freezed,
     Object? sessionStatus = freezed,
@@ -576,6 +585,18 @@ class _$SaleRowCopyWithImpl<$Res, $Val extends SaleRow>
                 ? _value.paymentMethod
                 : paymentMethod // ignore: cast_nullable_to_non_nullable
                       as String?,
+            paymentCashAmount: null == paymentCashAmount
+                ? _value.paymentCashAmount
+                : paymentCashAmount // ignore: cast_nullable_to_non_nullable
+                      as double,
+            paymentCardAmount: null == paymentCardAmount
+                ? _value.paymentCardAmount
+                : paymentCardAmount // ignore: cast_nullable_to_non_nullable
+                      as double,
+            paymentTransferAmount: null == paymentTransferAmount
+                ? _value.paymentTransferAmount
+                : paymentTransferAmount // ignore: cast_nullable_to_non_nullable
+                      as double,
             customerName: freezed == customerName
                 ? _value.customerName
                 : customerName // ignore: cast_nullable_to_non_nullable
@@ -634,6 +655,9 @@ abstract class _$$SaleRowImplCopyWith<$Res> implements $SaleRowCopyWith<$Res> {
     double total,
     List<SaleRowItem> items,
     String? paymentMethod,
+    double paymentCashAmount,
+    double paymentCardAmount,
+    double paymentTransferAmount,
     String? customerName,
     int? sessionId,
     String? sessionStatus,
@@ -665,6 +689,9 @@ class __$$SaleRowImplCopyWithImpl<$Res>
     Object? total = null,
     Object? items = null,
     Object? paymentMethod = freezed,
+    Object? paymentCashAmount = null,
+    Object? paymentCardAmount = null,
+    Object? paymentTransferAmount = null,
     Object? customerName = freezed,
     Object? sessionId = freezed,
     Object? sessionStatus = freezed,
@@ -694,6 +721,18 @@ class __$$SaleRowImplCopyWithImpl<$Res>
             ? _value.paymentMethod
             : paymentMethod // ignore: cast_nullable_to_non_nullable
                   as String?,
+        paymentCashAmount: null == paymentCashAmount
+            ? _value.paymentCashAmount
+            : paymentCashAmount // ignore: cast_nullable_to_non_nullable
+                  as double,
+        paymentCardAmount: null == paymentCardAmount
+            ? _value.paymentCardAmount
+            : paymentCardAmount // ignore: cast_nullable_to_non_nullable
+                  as double,
+        paymentTransferAmount: null == paymentTransferAmount
+            ? _value.paymentTransferAmount
+            : paymentTransferAmount // ignore: cast_nullable_to_non_nullable
+                  as double,
         customerName: freezed == customerName
             ? _value.customerName
             : customerName // ignore: cast_nullable_to_non_nullable
@@ -732,6 +771,9 @@ class _$SaleRowImpl implements _SaleRow {
     required this.total,
     final List<SaleRowItem> items = const <SaleRowItem>[],
     this.paymentMethod,
+    this.paymentCashAmount = 0,
+    this.paymentCardAmount = 0,
+    this.paymentTransferAmount = 0,
     this.customerName,
     this.sessionId,
     this.sessionStatus,
@@ -761,6 +803,15 @@ class _$SaleRowImpl implements _SaleRow {
   @override
   final String? paymentMethod;
   @override
+  @JsonKey()
+  final double paymentCashAmount;
+  @override
+  @JsonKey()
+  final double paymentCardAmount;
+  @override
+  @JsonKey()
+  final double paymentTransferAmount;
+  @override
   final String? customerName;
   @override
   final int? sessionId;
@@ -775,7 +826,7 @@ class _$SaleRowImpl implements _SaleRow {
 
   @override
   String toString() {
-    return 'SaleRow(id: $id, localCode: $localCode, total: $total, items: $items, paymentMethod: $paymentMethod, customerName: $customerName, sessionId: $sessionId, sessionStatus: $sessionStatus, sessionOpenedAt: $sessionOpenedAt, createdAt: $createdAt, user: $user)';
+    return 'SaleRow(id: $id, localCode: $localCode, total: $total, items: $items, paymentMethod: $paymentMethod, paymentCashAmount: $paymentCashAmount, paymentCardAmount: $paymentCardAmount, paymentTransferAmount: $paymentTransferAmount, customerName: $customerName, sessionId: $sessionId, sessionStatus: $sessionStatus, sessionOpenedAt: $sessionOpenedAt, createdAt: $createdAt, user: $user)';
   }
 
   @override
@@ -790,6 +841,12 @@ class _$SaleRowImpl implements _SaleRow {
             const DeepCollectionEquality().equals(other._items, _items) &&
             (identical(other.paymentMethod, paymentMethod) ||
                 other.paymentMethod == paymentMethod) &&
+            (identical(other.paymentCashAmount, paymentCashAmount) ||
+                other.paymentCashAmount == paymentCashAmount) &&
+            (identical(other.paymentCardAmount, paymentCardAmount) ||
+                other.paymentCardAmount == paymentCardAmount) &&
+            (identical(other.paymentTransferAmount, paymentTransferAmount) ||
+                other.paymentTransferAmount == paymentTransferAmount) &&
             (identical(other.customerName, customerName) ||
                 other.customerName == customerName) &&
             (identical(other.sessionId, sessionId) ||
@@ -812,6 +869,9 @@ class _$SaleRowImpl implements _SaleRow {
     total,
     const DeepCollectionEquality().hash(_items),
     paymentMethod,
+    paymentCashAmount,
+    paymentCardAmount,
+    paymentTransferAmount,
     customerName,
     sessionId,
     sessionStatus,
@@ -841,6 +901,9 @@ abstract class _SaleRow implements SaleRow {
     required final double total,
     final List<SaleRowItem> items,
     final String? paymentMethod,
+    final double paymentCashAmount,
+    final double paymentCardAmount,
+    final double paymentTransferAmount,
     final String? customerName,
     final int? sessionId,
     final String? sessionStatus,
@@ -861,6 +924,12 @@ abstract class _SaleRow implements SaleRow {
   List<SaleRowItem> get items;
   @override
   String? get paymentMethod;
+  @override
+  double get paymentCashAmount;
+  @override
+  double get paymentCardAmount;
+  @override
+  double get paymentTransferAmount;
   @override
   String? get customerName;
   @override

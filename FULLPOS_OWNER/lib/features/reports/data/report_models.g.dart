@@ -51,6 +51,10 @@ _$SaleRowImpl _$$SaleRowImplFromJson(Map<String, dynamic> json) =>
               .toList() ??
           const <SaleRowItem>[],
       paymentMethod: json['paymentMethod'] as String?,
+      paymentCashAmount: (json['paymentCashAmount'] as num?)?.toDouble() ?? 0,
+      paymentCardAmount: (json['paymentCardAmount'] as num?)?.toDouble() ?? 0,
+      paymentTransferAmount:
+          (json['paymentTransferAmount'] as num?)?.toDouble() ?? 0,
       customerName: json['customerName'] as String?,
       sessionId: (json['sessionId'] as num?)?.toInt(),
       sessionStatus: json['sessionStatus'] as String?,
@@ -72,6 +76,9 @@ Map<String, dynamic> _$$SaleRowImplToJson(_$SaleRowImpl instance) =>
       'total': instance.total,
       'items': instance.items,
       'paymentMethod': instance.paymentMethod,
+      'paymentCashAmount': instance.paymentCashAmount,
+      'paymentCardAmount': instance.paymentCardAmount,
+      'paymentTransferAmount': instance.paymentTransferAmount,
       'customerName': instance.customerName,
       'sessionId': instance.sessionId,
       'sessionStatus': instance.sessionStatus,

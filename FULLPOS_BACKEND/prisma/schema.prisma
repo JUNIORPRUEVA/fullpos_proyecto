@@ -448,6 +448,9 @@ model Sale {
   itbisAmount          Decimal     @default(0) @db.Decimal(12, 2)
   total                Decimal     @default(0) @db.Decimal(12, 2)
   paymentMethod        String?
+  paymentCashAmount    Decimal     @default(0) @db.Decimal(12, 2)
+  paymentCardAmount    Decimal     @default(0) @db.Decimal(12, 2)
+  paymentTransferAmount Decimal    @default(0) @db.Decimal(12, 2)
   paidAmount           Decimal     @default(0) @db.Decimal(12, 2)
   changeAmount         Decimal     @default(0) @db.Decimal(12, 2)
   creditInterestRate   Decimal     @default(0) @db.Decimal(7, 4)

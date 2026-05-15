@@ -26,6 +26,9 @@ function toSaleRealtimePayload(sale: {
   status: string;
   total: Prisma.Decimal | number;
   paymentMethod: string | null;
+  paymentCashAmount: Prisma.Decimal | number;
+  paymentCardAmount: Prisma.Decimal | number;
+  paymentTransferAmount: Prisma.Decimal | number;
   customerNameSnapshot: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -38,6 +41,9 @@ function toSaleRealtimePayload(sale: {
     status: sale.status,
     total: toNumber(sale.total),
     paymentMethod: sale.paymentMethod,
+    paymentCashAmount: toNumber(sale.paymentCashAmount),
+    paymentCardAmount: toNumber(sale.paymentCardAmount),
+    paymentTransferAmount: toNumber(sale.paymentTransferAmount),
     customerName: sale.customerNameSnapshot,
     createdAt: sale.createdAt,
     updatedAt: sale.updatedAt,
@@ -123,6 +129,9 @@ export type SyncSaleInput = {
   itbisAmount: number;
   total: number;
   paymentMethod?: string | null;
+  paymentCashAmount?: number;
+  paymentCardAmount?: number;
+  paymentTransferAmount?: number;
   paidAmount: number;
   changeAmount: number;
   creditInterestRate?: number;
@@ -181,6 +190,9 @@ export async function syncSalesByRnc(
             status: true,
             total: true,
             paymentMethod: true,
+            paymentCashAmount: true,
+            paymentCardAmount: true,
+            paymentTransferAmount: true,
             customerNameSnapshot: true,
             updatedAt: true,
             deletedAt: true,
@@ -240,6 +252,9 @@ export async function syncSalesByRnc(
           itbisAmount: sale.itbisAmount,
           total: sale.total,
           paymentMethod: sale.paymentMethod ?? null,
+          paymentCashAmount: sale.paymentCashAmount ?? 0,
+          paymentCardAmount: sale.paymentCardAmount ?? 0,
+          paymentTransferAmount: sale.paymentTransferAmount ?? 0,
           paidAmount: sale.paidAmount,
           changeAmount: sale.changeAmount,
           creditInterestRate: sale.creditInterestRate ?? 0,
@@ -269,6 +284,9 @@ export async function syncSalesByRnc(
           itbisAmount: sale.itbisAmount,
           total: sale.total,
           paymentMethod: sale.paymentMethod ?? null,
+          paymentCashAmount: sale.paymentCashAmount ?? 0,
+          paymentCardAmount: sale.paymentCardAmount ?? 0,
+          paymentTransferAmount: sale.paymentTransferAmount ?? 0,
           paidAmount: sale.paidAmount,
           changeAmount: sale.changeAmount,
           creditInterestRate: sale.creditInterestRate ?? 0,
@@ -291,6 +309,9 @@ export async function syncSalesByRnc(
           status: true,
           total: true,
           paymentMethod: true,
+          paymentCashAmount: true,
+          paymentCardAmount: true,
+          paymentTransferAmount: true,
           customerNameSnapshot: true,
           createdAt: true,
           updatedAt: true,
@@ -309,6 +330,9 @@ export async function syncSalesByRnc(
         previous.status !== upserted.status ||
         toNumber(previous.total) !== toNumber(upserted.total) ||
         previous.paymentMethod !== upserted.paymentMethod ||
+        toNumber(previous.paymentCashAmount) !== toNumber(upserted.paymentCashAmount) ||
+        toNumber(previous.paymentCardAmount) !== toNumber(upserted.paymentCardAmount) ||
+        toNumber(previous.paymentTransferAmount) !== toNumber(upserted.paymentTransferAmount) ||
         previous.customerNameSnapshot !== upserted.customerNameSnapshot ||
         !sameDate(previous.updatedAt, upserted.updatedAt) ||
         !sameDate(previous.deletedAt, upserted.deletedAt);
