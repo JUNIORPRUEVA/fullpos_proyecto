@@ -13,27 +13,23 @@ void main() {
       expect(rangeForPreset(SalesDatePreset.yesterday).start, yesterday);
       expect(rangeForPreset(SalesDatePreset.yesterday).end, yesterday);
 
-      final dayBeforeYesterday = today.subtract(const Duration(days: 2));
       expect(
-        rangeForPreset(SalesDatePreset.dayBeforeYesterday).start,
-        dayBeforeYesterday,
-      );
-      expect(
-        rangeForPreset(SalesDatePreset.dayBeforeYesterday).end,
-        dayBeforeYesterday,
-      );
-
-      expect(
-        rangeForPreset(SalesDatePreset.last5Days).start,
-        today.subtract(const Duration(days: 4)),
-      );
-      expect(rangeForPreset(SalesDatePreset.last5Days).end, today);
-
-      expect(
-        rangeForPreset(SalesDatePreset.lastWeek).start,
+        rangeForPreset(SalesDatePreset.week).start,
         today.subtract(const Duration(days: 6)),
       );
-      expect(rangeForPreset(SalesDatePreset.lastWeek).end, today);
+      expect(rangeForPreset(SalesDatePreset.week).end, today);
+
+      expect(
+        rangeForPreset(SalesDatePreset.fortnight).start,
+        today.subtract(const Duration(days: 14)),
+      );
+      expect(rangeForPreset(SalesDatePreset.fortnight).end, today);
+
+      expect(
+        rangeForPreset(SalesDatePreset.month).start,
+        today.subtract(const Duration(days: 29)),
+      );
+      expect(rangeForPreset(SalesDatePreset.month).end, today);
     });
 
     test('custom range normalizes dates to full local days', () {

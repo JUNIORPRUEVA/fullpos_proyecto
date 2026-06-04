@@ -16,7 +16,6 @@ import '../data/report_models.dart';
 import '../data/report_realtime_projection.dart';
 import '../data/reports_repository.dart';
 import '../data/sale_realtime_service.dart';
-import 'widgets/sales_date_filter_bar.dart';
 
 const _maxReportRangeDays = 365;
 const _maxReportRangeOffsetDays = _maxReportRangeDays - 1;
@@ -287,8 +286,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
       case _ReportRangeOption.fortnight:
         _applyQuickRange(15);
         return;
-      case _ReportRangeOption.year:
-        _applyQuickRange(_maxReportRangeDays);
+      case _ReportRangeOption.month:
+        _applyQuickRange(30);
         return;
       case _ReportRangeOption.custom:
         await _openCustomRangeSheet();
@@ -320,7 +319,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
     if (_isSameDate(toDay, today) &&
         fromDay ==
             today.subtract(const Duration(days: _maxReportRangeOffsetDays))) {
-      return _ReportRangeOption.year;
+      return _ReportRangeOption.month;
     }
     return _ReportRangeOption.custom;
   }
@@ -663,8 +662,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final isPhone = width < 700;
-        final columns = 3;
-        final metricRatio = width >= 1100 ? 2.7 : 2.25;
         final chartHeight = width >= 1100
             ? 300.0
             : width >= 700
@@ -677,13 +674,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
             caption: '',
             icon: Icons.payments_outlined,
             color: theme.colorScheme.primary,
-          ),
-          _MetricInfo(
-            title: 'Costo',
-            value: _formatReportAmount(totalCost),
-            caption: '',
-            icon: Icons.inventory_2_outlined,
-            color: theme.colorScheme.secondary,
           ),
           _MetricInfo(
             title: 'Ganancias',
@@ -699,8 +689,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SalesDateFilterBar(),
-              const SizedBox(height: 12),
               if (_loading)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 10),
@@ -717,53 +705,22 @@ class _DashboardPageState extends ConsumerState<DashboardPage>
                 _SimpleNoDataState(
                   rangeLabel: visibleRangeLabel,
                   companyContext: companyContext,
-                  onChangeRange: () => unawaited(_openRangeOptionsSheet()),
+                  onChangeRange: _openRangeOptionsSheet,
                 )
               else ...[
-                isPhone
-                    ? _MobileMetricStrip(
-                        items: metricItems,
-                        onTap: (index) {
-                          _showMetricPreview(
-                            context,
-                            metric: metricItems[index],
-                            isPhone: isPhone,
-                            width: width,
-                          );
-                        },
-                      )
-                    : GridView.count(
-                        crossAxisCount: columns,
-                        childAspectRatio: metricRatio,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        children: [
-                          for (
-                            var index = 0;
-                            index < metricItems.length;
-                            index++
-                          )
-                            _MetricCard(
-                              title: metricItems[index].title,
-                              value: metricItems[index].value,
-                              caption: metricItems[index].caption,
-                              icon: metricItems[index].icon,
-                              color: metricItems[index].color,
-                              emphasized: true,
-                              onTap: () {
-                                _showMetricPreview(
-                                  context,
-                                  metric: metricItems[index],
-                                  isPhone: isPhone,
-                                  width: width,
-                                );
-                              },
-                            ),
-                        ],
-                      ),
-                const SizedBox(height: 18),
+                _ReportMetricStrip(
+                  items: metricItems,
+                  isPhone: isPhone,
+                  onMetricTap: (index) {
+                    _showMetricPreview(
+                      context,
+                      metric: metricItems[index],
+                      isPhone: isPhone,
+                      width: width,
+                    );
+                  },
+                ),
+                const SizedBox(height: 22),
                 _SalesOverviewSection(
                   fromLabel: fromStr,
                   toLabel: toStr,
@@ -836,10 +793,10 @@ class _ReportRangeDialog extends StatelessWidget {
             option: _ReportRangeOption.fortnight,
           ),
           (
-            title: '365 días',
-            subtitle: 'Ultimo año disponible',
+            title: 'Mes',
+            subtitle: 'Ultimos 30 dias',
             icon: Icons.calendar_month_outlined,
-            option: _ReportRangeOption.year,
+            option: _ReportRangeOption.month,
           ),
           (
             title: 'Personalizado',
@@ -990,6 +947,39 @@ class _RangeMenuTile extends StatelessWidget {
   }
 }
 
+class _ReportMetricStrip extends StatelessWidget {
+  const _ReportMetricStrip({
+    required this.items,
+    required this.isPhone,
+    required this.onMetricTap,
+  });
+
+  final List<_MetricInfo> items;
+  final bool isPhone;
+  final ValueChanged<int> onMetricTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final spacing = isPhone ? 10.0 : 14.0;
+    return Row(
+      children: [
+        for (var index = 0; index < items.length; index++) ...[
+          if (index > 0) SizedBox(width: spacing),
+          Expanded(
+            child: _ReportMetricTile(
+              metric: items[index],
+              theme: theme,
+              isPhone: isPhone,
+              onTap: () => onMetricTap(index),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _SalesOverviewSection extends StatelessWidget {
   const _SalesOverviewSection({
     required this.fromLabel,
@@ -1079,6 +1069,7 @@ class _SalesOverviewSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Expanded(
                   child: Column(
@@ -1087,25 +1078,40 @@ class _SalesOverviewSection extends StatelessWidget {
                       Text(
                         'Ventas',
                         style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.2,
+                          color: const Color(0xFF172033),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                          fontSize: isPhone ? 17 : 19,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         '$fromLabel - $toLabel',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                          color: const Color(0xFF7A8497),
                           fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.1,
                         ),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 12),
-                FilledButton.tonalIcon(
+                FilledButton.icon(
                   onPressed: chartData.isEmpty ? null : onOpenDetails,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
                   icon: const Icon(Icons.visibility_outlined, size: 18),
                   label: const Text('Detalle'),
                 ),
@@ -1168,20 +1174,19 @@ class _SurfaceCard extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.surface,
-            theme.colorScheme.surfaceContainerLowest,
-          ],
+          colors: [theme.colorScheme.surface, const Color(0xFFF7FAFF)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
+            color: theme.colorScheme.primary.withValues(alpha: 0.04),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -1239,52 +1244,214 @@ class _SimpleNoDataState extends StatelessWidget {
     final theme = Theme.of(context);
     return SizedBox(
       width: double.infinity,
-      height: MediaQuery.sizeOf(context).height * 0.38,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.search_off_outlined,
-                size: 42,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'No hay ventas en este rango de fechas.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Rango: $rangeLabel',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              if (companyContext.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Empresa: $companyContext',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 24, 4, 8),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.timeline_rounded,
+                    size: 34,
+                    color: theme.colorScheme.primary,
                   ),
                 ),
+                const SizedBox(height: 20),
+                Text(
+                  'No hay ventas en este periodo.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: const Color(0xFF1B2234),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.7,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Prueba otro rango para ver movimiento en el panel.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _NoDataMetaChip(
+                      icon: Icons.event_outlined,
+                      label: rangeLabel,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                OutlinedButton.icon(
+                  onPressed: onChangeRange,
+                  icon: const Icon(Icons.tune_rounded, size: 18),
+                  label: const Text('Cambiar filtro'),
+                ),
               ],
-              const SizedBox(height: 12),
-              FilledButton.tonalIcon(
-                onPressed: onChangeRange,
-                icon: const Icon(Icons.tune_rounded, size: 18),
-                label: const Text('Cambiar filtro'),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NoDataMetaChip extends StatelessWidget {
+  const _NoDataMetaChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.72),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReportMetricTile extends StatelessWidget {
+  const _ReportMetricTile({
+    required this.metric,
+    required this.onTap,
+    required this.theme,
+    required this.isPhone,
+  });
+
+  final _MetricInfo metric;
+  final VoidCallback onTap;
+  final ThemeData theme;
+  final bool isPhone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Ink(
+          padding: EdgeInsets.fromLTRB(
+            isPhone ? 14 : 16,
+            isPhone ? 13 : 15,
+            isPhone ? 12 : 14,
+            isPhone ? 13 : 15,
+          ),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface.withValues(alpha: 0.96),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: metric.color.withValues(alpha: 0.18)),
+            boxShadow: [
+              BoxShadow(
+                color: metric.color.withValues(alpha: 0.07),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: isPhone ? 38 : 42,
+                    height: isPhone ? 38 : 42,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          metric.color.withValues(alpha: 0.15),
+                          metric.color.withValues(alpha: 0.05),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      metric.icon,
+                      color: metric.color,
+                      size: isPhone ? 17 : 19,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      metric.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: const Color(0xFF6F7789),
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    Icons.north_east_rounded,
+                    size: 18,
+                    color: metric.color.withValues(alpha: 0.72),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  metric.value,
+                  maxLines: 1,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: const Color(0xFF1A2234),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.9,
+                    fontSize: isPhone ? 19 : 22,
+                  ),
+                ),
               ),
             ],
           ),
@@ -1303,7 +1470,6 @@ class _MetricCard extends StatelessWidget {
     required this.color,
     this.emphasized = false,
     this.large = false,
-    this.onTap,
   });
 
   final String title;
@@ -1313,12 +1479,11 @@ class _MetricCard extends StatelessWidget {
   final Color color;
   final bool emphasized;
   final bool large;
-  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final content = Container(
+    return Container(
       padding: EdgeInsets.symmetric(
         horizontal: large
             ? 26
@@ -1464,19 +1629,6 @@ class _MetricCard extends StatelessWidget {
         ],
       ),
     );
-
-    if (onTap == null) {
-      return content;
-    }
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: content,
-      ),
-    );
   }
 }
 
@@ -1530,35 +1682,6 @@ class _StatPill extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _MobileMetricStrip extends StatelessWidget {
-  const _MobileMetricStrip({required this.items, required this.onTap});
-
-  final List<_MetricInfo> items;
-  final ValueChanged<int> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var index = 0; index < items.length; index++) ...[
-          Expanded(
-            child: _MetricCard(
-              title: items[index].title,
-              value: items[index].value,
-              caption: items[index].caption,
-              icon: items[index].icon,
-              color: items[index].color,
-              emphasized: true,
-              onTap: () => onTap(index),
-            ),
-          ),
-          if (index != items.length - 1) const SizedBox(width: 8),
-        ],
-      ],
     );
   }
 }
@@ -1735,7 +1858,7 @@ class _MetricInfo {
   final Color color;
 }
 
-enum _ReportRangeOption { today, yesterday, week, fortnight, year, custom }
+enum _ReportRangeOption { today, yesterday, week, fortnight, month, custom }
 
 enum _CustomPreset { last15Days, currentMonth, last365Days }
 
@@ -1839,18 +1962,17 @@ class _SalesTrendChartState extends State<_SalesTrendChart> {
     final axisValues = [peakValue, peakValue * 0.66, peakValue * 0.33, 0.0];
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.primary.withValues(alpha: 0.06),
-            theme.colorScheme.surface,
-          ],
+        gradient: const LinearGradient(
+          colors: [Color(0xFFEAF3FF), Color(0xFFF6FAFF)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.16),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1975,9 +2097,16 @@ class _ChartSummaryChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.16)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

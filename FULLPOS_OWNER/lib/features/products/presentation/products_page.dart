@@ -628,38 +628,84 @@ class _CatalogToolbar extends StatelessWidget {
         children: [
           Expanded(
             child: Container(
-              height: 42,
+              height: 48,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
                 color: theme.colorScheme.surface,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.72,
+                  ),
+                ),
                 boxShadow: [
                   BoxShadow(
-                    color: theme.colorScheme.shadow.withValues(alpha: 0.08),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
+                    color: theme.colorScheme.primary.withValues(alpha: 0.05),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
-              child: TextField(
-                controller: searchController,
-                onSubmitted: (_) => onSearch(),
-                onChanged: onChanged,
-                textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  hintText: 'Buscar producto...',
-                  hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  prefixIcon: Icon(
-                    Icons.search_rounded,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  suffixIcon: searchController.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: 'Limpiar búsqueda',
+              child: ValueListenableBuilder<TextEditingValue>(
+                valueListenable: searchController,
+                builder: (context, value, _) {
+                  return Row(
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.09,
+                          ),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.search_rounded,
+                          size: 19,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: searchController,
+                          onSubmitted: (_) => onSearch(),
+                          onChanged: onChanged,
+                          textInputAction: TextInputAction.search,
+                          textAlignVertical: TextAlignVertical.center,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: const Color(0xFF182033),
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.1,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Buscar producto, codigo o categoria',
+                            hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                              color: const Color(0xFF8A94A6),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 0,
+                              vertical: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (value.text.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        IconButton(
+                          tooltip: 'Limpiar busqueda',
+                          style: IconButton.styleFrom(
+                            minimumSize: const Size(34, 34),
+                            padding: EdgeInsets.zero,
+                          ),
                           icon: Icon(
                             Icons.close_rounded,
+                            size: 18,
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
                           onPressed: () {
@@ -668,12 +714,10 @@ class _CatalogToolbar extends StatelessWidget {
                             onSearch();
                           },
                         ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                ),
+                      ],
+                    ],
+                  );
+                },
               ),
             ),
           ),

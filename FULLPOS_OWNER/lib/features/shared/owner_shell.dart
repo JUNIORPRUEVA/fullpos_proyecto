@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/realtime/company_realtime_service.dart';
 import '../../core/providers/sync_request_provider.dart';
+import '../../core/realtime/company_realtime_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/app_shell_scaffold.dart';
 import '../auth/data/auth_repository.dart';
@@ -13,6 +13,7 @@ import '../auth/data/auth_state.dart';
 import '../inventory/presentation/inventory_page.dart';
 import '../products/data/product_realtime_service.dart';
 import '../products/presentation/products_page.dart';
+import '../reports/application/sales_date_filter_controller.dart';
 import '../reports/data/sale_realtime_service.dart';
 import '../reports/presentation/dashboard_page.dart';
 
@@ -30,12 +31,12 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
   static const _mainNavItems = [
     _MainNavItem(
       route: '/dashboard',
-      label: 'Reporte',
-      icon: Icons.analytics_outlined,
+      label: 'Panel',
+      icon: Icons.space_dashboard_rounded,
     ),
     _MainNavItem(
       route: '/products',
-      label: 'Categorias',
+      label: 'Catalogo',
       icon: Icons.category_outlined,
     ),
     _MainNavItem(
@@ -44,24 +45,65 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
       icon: Icons.inventory_2_outlined,
     ),
   ];
+  static const _allCategoriesValue = '__all_categories__';
+
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  late final ProductsPageController _productsPageController =
+      ProductsPageController();
+  late final InventoryPageController _inventoryPageController =
+      InventoryPageController();
+  late final List<Widget> _pages = [
+    const DashboardPage(key: PageStorageKey('tab_panel')),
+    ProductsPage(
+      key: const PageStorageKey('tab_catalogo'),
+      controller: _productsPageController,
+      showEmbeddedToolbar: false,
+    ),
+    InventoryPage(
+      key: const PageStorageKey('tab_inventory'),
+      controller: _inventoryPageController,
+      showEmbeddedToolbar: false,
+    ),
+  ];
 
   StreamSubscription<CompanyRealtimeMessage>? _companyRealtimeSubscription;
   Timer? _realtimeRefreshDebounce;
   bool _isSyncing = false;
-  late final ProductsPageController _productsPageController =
-      ProductsPageController();
+  bool _isCatalogSearchVisible = false;
+  final FocusNode _catalogSearchFocusNode = FocusNode();
 
-  late final List<Widget> _pages = [
-    const DashboardPage(key: PageStorageKey('tab_reportes')),
-    ProductsPage(
-      key: const PageStorageKey('tab_catalog'),
-      controller: _productsPageController,
-      showEmbeddedToolbar: false,
-    ),
-    const InventoryPage(key: PageStorageKey('tab_inventory')),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _bindCompanyRealtime();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_syncRealtimeConnections());
+    });
+  }
 
-  static const _allCategoriesValue = '__all_categories__';
+  @override
+  void dispose() {
+    _realtimeRefreshDebounce?.cancel();
+    _companyRealtimeSubscription?.cancel();
+    _catalogSearchFocusNode.dispose();
+    _productsPageController.dispose();
+    _inventoryPageController.dispose();
+    super.dispose();
+  }
+
+  void _bindCompanyRealtime() {
+    _companyRealtimeSubscription?.cancel();
+    _companyRealtimeSubscription = ref
+        .read(companyRealtimeServiceProvider)
+        .stream
+        .listen((_) {
+          _realtimeRefreshDebounce?.cancel();
+          _realtimeRefreshDebounce = Timer(
+            const Duration(milliseconds: 250),
+            () => ref.read(syncRequestProvider.notifier).syncFullApp(),
+          );
+        });
+  }
 
   Future<void> _syncRealtimeConnections() async {
     final authState = ref.read(authRepositoryProvider);
@@ -87,48 +129,22 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
     ]);
   }
 
-  void _bindCompanyRealtime() {
-    _companyRealtimeSubscription?.cancel();
-    _companyRealtimeSubscription = ref
-        .read(companyRealtimeServiceProvider)
-        .stream
-        .listen((_) {
-          _realtimeRefreshDebounce?.cancel();
-          _realtimeRefreshDebounce = Timer(
-            const Duration(milliseconds: 250),
-            () => ref.read(syncRequestProvider.notifier).syncFullApp(),
-          );
-        });
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _bindCompanyRealtime();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_syncRealtimeConnections());
-    });
-  }
-
-  @override
-  void dispose() {
-    _realtimeRefreshDebounce?.cancel();
-    _companyRealtimeSubscription?.cancel();
-    _productsPageController.dispose();
-    super.dispose();
+  int _resolveRouteIndex(String location) {
+    for (var i = 0; i < _mainRoutes.length; i++) {
+      final route = _mainRoutes[i];
+      if (location == route || location.startsWith('$route/')) return i;
+    }
+    return -1;
   }
 
   String _titleForRoute(String route, {required int routeIndex}) {
-    if (routeIndex == 0) return 'Reporte';
-    if (routeIndex == 1) return 'Categorias';
+    if (routeIndex == 0) return 'Panel';
+    if (routeIndex == 1) return 'Catalogo';
     if (routeIndex == 2) return 'Inventario';
-
-    if (route.startsWith('/settings')) return 'Configuración';
+    if (route.startsWith('/settings')) return 'Configuracion';
     if (route.startsWith('/sales/by-day')) return 'Ventas diarias';
     if (route.startsWith('/sales/list')) return 'Registro de ventas';
     if (route.startsWith('/sales/detail')) return 'Ticket de venta';
-    if (route.startsWith('/inventory')) return 'Inventario';
-
     return '';
   }
 
@@ -144,22 +160,12 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
     return '/dashboard';
   }
 
-  Widget? _buildBackButton(
-    BuildContext context, {
-    required String currentRoute,
-    required int routeIndex,
-  }) {
-    if (!_isSecondaryRoute(currentRoute, routeIndex: routeIndex)) {
-      return null;
-    }
-
-    final targetRoute = _parentRouteFor(currentRoute);
-    return IconButton(
-      tooltip: 'Regresar',
-      icon: const Icon(Icons.arrow_back_rounded),
-      onPressed: () {
-        context.go(targetRoute);
-      },
+  String? _activeMainRoute(String currentRoute, {required int routeIndex}) {
+    if (routeIndex >= 0) return _mainRoutes[routeIndex];
+    if (currentRoute.startsWith('/sales/')) return '/dashboard';
+    return _mainRoutes.firstWhere(
+      (route) => currentRoute == route || currentRoute.startsWith('$route/'),
+      orElse: () => '/dashboard',
     );
   }
 
@@ -193,75 +199,21 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
     }
   }
 
-  String? _activeMainRoute(String currentRoute, {required int routeIndex}) {
-    if (routeIndex >= 0) {
-      return _mainRoutes[routeIndex];
-    }
-    if (currentRoute.startsWith('/sales/')) {
-      return '/dashboard';
-    }
-    if (currentRoute.startsWith('/settings')) {
-      return null;
-    }
-    return _mainRoutes.firstWhere(
-      (route) => currentRoute == route || currentRoute.startsWith('$route/'),
-      orElse: () => '/dashboard',
-    );
-  }
-
   Future<void> _handleSessionAction(
     BuildContext context, {
     required _SessionMenuAction action,
     required AuthState authState,
   }) async {
+    if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
+      Navigator.of(context).pop();
+    }
+
     switch (action) {
       case _SessionMenuAction.profile:
-        await showGeneralDialog<void>(
-          context: context,
-          barrierLabel: 'Perfil',
-          barrierDismissible: true,
-          barrierColor: Colors.black.withValues(alpha: 0.14),
-          transitionDuration: const Duration(milliseconds: 240),
-          pageBuilder: (dialogContext, animation, secondaryAnimation) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 76, 12, 12),
-                child: Align(
-                  alignment: Alignment.topRight,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 360),
-                    child: _ProfileSheet(authState: authState),
-                  ),
-                ),
-              ),
-            );
-          },
-          transitionBuilder: (context, animation, secondaryAnimation, child) {
-            final curved = CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-              reverseCurve: Curves.easeInCubic,
-            );
-
-            return FadeTransition(
-              opacity: curved,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0.04, -0.05),
-                  end: Offset.zero,
-                ).animate(curved),
-                child: ScaleTransition(
-                  alignment: Alignment.topRight,
-                  scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
-                  child: child,
-                ),
-              ),
-            );
-          },
-        );
+        await _showProfileSheet(context, authState: authState);
         return;
       case _SessionMenuAction.settings:
-        context.go('/settings');
+        if (context.mounted) context.go('/settings');
         return;
       case _SessionMenuAction.logout:
         await ref.read(authRepositoryProvider.notifier).logout();
@@ -271,87 +223,41 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
     }
   }
 
-  Future<void> _openCatalogSearchDialog(BuildContext context) async {
-    final theme = Theme.of(context);
+  Future<void> _showProfileSheet(
+    BuildContext context, {
+    required AuthState authState,
+  }) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width < 900) {
+      return showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: (sheetContext) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: _ProfileSheet(authState: authState),
+          );
+        },
+      );
+    }
 
-    await showGeneralDialog<void>(
+    return showGeneralDialog<void>(
       context: context,
-      barrierLabel: 'Buscar producto',
+      barrierLabel: 'Perfil',
       barrierDismissible: true,
-      barrierColor: Colors.black.withValues(alpha: 0.18),
-      transitionDuration: const Duration(milliseconds: 220),
+      barrierColor: Colors.black.withValues(alpha: 0.14),
+      transitionDuration: const Duration(milliseconds: 240),
       pageBuilder: (dialogContext, animation, secondaryAnimation) {
         return SafeArea(
-          child: Align(
-            alignment: Alignment.topCenter,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 82, 16, 16),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 76, 12, 12),
+            child: Align(
+              alignment: Alignment.topRight,
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 520),
-                child: Material(
-                  color: Colors.transparent,
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surface,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: theme.colorScheme.outlineVariant,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.10),
-                          blurRadius: 24,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Buscar en catálogo',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        ValueListenableBuilder<TextEditingValue>(
-                          valueListenable:
-                              _productsPageController.searchController,
-                          builder: (context, value, child) {
-                            return TextField(
-                              controller:
-                                  _productsPageController.searchController,
-                              autofocus: true,
-                              textInputAction: TextInputAction.search,
-                              onChanged:
-                                  _productsPageController.applySearchChange,
-                              onSubmitted: (_) {
-                                _productsPageController.submitSearch();
-                                Navigator.of(dialogContext).pop();
-                              },
-                              decoration: InputDecoration(
-                                hintText: 'Buscar producto...',
-                                prefixIcon: const Icon(Icons.search_rounded),
-                                suffixIcon: value.text.isEmpty
-                                    ? null
-                                    : IconButton(
-                                        tooltip: 'Limpiar búsqueda',
-                                        icon: const Icon(Icons.close_rounded),
-                                        onPressed:
-                                            _productsPageController.clearSearch,
-                                      ),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: _ProfileSheet(authState: authState),
               ),
             ),
           ),
@@ -368,14 +274,141 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
           opacity: curved,
           child: SlideTransition(
             position: Tween<Offset>(
-              begin: const Offset(0, -0.04),
+              begin: const Offset(0.04, -0.05),
               end: Offset.zero,
             ).animate(curved),
-            child: child,
+            child: ScaleTransition(
+              alignment: Alignment.topRight,
+              scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
+              child: child,
+            ),
           ),
         );
       },
     );
+  }
+
+  void _openInlineCatalogSearch() {
+    if (_isCatalogSearchVisible) return;
+    setState(() {
+      _isCatalogSearchVisible = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _catalogSearchFocusNode.requestFocus();
+    });
+  }
+
+  void _closeInlineCatalogSearch() {
+    if (!_isCatalogSearchVisible) return;
+    _catalogSearchFocusNode.unfocus();
+    setState(() {
+      _isCatalogSearchVisible = false;
+    });
+  }
+
+  Future<void> _openDashboardFilterMenu(BuildContext context) async {
+    final state = ref.read(salesDateFilterProvider);
+    final selected = await showModalBottomSheet<SalesDatePreset>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final options = <SalesDatePreset>[
+          SalesDatePreset.today,
+          SalesDatePreset.yesterday,
+          SalesDatePreset.week,
+          SalesDatePreset.fortnight,
+          SalesDatePreset.month,
+          SalesDatePreset.custom,
+        ];
+
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Filtrar panel',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  state.fullRangeLabel,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                for (final option in options) ...[
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(presetIcon(option)),
+                    title: Text(presetLabel(option)),
+                    trailing: state.preset == option
+                        ? Icon(
+                            Icons.check_circle_rounded,
+                            color: theme.colorScheme.primary,
+                          )
+                        : const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.of(sheetContext).pop(option),
+                  ),
+                  if (option != options.last) const Divider(height: 1),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selected == null || !context.mounted) return;
+    if (selected == SalesDatePreset.custom) {
+      await _pickCustomDashboardRange(context);
+      return;
+    }
+    ref.read(salesDateFilterProvider.notifier).applyPreset(selected);
+  }
+
+  Future<void> _pickCustomDashboardRange(BuildContext context) async {
+    final current = ref.read(salesDateFilterProvider).range;
+    final today = localDateOnly(DateTime.now());
+    final firstAllowedDate = today.subtract(
+      const Duration(days: maxSalesDateFilterDays - 1),
+    );
+    var start = clampLocalDate(current.start, firstAllowedDate, today);
+    var end = clampLocalDate(current.end, firstAllowedDate, today);
+    if (start.isAfter(end)) start = end;
+
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: firstAllowedDate,
+      lastDate: today,
+      initialDateRange: DateTimeRange(start: start, end: end),
+      helpText: 'Rango personalizado',
+      cancelText: 'Cancelar',
+      confirmText: 'Aplicar',
+      fieldStartLabelText: 'Fecha inicial',
+      fieldEndLabelText: 'Fecha final',
+      errorInvalidRangeText: 'La fecha inicial no puede ser mayor que la final',
+    );
+
+    if (picked == null) return;
+    ref
+        .read(salesDateFilterProvider.notifier)
+        .applyCustomRange(picked.start, picked.end);
   }
 
   List<Widget> _buildCatalogAppBarActions(BuildContext context) {
@@ -384,11 +417,19 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
         listenable: _productsPageController,
         builder: (context, child) {
           return IconButton(
-            tooltip: 'Buscar en catálogo',
-            onPressed: () => _openCatalogSearchDialog(context),
+            tooltip: _isCatalogSearchVisible
+                ? 'Cerrar busqueda'
+                : 'Buscar en catalogo',
+            onPressed: _isCatalogSearchVisible
+                ? _closeInlineCatalogSearch
+                : _openInlineCatalogSearch,
             icon: _AppBarActionIcon(
-              icon: Icons.search_rounded,
-              active: _productsPageController.hasSearchQuery,
+              icon: _isCatalogSearchVisible
+                  ? Icons.close_rounded
+                  : Icons.search_rounded,
+              active:
+                  _isCatalogSearchVisible ||
+                  _productsPageController.hasSearchQuery,
             ),
           );
         },
@@ -400,7 +441,7 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
           final categories = _productsPageController.categories;
 
           return PopupMenuButton<String>(
-            tooltip: 'Filtrar por categoría',
+            tooltip: 'Filtrar por categoria',
             offset: const Offset(0, 10),
             position: PopupMenuPosition.under,
             surfaceTintColor: theme.colorScheme.surface,
@@ -422,7 +463,7 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
               CheckedPopupMenuItem<String>(
                 value: _allCategoriesValue,
                 checked: _productsPageController.selectedCategory == null,
-                child: const Text('Todas las categorías'),
+                child: const Text('Todas las categorias'),
               ),
               ...categories.map(
                 (category) => CheckedPopupMenuItem<String>(
@@ -443,103 +484,138 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
   }
 
   List<Widget> _buildAppBarActions(
-    BuildContext context,
-    AuthState authState, {
+    BuildContext context, {
     required String currentRoute,
     required int routeIndex,
+    required bool hasSidebar,
   }) {
     final theme = Theme.of(context);
     final isCatalogRoute =
         routeIndex == 1 ||
         currentRoute == '/products' ||
         currentRoute.startsWith('/products/');
+    final isInventoryRoute =
+        routeIndex == 2 ||
+        currentRoute == '/inventory' ||
+        currentRoute.startsWith('/inventory/');
     final catalogActions = isCatalogRoute
         ? _buildCatalogAppBarActions(context)
+        : const <Widget>[];
+    final inventoryActions = isInventoryRoute
+        ? _buildInventoryAppBarActions(context)
+        : const <Widget>[];
+    final dashboardActions = routeIndex == 0
+        ? <Widget>[
+            IconButton(
+              tooltip: 'Filtrar panel',
+              onPressed: () => _openDashboardFilterMenu(context),
+              icon: const _AppBarActionIcon(
+                icon: Icons.tune_rounded,
+                active: false,
+              ),
+            ),
+          ]
         : const <Widget>[];
 
     return [
       ...catalogActions,
-      IconButton(
-        tooltip: _isSyncing ? 'Sincronizando app' : 'Sincronizar app',
-        onPressed: _isSyncing ? null : () => _handleSyncAction(context),
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: _isSyncing
-              ? SizedBox(
-                  key: const ValueKey('syncing'),
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      theme.colorScheme.primary,
+      ...inventoryActions,
+      ...dashboardActions,
+      Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: IconButton(
+          tooltip: _isSyncing ? 'Sincronizando app' : 'Sincronizar app',
+          onPressed: _isSyncing ? null : () => _handleSyncAction(context),
+          icon: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: _isSyncing
+                ? SizedBox(
+                    key: const ValueKey('syncing'),
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        theme.colorScheme.primary,
+                      ),
                     ),
+                  )
+                : const _AppBarActionIcon(
+                    key: ValueKey('sync'),
+                    icon: Icons.sync_rounded,
+                    active: false,
                   ),
-                )
-              : const Icon(Icons.sync_rounded, key: ValueKey('sync')),
+          ),
         ),
       ),
-      Padding(
-        padding: const EdgeInsets.only(right: 6),
-        child: PopupMenuButton<_SessionMenuAction>(
-          tooltip: 'Sesión activa',
-          offset: const Offset(0, 12),
-          position: PopupMenuPosition.under,
-          surfaceTintColor: theme.colorScheme.surface,
-          color: theme.colorScheme.surface,
-          elevation: 10,
-          shadowColor: Colors.black.withValues(alpha: 0.16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-            side: BorderSide(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.75),
-            ),
-          ),
-          constraints: const BoxConstraints(minWidth: 248, maxWidth: 264),
-          padding: EdgeInsets.zero,
-          icon: _UserMenuButton(authState: authState),
-          onSelected: (value) => _handleSessionAction(
-            context,
-            action: value,
-            authState: authState,
-          ),
-          itemBuilder: (menuContext) => [
-            PopupMenuItem<_SessionMenuAction>(
-              enabled: false,
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: 256,
-                child: _SessionMenuHeader(authState: authState),
+    ];
+  }
+
+  List<Widget> _buildInventoryAppBarActions(BuildContext context) {
+    return [
+      ListenableBuilder(
+        listenable: _inventoryPageController,
+        builder: (context, child) {
+          final theme = Theme.of(context);
+          final categories = _inventoryPageController.categories;
+
+          return PopupMenuButton<String>(
+            tooltip: 'Filtrar por categoria',
+            offset: const Offset(0, 10),
+            position: PopupMenuPosition.under,
+            surfaceTintColor: theme.colorScheme.surface,
+            color: theme.colorScheme.surface,
+            elevation: 10,
+            shadowColor: Colors.black.withValues(alpha: 0.16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.75),
               ),
             ),
-            const PopupMenuDivider(height: 1),
-            const PopupMenuItem<_SessionMenuAction>(
-              value: _SessionMenuAction.profile,
-              height: 48,
-              child: _SessionActionTile(
-                title: 'Perfil',
-                icon: Icons.account_circle_outlined,
+            onSelected: (value) {
+              _inventoryPageController.selectCategory(
+                value == _allCategoriesValue ? null : value,
+              );
+            },
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem<String>(
+                value: _allCategoriesValue,
+                checked: _inventoryPageController.selectedCategory == null,
+                child: const Text('Todas las categorias'),
               ),
-            ),
-            const PopupMenuItem<_SessionMenuAction>(
-              value: _SessionMenuAction.settings,
-              height: 48,
-              child: _SessionActionTile(
-                title: 'Configuracion',
-                icon: Icons.settings_outlined,
+              ...categories.map(
+                (category) => CheckedPopupMenuItem<String>(
+                  value: category,
+                  checked:
+                      _inventoryPageController.selectedCategory == category,
+                  child: Text(category),
+                ),
               ),
+            ],
+            icon: _AppBarActionIcon(
+              icon: Icons.category_outlined,
+              active: _inventoryPageController.selectedCategory != null,
             ),
-            const PopupMenuItem<_SessionMenuAction>(
-              value: _SessionMenuAction.logout,
-              height: 48,
-              child: _SessionActionTile(
-                title: 'Cerrar sesión',
-                icon: Icons.logout_rounded,
-                destructive: true,
-              ),
+          );
+        },
+      ),
+      ListenableBuilder(
+        listenable: _inventoryPageController,
+        builder: (context, child) {
+          return IconButton(
+            tooltip: _inventoryPageController.outOfStockOnly
+                ? 'Mostrar todo'
+                : 'Mostrar agotados',
+            onPressed: () => _inventoryPageController.toggleOutOfStock(
+              !_inventoryPageController.outOfStockOnly,
             ),
-          ],
-        ),
+            icon: _AppBarActionIcon(
+              icon: Icons.remove_shopping_cart_outlined,
+              active: _inventoryPageController.outOfStockOnly,
+            ),
+          );
+        },
       ),
     ];
   }
@@ -548,66 +624,87 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
     BuildContext context, {
     required String currentRoute,
     required int routeIndex,
-    required AuthState authState,
+    required bool hasSidebar,
   }) {
-    final title = _titleForRoute(currentRoute, routeIndex: routeIndex);
     final theme = Theme.of(context);
-    final leading = _buildBackButton(
-      context,
-      currentRoute: currentRoute,
-      routeIndex: routeIndex,
-    );
+    final title = _titleForRoute(currentRoute, routeIndex: routeIndex);
+    final isCatalogRoute =
+        routeIndex == 1 ||
+        currentRoute == '/products' ||
+        currentRoute.startsWith('/products/');
+    final leading = routeIndex >= 0 && !hasSidebar
+        ? Padding(
+            padding: const EdgeInsets.only(left: 10),
+            child: _DrawerLauncherButton(
+              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+            ),
+          )
+        : _isSecondaryRoute(currentRoute, routeIndex: routeIndex)
+        ? IconButton(
+            tooltip: 'Regresar',
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () {
+              context.go(_parentRouteFor(currentRoute));
+            },
+          )
+        : null;
 
     return AppBar(
-      toolbarHeight: 64,
+      toolbarHeight: routeIndex == 0 ? 76 : 70,
       elevation: 0,
-      scrolledUnderElevation: 1,
+      scrolledUnderElevation: 0,
       surfaceTintColor: Colors.transparent,
       backgroundColor: theme.colorScheme.surface,
       leading: leading,
-      titleSpacing: leading == null ? 18 : 8,
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            title,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-            ),
-          ),
-          if (routeIndex != 0) ...[
-            const SizedBox(height: 2),
-            Text(
-              'Panel administrativo',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
-                fontSize: 11,
+      leadingWidth: routeIndex >= 0 && !hasSidebar ? 64 : null,
+      titleSpacing: leading == null ? 18 : 6,
+      title: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        child: isCatalogRoute && _isCatalogSearchVisible
+            ? _InlineCatalogSearchField(
+                key: const ValueKey('catalog-search'),
+                controller: _productsPageController.searchController,
+                focusNode: _catalogSearchFocusNode,
+                onChanged: _productsPageController.applySearchChange,
+                onSubmitted: (_) => _productsPageController.submitSearch(),
+                onClear: _productsPageController.clearSearch,
+              )
+            : Text(
+                key: ValueKey('title-$title'),
+                title,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  fontSize: routeIndex == 0 ? 29 : 21,
+                  letterSpacing: -1.15,
+                  color: const Color(0xFF131B2D),
+                ),
               ),
-            ),
-          ],
-        ],
       ),
-      centerTitle: false,
       actions: _buildAppBarActions(
         context,
-        authState,
         currentRoute: currentRoute,
         routeIndex: routeIndex,
+        hasSidebar: hasSidebar,
       ),
     );
   }
 
-  int _resolveRouteIndex(String location) {
-    for (var i = 0; i < _mainRoutes.length; i++) {
-      final route = _mainRoutes[i];
-      if (location == route || location.startsWith('$route/')) return i;
+  String? _buildCompanySubtitle(AuthState authState) {
+    final parts = <String>[];
+    final companyRnc = authState.companyRnc?.trim();
+    final companyId = authState.companyId;
+
+    if (companyRnc != null && companyRnc.isNotEmpty) {
+      parts.add('RNC $companyRnc');
     }
-    return -1;
+    if (companyId != null) {
+      parts.add('ID $companyId');
+    }
+
+    if (parts.isEmpty) return null;
+    return parts.join(' · ');
   }
 
   @override
@@ -624,132 +721,249 @@ class _OwnerShellState extends ConsumerState<OwnerShell> {
     final authState = ref.watch(authRepositoryProvider);
     final currentRoute = GoRouterState.of(context).matchedLocation;
     final routeIndex = _resolveRouteIndex(currentRoute);
-    final showMainPages = routeIndex >= 0;
     final selectedMainRoute = _activeMainRoute(
       currentRoute,
       routeIndex: routeIndex,
     );
-
-    final mainBody = showMainPages
+    final mainBody = routeIndex >= 0
         ? IndexedStack(index: routeIndex, children: _pages)
         : widget.child;
 
-    final body = LayoutBuilder(
+    return LayoutBuilder(
       builder: (context, constraints) {
-        final useSideNavigation = constraints.maxWidth >= 900;
+        final hasSidebar = constraints.maxWidth >= 980;
+
         void selectRoute(String route) {
           if (route == selectedMainRoute) return;
           context.go(route);
         }
 
-        if (useSideNavigation) {
-          return Row(
-            children: [
-              _CollapsedSideNavigation(
-                items: _mainNavItems,
-                selectedRoute: selectedMainRoute,
-                onSelected: selectRoute,
-              ),
-              const SizedBox(width: 14),
-              Expanded(child: mainBody),
-            ],
-          );
-        }
-
-        return Column(
+        final shellBody = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (hasSidebar)
+              Padding(
+                padding: const EdgeInsets.only(right: 18),
+                child: _OwnerSidebar(
+                  authState: authState,
+                  items: _mainNavItems,
+                  selectedRoute: selectedMainRoute,
+                  onSelected: selectRoute,
+                  onActionSelected: (action) => _handleSessionAction(
+                    context,
+                    action: action,
+                    authState: authState,
+                  ),
+                ),
+              ),
             Expanded(child: mainBody),
-            _FooterNavigationBar(
-              items: _mainNavItems,
-              selectedRoute: selectedMainRoute,
-              onSelected: selectRoute,
-            ),
           ],
+        );
+
+        return AppShellScaffold(
+          scaffoldKey: _scaffoldKey,
+          drawer: hasSidebar
+              ? null
+              : Drawer(
+                  width: constraints.maxWidth > 420
+                      ? 340
+                      : constraints.maxWidth * 0.88,
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  child: _OwnerDrawer(
+                    authState: authState,
+                    items: _mainNavItems,
+                    selectedRoute: selectedMainRoute,
+                    onSelected: selectRoute,
+                    onActionSelected: (action) => _handleSessionAction(
+                      context,
+                      action: action,
+                      authState: authState,
+                    ),
+                  ),
+                ),
+          appBar: _buildAppBar(
+            context,
+            currentRoute: currentRoute,
+            routeIndex: routeIndex,
+            hasSidebar: hasSidebar,
+          ),
+          title: _titleForRoute(currentRoute, routeIndex: routeIndex),
+          companyName: authState.companyName?.trim().isNotEmpty == true
+              ? authState.companyName!.trim()
+              : 'FULLPOS',
+          companySubtitle: _buildCompanySubtitle(authState),
+          username: authState.displayName ?? authState.username,
+          version: authState.ownerVersion,
+          body: shellBody,
+          currentRoute: currentRoute,
+          onDrawerNavigate: selectRoute,
+          onLogout: () async {
+            await ref.read(authRepositoryProvider.notifier).logout();
+            if (!context.mounted) return;
+            context.go('/login');
+          },
         );
       },
     );
-
-    return AppShellScaffold(
-      appBar: _buildAppBar(
-        context,
-        currentRoute: currentRoute,
-        routeIndex: routeIndex,
-        authState: authState,
-      ),
-      title: _titleForRoute(currentRoute, routeIndex: routeIndex),
-      companyName: authState.companyName?.trim().isNotEmpty == true
-          ? authState.companyName!.trim()
-          : 'FULLPOS',
-      companySubtitle: _buildCompanySubtitle(authState),
-      username: authState.displayName ?? authState.username,
-      version: authState.ownerVersion,
-      body: body,
-      currentRoute: currentRoute,
-      onDrawerNavigate: (path) {
-        context.go(path);
-      },
-      onLogout: () async {
-        await ref.read(authRepositoryProvider.notifier).logout();
-        if (!context.mounted) return;
-        context.go('/login');
-      },
-    );
-  }
-
-  String? _buildCompanySubtitle(AuthState authState) {
-    final details = <String>[];
-    final companyRnc = authState.companyRnc?.trim();
-    final companyId = authState.companyId?.toString();
-
-    if (companyRnc != null && companyRnc.isNotEmpty) {
-      details.add('RNC $companyRnc');
-    }
-    if (companyId != null && companyId.isNotEmpty) {
-      details.add('ID $companyId');
-    }
-
-    if (details.isEmpty) return null;
-    return details.join(' · ');
   }
 }
 
-class _SessionInfoRow extends StatelessWidget {
-  const _SessionInfoRow({required this.label, required this.value});
+class _MainNavItem {
+  const _MainNavItem({
+    required this.route,
+    required this.label,
+    required this.icon,
+  });
 
+  final String route;
   final String label;
-  final String value;
+  final IconData icon;
+}
+
+enum _SessionMenuAction { profile, settings, logout }
+
+class _DrawerLauncherButton extends StatelessWidget {
+  const _DrawerLauncherButton({required this.onTap});
+
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Ink(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                theme.colorScheme.primary.withValues(alpha: 0.18),
+                const Color(0xFFEAF3FF),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: theme.colorScheme.primary.withValues(alpha: 0.22),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Icon(
+            Icons.menu_rounded,
+            color: theme.colorScheme.primary,
+            size: 18,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OwnerSidebar extends StatelessWidget {
+  const _OwnerSidebar({
+    required this.authState,
+    required this.items,
+    required this.selectedRoute,
+    required this.onSelected,
+    required this.onActionSelected,
+  });
+
+  final AuthState authState;
+  final List<_MainNavItem> items;
+  final String? selectedRoute;
+  final ValueChanged<String> onSelected;
+  final ValueChanged<_SessionMenuAction> onActionSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const accentColor = Color(0xFF5DB2FF);
+    const textColor = Color(0xFFEAF2FF);
+    const mutedColor = Color(0xFF8EA3BF);
+
+    return Container(
+      width: 228,
+      height: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0C1726), Color(0xFF102033), Color(0xFF0B1624)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 24,
+            offset: const Offset(8, 0),
+          ),
+        ],
+      ),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 82,
-            child: Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.1,
-              ),
+          _BrandHeader(authState: authState),
+          const SizedBox(height: 18),
+          Text(
+            'Navegacion',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: mutedColor,
+              fontWeight: FontWeight.w800,
+              fontSize: 11,
+              letterSpacing: 1.1,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              value,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                height: 1.15,
-                letterSpacing: -0.1,
-              ),
+          const SizedBox(height: 8),
+          for (final item in items) ...[
+            _SidebarNavTile(
+              item: item,
+              selected: item.route == selectedRoute,
+              onTap: () => onSelected(item.route),
+              accentColor: accentColor,
+              textColor: textColor,
+              mutedColor: mutedColor,
             ),
+            const SizedBox(height: 6),
+          ],
+          const Spacer(),
+          _MenuActionTile(
+            icon: Icons.account_circle_outlined,
+            label: 'Perfil',
+            onTap: () => onActionSelected(_SessionMenuAction.profile),
+            textColor: textColor,
+            mutedColor: mutedColor,
+          ),
+          const SizedBox(height: 6),
+          _MenuActionTile(
+            icon: Icons.settings_outlined,
+            label: 'Configuracion',
+            onTap: () => onActionSelected(_SessionMenuAction.settings),
+            textColor: textColor,
+            mutedColor: mutedColor,
+          ),
+          const SizedBox(height: 6),
+          _MenuActionTile(
+            icon: Icons.logout_rounded,
+            label: 'Cerrar sesion',
+            destructive: true,
+            onTap: () => onActionSelected(_SessionMenuAction.logout),
+            textColor: textColor,
+            mutedColor: mutedColor,
           ),
         ],
       ),
@@ -757,304 +971,401 @@ class _SessionInfoRow extends StatelessWidget {
   }
 }
 
-class _UserIdentity {
-  const _UserIdentity({required this.displayName, required this.initials});
-
-  final String displayName;
-  final String initials;
-}
-
-_UserIdentity _resolveUserIdentity(AuthState authState) {
-  final displayName = authState.displayName?.trim();
-  final username = authState.username?.trim();
-  final name = (displayName != null && displayName.isNotEmpty)
-      ? displayName
-      : (username != null && username.isNotEmpty ? username : 'Usuario activo');
-
-  final parts = name
-      .split(RegExp(r'\s+'))
-      .where((part) => part.isNotEmpty)
-      .take(2)
-      .toList();
-  final initials = parts.isEmpty
-      ? 'U'
-      : parts.map((part) => part.characters.first.toUpperCase()).join();
-
-  return _UserIdentity(displayName: name, initials: initials);
-}
-
-class _UserMenuButton extends StatelessWidget {
-  const _UserMenuButton({required this.authState});
+class _OwnerDrawer extends StatelessWidget {
+  const _OwnerDrawer({
+    required this.authState,
+    required this.items,
+    required this.selectedRoute,
+    required this.onSelected,
+    required this.onActionSelected,
+  });
 
   final AuthState authState;
+  final List<_MainNavItem> items;
+  final String? selectedRoute;
+  final ValueChanged<String> onSelected;
+  final ValueChanged<_SessionMenuAction> onActionSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 28, 12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.78),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.12),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(child: SizedBox()),
+                    IconButton(
+                      tooltip: 'Cerrar menu',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                _BrandHeader(authState: authState, darkSurface: false),
+                const SizedBox(height: 22),
+                Text(
+                  'Panel principal',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                for (final item in items) ...[
+                  _SidebarNavTile(
+                    item: item,
+                    selected: item.route == selectedRoute,
+                    onTap: () => onSelected(item.route),
+                    accentColor: const Color(0xFF2C7BE5),
+                    textColor: const Color(0xFF142033),
+                    mutedColor: const Color(0xFF6C7C93),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                const Spacer(),
+                _MenuActionTile(
+                  icon: Icons.account_circle_outlined,
+                  label: 'Perfil',
+                  onTap: () => onActionSelected(_SessionMenuAction.profile),
+                  textColor: const Color(0xFF142033),
+                  mutedColor: const Color(0xFF6C7C93),
+                ),
+                const SizedBox(height: 8),
+                _MenuActionTile(
+                  icon: Icons.settings_outlined,
+                  label: 'Configuracion',
+                  onTap: () => onActionSelected(_SessionMenuAction.settings),
+                  textColor: const Color(0xFF142033),
+                  mutedColor: const Color(0xFF6C7C93),
+                ),
+                const SizedBox(height: 8),
+                _MenuActionTile(
+                  icon: Icons.logout_rounded,
+                  label: 'Cerrar sesion',
+                  destructive: true,
+                  onTap: () => onActionSelected(_SessionMenuAction.logout),
+                  textColor: const Color(0xFF142033),
+                  mutedColor: const Color(0xFF6C7C93),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BrandHeader extends StatelessWidget {
+  const _BrandHeader({required this.authState, this.darkSurface = true});
+
+  final AuthState authState;
+  final bool darkSurface;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final identity = _resolveUserIdentity(authState);
+    final companyName = authState.companyName?.trim();
+    final companyMeta = <String>[
+      if (authState.companyRnc?.trim().isNotEmpty == true)
+        'RNC ${authState.companyRnc!.trim()}',
+      if (authState.companyId != null) 'ID ${authState.companyId}',
+    ].join(' · ');
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(999),
+        gradient: LinearGradient(
+          colors: [
+            darkSurface
+                ? Colors.white.withValues(alpha: 0.08)
+                : const Color(0xFFEDF4FF),
+            darkSurface ? Colors.white.withValues(alpha: 0.02) : Colors.white,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.75),
+          color: darkSurface
+              ? Colors.white.withValues(alpha: 0.08)
+              : const Color(0xFFD7E4F7),
         ),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 34,
-            height: 34,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  theme.colorScheme.primary.withValues(alpha: 0.98),
-                  Color.lerp(
-                        theme.colorScheme.primary,
-                        theme.colorScheme.secondary,
-                        0.35,
-                      ) ??
-                      theme.colorScheme.primary,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+              gradient: const LinearGradient(
+                colors: [Color(0xFF5DB2FF), Color(0xFF2C7BE5)],
               ),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF5DB2FF).withValues(alpha: 0.28),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
             alignment: Alignment.center,
             child: Text(
               identity.initials,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.onPrimary,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: Colors.white,
                 fontWeight: FontWeight.w900,
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          Icon(
-            Icons.keyboard_arrow_down_rounded,
-            color: theme.colorScheme.onSurfaceVariant,
-            size: 20,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SessionDetailsPanel extends StatelessWidget {
-  const _SessionDetailsPanel({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.85),
-        ),
-      ),
-      child: Column(children: children),
-    );
-  }
-}
-
-class _SessionInfoMenu extends StatelessWidget {
-  const _SessionInfoMenu({required this.authState});
-
-  final AuthState authState;
-
-  String get _displayName {
-    final displayName = authState.displayName?.trim();
-    if (displayName != null && displayName.isNotEmpty) return displayName;
-
-    final username = authState.username?.trim();
-    if (username != null && username.isNotEmpty) return username;
-
-    return 'Usuario activo';
-  }
-
-  String get _initials {
-    final source = _displayName.trim();
-    if (source.isEmpty) return 'U';
-
-    final parts = source
-        .split(RegExp(r'\s+'))
-        .where((part) => part.isNotEmpty)
-        .take(2)
-        .toList();
-    if (parts.isEmpty) return 'U';
-
-    return parts.map((part) => part.characters.first.toUpperCase()).join();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final username = authState.username?.trim();
-    final displayName = authState.displayName?.trim();
-    final email = authState.email?.trim();
-    final companyName = authState.companyName?.trim();
-    final companyRnc = authState.companyRnc?.trim();
-    final companyId = authState.companyId?.toString();
-    final version = authState.ownerVersion?.trim();
-    final normalizedDisplayName = displayName?.toLowerCase();
-    final normalizedUsername = username?.toLowerCase();
-    final shouldShowUsername =
-        normalizedUsername != null &&
-        normalizedUsername.isNotEmpty &&
-        normalizedUsername != normalizedDisplayName;
-    final detailRows = <Widget>[
-      const _SessionInfoRow(label: 'Rol', value: 'Admin'),
-      if (companyId != null && companyId.isNotEmpty)
-        _buildSessionDetailRow(label: 'ID empresa', value: companyId),
-      if (shouldShowUsername)
-        _buildSessionDetailRow(label: 'Usuario', value: username!),
-      if (version != null && version.isNotEmpty)
-        _buildSessionDetailRow(label: 'Versión', value: version),
-      if (email != null && email.isNotEmpty)
-        _buildSessionDetailRow(label: 'Correo', value: email),
-      if (companyName != null && companyName.isNotEmpty)
-        _buildSessionDetailRow(label: 'Empresa', value: companyName),
-      if (companyRnc != null && companyRnc.isNotEmpty)
-        _buildSessionDetailRow(label: 'RNC', value: companyRnc, isLast: true),
-    ];
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha((0.08 * 255).round()),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'OWNER PANEL',
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.primary.withValues(alpha: 0.82),
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.9,
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  companyName != null && companyName.isNotEmpty
+                      ? companyName
+                      : 'FULLPOS OWNER',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: darkSurface
+                        ? const Color(0xFFEAF2FF)
+                        : const Color(0xFF1A2740),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  identity.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: darkSurface
+                        ? const Color(0xFF8EA3BF)
+                        : const Color(0xFF5F7290),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+                if (companyMeta.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    companyMeta,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: darkSurface
+                          ? const Color(0xFFC7D5E8)
+                          : const Color(0xFF6A7B94),
+                      fontWeight: FontWeight.w600,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
+        ],
+      ),
+    );
+  }
+}
+
+class _SidebarNavTile extends StatelessWidget {
+  const _SidebarNavTile({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+    required this.accentColor,
+    required this.textColor,
+    required this.mutedColor,
+  });
+
+  final _MainNavItem item;
+  final bool selected;
+  final VoidCallback onTap;
+  final Color accentColor;
+  final Color textColor;
+  final Color mutedColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          decoration: BoxDecoration(
+            gradient: selected
+                ? LinearGradient(
                     colors: [
-                      theme.colorScheme.primary.withAlpha((0.16 * 255).round()),
-                      theme.colorScheme.primary.withAlpha((0.08 * 255).round()),
+                      accentColor.withValues(alpha: 0.22),
+                      accentColor.withValues(alpha: 0.10),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : LinearGradient(
+                    colors: [
+                      Colors.white.withValues(alpha: 0.05),
+                      Colors.white.withValues(alpha: 0.015),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: theme.colorScheme.primary.withAlpha(
-                      (0.16 * 255).round(),
-                    ),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  _initials,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.35,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      'Sesión activa',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                        height: 1.05,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected
+                  ? accentColor.withValues(alpha: 0.28)
+                  : Colors.white.withValues(alpha: 0.06),
+            ),
           ),
-          const SizedBox(height: 12),
-          Row(
+          child: Row(
             children: [
               Container(
-                width: 34,
-                height: 3,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(999),
+                  color: selected
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  item.icon,
+                  color: selected ? accentColor : mutedColor,
+                  size: 18,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Container(
-                  height: 1,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        theme.colorScheme.primary.withValues(alpha: 0.22),
-                        theme.colorScheme.outlineVariant.withValues(
-                          alpha: 0.55,
-                        ),
-                        Colors.transparent,
-                      ],
-                    ),
+                child: Text(
+                  item.label,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: selected
+                        ? textColor
+                        : textColor.withValues(alpha: 0.88),
                   ),
                 ),
               ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: selected ? accentColor : mutedColor,
+                size: 18,
+              ),
             ],
           ),
-          const SizedBox(height: 12),
-          _SessionDetailsPanel(children: detailRows),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuActionTile extends StatelessWidget {
+  const _MenuActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    required this.textColor,
+    required this.mutedColor,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color textColor;
+  final Color mutedColor;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive ? const Color(0xFFFF7B7B) : textColor;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          decoration: BoxDecoration(
+            color: destructive
+                ? const Color(0xFFFF7B7B).withValues(alpha: 0.10)
+                : Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: destructive
+                  ? const Color(0xFFFF7B7B).withValues(alpha: 0.18)
+                  : Colors.white.withValues(alpha: 0.06),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: color, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: destructive ? color.withValues(alpha: 0.8) : mutedColor,
+                size: 18,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
 class _AppBarActionIcon extends StatelessWidget {
-  const _AppBarActionIcon({required this.icon, required this.active});
+  const _AppBarActionIcon({
+    super.key,
+    required this.icon,
+    required this.active,
+  });
 
   final IconData icon;
   final bool active;
@@ -1067,21 +1378,43 @@ class _AppBarActionIcon extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         Container(
-          width: 36,
-          height: 36,
+          width: 38,
+          height: 38,
           decoration: BoxDecoration(
-            color: active
-                ? theme.colorScheme.primary.withValues(alpha: 0.12)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+              colors: active
+                  ? [
+                      theme.colorScheme.primary.withValues(alpha: 0.18),
+                      theme.colorScheme.primary.withValues(alpha: 0.07),
+                    ]
+                  : [
+                      theme.colorScheme.surfaceContainerLowest,
+                      theme.colorScheme.surface.withValues(alpha: 0.92),
+                    ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(
+              color: active
+                  ? theme.colorScheme.primary.withValues(alpha: 0.22)
+                  : theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: active
+                    ? theme.colorScheme.primary.withValues(alpha: 0.10)
+                    : theme.colorScheme.shadow.withValues(alpha: 0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           alignment: Alignment.center,
           child: Icon(
             icon,
-            size: 20,
-            color: active
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurfaceVariant,
+            size: 19,
+            color: active ? theme.colorScheme.primary : const Color(0xFF5C677B),
           ),
         ),
         if (active)
@@ -1102,165 +1435,88 @@ class _AppBarActionIcon extends StatelessWidget {
   }
 }
 
-class _SessionMenuHeader extends StatelessWidget {
-  const _SessionMenuHeader({required this.authState});
-
-  final AuthState authState;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final identity = _resolveUserIdentity(authState);
-    final username = authState.username?.trim();
-    final companyName = authState.companyName?.trim();
-    final normalizedDisplayName = identity.displayName.trim().toLowerCase();
-    final normalizedUsername = username?.trim().toLowerCase();
-    final String secondaryLabel =
-        (normalizedUsername != null &&
-            normalizedUsername.isNotEmpty &&
-            normalizedUsername != normalizedDisplayName)
-        ? username!
-        : (companyName != null && companyName.isNotEmpty
-              ? companyName
-              : 'Administrador activo');
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.surface,
-            theme.colorScheme.surfaceContainerLowest,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  theme.colorScheme.primary,
-                  Color.lerp(
-                        theme.colorScheme.primary,
-                        theme.colorScheme.secondary,
-                        0.4,
-                      ) ??
-                      theme.colorScheme.primary,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.15),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              identity.initials,
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: theme.colorScheme.onPrimary,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  identity.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.2,
-                  ),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  secondaryLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SessionActionTile extends StatelessWidget {
-  const _SessionActionTile({
-    required this.title,
-    required this.icon,
-    this.destructive = false,
+class _InlineCatalogSearchField extends StatelessWidget {
+  const _InlineCatalogSearchField({
+    super.key,
+    required this.controller,
+    required this.focusNode,
+    required this.onChanged,
+    required this.onSubmitted,
+    required this.onClear,
   });
 
-  final String title;
-  final IconData icon;
-  final bool destructive;
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = destructive
-        ? theme.colorScheme.error
-        : theme.colorScheme.onSurface;
 
-    return Row(
-      children: [
-        Container(
-          width: 32,
-          height: 32,
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (context, value, child) {
+        return Container(
+          height: 44,
           decoration: BoxDecoration(
-            color: destructive
-                ? theme.colorScheme.errorContainer.withValues(alpha: 0.36)
-                : theme.colorScheme.primary.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, size: 16, color: color),
-        ),
-        const SizedBox(width: 9),
-        Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.1,
+            color: theme.colorScheme.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
             ),
           ),
-        ),
-        Icon(
-          Icons.chevron_right_rounded,
-          size: 16,
-          color: destructive
-              ? theme.colorScheme.error.withValues(alpha: 0.7)
-              : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-        ),
-      ],
+          child: Row(
+            children: [
+              const SizedBox(width: 12),
+              Icon(
+                Icons.search_rounded,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  autofocus: true,
+                  onChanged: onChanged,
+                  onSubmitted: onSubmitted,
+                  textInputAction: TextInputAction.search,
+                  textAlignVertical: TextAlignVertical.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF182033),
+                    fontWeight: FontWeight.w700,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Buscar en catalogo',
+                    hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFF8A94A6),
+                      fontWeight: FontWeight.w500,
+                    ),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              if (value.text.isNotEmpty)
+                IconButton(
+                  tooltip: 'Limpiar busqueda',
+                  onPressed: onClear,
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                const SizedBox(width: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -1273,352 +1529,185 @@ class _ProfileSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.85),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.14),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
+    final identity = _resolveUserIdentity(authState);
+    final details = <({String label, String value})>[
+      (
+        label: 'Usuario',
+        value: authState.username?.trim().isNotEmpty == true
+            ? authState.username!.trim()
+            : identity.displayName,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Perfil',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.25,
-                ),
-              ),
-              const Spacer(),
-              Icon(
-                Icons.account_circle_outlined,
-                color: theme.colorScheme.primary,
-                size: 18,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _SessionInfoMenu(authState: authState),
-        ],
+      (
+        label: 'Correo',
+        value: authState.email?.trim().isNotEmpty == true
+            ? authState.email!.trim()
+            : 'No disponible',
       ),
-    );
-  }
-}
-
-Widget _buildSessionDetailRow({
-  required String label,
-  required String value,
-  bool isLast = false,
-}) {
-  return Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      _SessionInfoRow(label: label, value: value),
-      if (!isLast) const Divider(height: 1),
-    ],
-  );
-}
-
-class _CollapsedSideNavigation extends StatelessWidget {
-  const _CollapsedSideNavigation({
-    required this.items,
-    required this.selectedRoute,
-    required this.onSelected,
-  });
-
-  final List<_MainNavItem> items;
-  final String? selectedRoute;
-  final ValueChanged<String> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      width: 72,
-      height: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.72),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
+      (
+        label: 'Empresa',
+        value: authState.companyName?.trim().isNotEmpty == true
+            ? authState.companyName!.trim()
+            : 'FULLPOS',
       ),
-      child: Column(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Text(
-              'FP',
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
+      (
+        label: 'Contexto',
+        value:
+            [
+              if (authState.companyId != null) 'ID ${authState.companyId}',
+              if (authState.companyRnc?.trim().isNotEmpty == true)
+                'RNC ${authState.companyRnc!.trim()}',
+            ].join(' · ').isEmpty
+            ? 'Sin datos adicionales'
+            : [
+                if (authState.companyId != null) 'ID ${authState.companyId}',
+                if (authState.companyRnc?.trim().isNotEmpty == true)
+                  'RNC ${authState.companyRnc!.trim()}',
+              ].join(' · '),
+      ),
+    ];
+
+    return Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(28),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.82),
           ),
-          const SizedBox(height: 14),
-          for (final item in items) ...[
-            _SideNavButton(
-              item: item,
-              selected: item.route == selectedRoute,
-              onTap: () => onSelected(item.route),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
             ),
-            const SizedBox(height: 8),
           ],
-          const Spacer(),
-        ],
-      ),
-    );
-  }
-}
-
-class _SideNavButton extends StatelessWidget {
-  const _SideNavButton({
-    required this.item,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final _MainNavItem item;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = selected ? theme.colorScheme.primary : AppColors.ink;
-
-    return Tooltip(
-      message: item.label,
-      waitDuration: const Duration(milliseconds: 350),
-      child: Material(
-        color: selected
-            ? theme.colorScheme.primary.withValues(alpha: 0.12)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: SizedBox(
-            width: 48,
-            height: 48,
-            child: Stack(
-              alignment: Alignment.center,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Icon(item.icon, color: color, size: 23),
-                Positioned(
-                  left: 4,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: 3,
-                    height: selected ? 22 : 0,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary,
-                      borderRadius: BorderRadius.circular(999),
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        theme.colorScheme.primary,
+                        theme.colorScheme.secondary,
+                      ],
                     ),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    identity.initials,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: theme.colorScheme.onPrimary,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        identity.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Perfil del administrador',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FooterNavigationBar extends StatelessWidget {
-  const _FooterNavigationBar({
-    required this.items,
-    required this.selectedRoute,
-    required this.onSelected,
-  });
-
-  final List<_MainNavItem> items;
-  final String? selectedRoute;
-  final ValueChanged<String> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final safeBottom = MediaQuery.paddingOf(context).bottom;
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        0,
-        8,
-        0,
-        safeBottom > 0 ? safeBottom - 2 : 4,
-      ),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface.withValues(alpha: 0.96),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.72),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
+            const SizedBox(height: 18),
+            for (var i = 0; i < details.length; i++) ...[
+              _ProfileInfoRow(label: details[i].label, value: details[i].value),
+              if (i != details.length - 1) const Divider(height: 18),
+            ],
           ],
         ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
-          child: Row(
-            children: [
-              for (var index = 0; index < items.length; index++)
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      right: index == items.length - 1 ? 0 : 8,
-                    ),
-                    child: _FooterNavButton(
-                      item: items[index],
-                      selected: items[index].route == selectedRoute,
-                      onTap: () => onSelected(items[index].route),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
       ),
     );
   }
 }
 
-class _FooterNavButton extends StatelessWidget {
-  const _FooterNavButton({
-    required this.item,
-    required this.selected,
-    required this.onTap,
-  });
+class _ProfileInfoRow extends StatelessWidget {
+  const _ProfileInfoRow({required this.label, required this.value});
 
-  final _MainNavItem item;
-  final bool selected;
-  final VoidCallback onTap;
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final activeColor = selected ? theme.colorScheme.primary : AppColors.ink;
 
-    return Material(
-      color: selected
-          ? theme.colorScheme.primary.withValues(alpha: 0.12)
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: selected
-                ? LinearGradient(
-                    colors: [
-                      theme.colorScheme.primary.withValues(alpha: 0.15),
-                      theme.colorScheme.primary.withValues(alpha: 0.06),
-                    ],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  )
-                : null,
-            border: Border.all(
-              color: selected
-                  ? theme.colorScheme.primary.withValues(alpha: 0.24)
-                  : Colors.transparent,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 72,
+          child: Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w800,
             ),
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.10),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ]
-                : null,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(item.icon, size: 18, color: activeColor),
-              const SizedBox(height: 4),
-              Text(
-                item.label,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  color: activeColor,
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                  letterSpacing: -0.1,
-                  fontSize: 11.5,
-                ),
-              ),
-              const SizedBox(height: 2),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOutCubic,
-                width: selected ? 18 : 0,
-                height: 2.5,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-            ],
           ),
         ),
-      ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            value,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _MainNavItem {
-  const _MainNavItem({
-    required this.route,
-    required this.label,
-    required this.icon,
-  });
+class _UserIdentity {
+  const _UserIdentity({required this.displayName, required this.initials});
 
-  final String route;
-  final String label;
-  final IconData icon;
+  final String displayName;
+  final String initials;
 }
 
-enum _SessionMenuAction { profile, settings, logout }
+_UserIdentity _resolveUserIdentity(AuthState authState) {
+  final displayName = authState.displayName?.trim().isNotEmpty == true
+      ? authState.displayName!.trim()
+      : authState.username?.trim().isNotEmpty == true
+      ? authState.username!.trim()
+      : 'Administrador';
+
+  final parts = displayName
+      .split(RegExp(r'\s+'))
+      .where((part) => part.trim().isNotEmpty)
+      .toList();
+  final initials = parts.isEmpty
+      ? 'AD'
+      : parts.take(2).map((part) => part.characters.first.toUpperCase()).join();
+
+  return _UserIdentity(displayName: displayName, initials: initials);
+}

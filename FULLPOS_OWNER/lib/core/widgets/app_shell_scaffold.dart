@@ -6,6 +6,7 @@ import 'app_background.dart';
 class AppShellScaffold extends StatelessWidget {
   const AppShellScaffold({
     super.key,
+    this.scaffoldKey,
     this.appBar,
     required this.title,
     required this.companyName,
@@ -16,8 +17,10 @@ class AppShellScaffold extends StatelessWidget {
     required this.currentRoute,
     required this.onDrawerNavigate,
     this.onLogout,
+    this.drawer,
   });
 
+  final GlobalKey<ScaffoldState>? scaffoldKey;
   final PreferredSizeWidget? appBar;
   final String title;
   final String companyName;
@@ -28,14 +31,17 @@ class AppShellScaffold extends StatelessWidget {
   final String currentRoute;
   final ValueChanged<String> onDrawerNavigate;
   final Future<void> Function()? onLogout;
+  final Widget? drawer;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
+      key: scaffoldKey,
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: appBar ?? _buildAppBar(theme),
+      drawer: drawer,
       body: AppBackground(
         child: SafeArea(
           bottom: false,

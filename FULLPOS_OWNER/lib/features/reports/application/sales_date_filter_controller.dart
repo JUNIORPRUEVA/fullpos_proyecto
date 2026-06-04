@@ -13,9 +13,9 @@ final salesDateFilterProvider =
 enum SalesDatePreset {
   today,
   yesterday,
-  dayBeforeYesterday,
-  last5Days,
-  lastWeek,
+  week,
+  fortnight,
+  month,
   custom,
 }
 
@@ -48,7 +48,7 @@ class SalesDateFilterState {
   });
 
   factory SalesDateFilterState.initial() {
-    return SalesDateFilterState.fromPreset(SalesDatePreset.today);
+    return SalesDateFilterState.fromPreset(SalesDatePreset.week);
   }
 
   factory SalesDateFilterState.fromPreset(SalesDatePreset preset) {
@@ -86,12 +86,12 @@ class SalesDateFilterState {
         return 'Hoy';
       case SalesDatePreset.yesterday:
         return 'Ayer';
-      case SalesDatePreset.dayBeforeYesterday:
-        return 'Antes de ayer';
-      case SalesDatePreset.last5Days:
-        return 'Ultimos 5 dias';
-      case SalesDatePreset.lastWeek:
-        return 'Ultima semana';
+      case SalesDatePreset.week:
+        return 'Semana';
+      case SalesDatePreset.fortnight:
+        return 'Quincena';
+      case SalesDatePreset.month:
+        return 'Mes';
       case SalesDatePreset.custom:
         return rangeLabel(range.start, range.end);
     }
@@ -129,17 +129,19 @@ SalesDateRange rangeForPreset(SalesDatePreset preset) {
     case SalesDatePreset.yesterday:
       final day = today.subtract(const Duration(days: 1));
       return SalesDateRange(start: day, end: day);
-    case SalesDatePreset.dayBeforeYesterday:
-      final day = today.subtract(const Duration(days: 2));
-      return SalesDateRange(start: day, end: day);
-    case SalesDatePreset.last5Days:
-      return SalesDateRange(
-        start: today.subtract(const Duration(days: 4)),
-        end: today,
-      );
-    case SalesDatePreset.lastWeek:
+    case SalesDatePreset.week:
       return SalesDateRange(
         start: today.subtract(const Duration(days: 6)),
+        end: today,
+      );
+    case SalesDatePreset.fortnight:
+      return SalesDateRange(
+        start: today.subtract(const Duration(days: 14)),
+        end: today,
+      );
+    case SalesDatePreset.month:
+      return SalesDateRange(
+        start: today.subtract(const Duration(days: 29)),
         end: today,
       );
     case SalesDatePreset.custom:
@@ -203,12 +205,12 @@ String presetLabel(SalesDatePreset preset) {
       return 'Hoy';
     case SalesDatePreset.yesterday:
       return 'Ayer';
-    case SalesDatePreset.dayBeforeYesterday:
-      return 'Antes de ayer';
-    case SalesDatePreset.last5Days:
-      return 'Ultimos 5 dias';
-    case SalesDatePreset.lastWeek:
-      return 'Ultima semana';
+    case SalesDatePreset.week:
+      return 'Semana';
+    case SalesDatePreset.fortnight:
+      return 'Quincena';
+    case SalesDatePreset.month:
+      return 'Mes';
     case SalesDatePreset.custom:
       return 'Personalizado';
   }
@@ -220,12 +222,12 @@ IconData presetIcon(SalesDatePreset preset) {
       return Icons.today_outlined;
     case SalesDatePreset.yesterday:
       return Icons.history_toggle_off_rounded;
-    case SalesDatePreset.dayBeforeYesterday:
-      return Icons.event_repeat_outlined;
-    case SalesDatePreset.last5Days:
-      return Icons.view_week_outlined;
-    case SalesDatePreset.lastWeek:
+    case SalesDatePreset.week:
       return Icons.date_range_outlined;
+    case SalesDatePreset.fortnight:
+      return Icons.calendar_view_week_outlined;
+    case SalesDatePreset.month:
+      return Icons.calendar_month_outlined;
     case SalesDatePreset.custom:
       return Icons.edit_calendar_outlined;
   }
