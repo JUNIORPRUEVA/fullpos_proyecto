@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { authGuard } from '../../middlewares/authGuard';
 import { asyncHandler } from '../../middlewares/asyncHandler';
-import { requireRoles } from '../../middlewares/requireRoles';
+import { releasePolicyAudit } from '../../middlewares/releasePolicyAudit';
+import { releasePolicyAuthGuard } from '../../middlewares/releasePolicyAuthGuard';
+import { releasePolicyRateLimit } from '../../middlewares/releasePolicyRateLimit';
 import { validate } from '../../middlewares/validate';
 import {
   getFullPosWindowsUpdatePolicy,
@@ -17,8 +18,9 @@ router.get('/fullpos/windows', asyncHandler(async (_req, res) => {
 
 router.put(
   '/fullpos/windows',
-  authGuard,
-  requireRoles('admin', 'owner'),
+  releasePolicyAudit,
+  releasePolicyRateLimit,
+  releasePolicyAuthGuard,
   validate(upsertAppUpdatePolicySchema),
   asyncHandler(async (req, res) => {
     res.json(await upsertFullPosWindowsUpdatePolicy(req.body));

@@ -61,6 +61,10 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
+  FULLPOS_RELEASE_API_KEY: z.preprocess(
+    optionalTrimmedString,
+    z.string().min(32).optional(),
+  ),
   CORS_ORIGINS: z.string().optional(),
   OVERRIDE_API_KEY: z.string().optional(),
   ALLOW_PUBLIC_CLOUD: z.preprocess(parseBooleanEnv, z.boolean().optional()),
@@ -114,6 +118,12 @@ const envSchema = z.object({
 const env = envSchema.parse(process.env);
 
 if (env.NODE_ENV === 'production') {
+  if (!env.FULLPOS_RELEASE_API_KEY) {
+    throw new Error(
+      'FULLPOS_RELEASE_API_KEY is required in production and must contain at least 32 characters.',
+    );
+  }
+
   if (env.ALLOW_PUBLIC_CLOUD === true) {
     console.warn(
       '[SECURITY WARNING] ALLOW_PUBLIC_CLOUD=true in production. ' +

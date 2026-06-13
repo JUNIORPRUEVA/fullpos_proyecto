@@ -6,6 +6,7 @@ declare global {
     interface Request {
       user?: JwtUser;
       requestId?: string;
+      releasePolicyAuthMethod?: 'admin_session' | 'release_key';
       integration?: {
         tokenId: number;
         companyId: number;
