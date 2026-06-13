@@ -58,6 +58,31 @@ model Company {
   @@index([normalizedRnc])
 }
 
+model AppUpdateRelease {
+  id                      Int      @id @default(autoincrement())
+  projectCode             String
+  platform                String
+  version                 String
+  buildNumber             Int
+  minimumSupportedVersion String
+  minimumSupportedBuild   Int
+  mandatory               Boolean  @default(false)
+  enabled                 Boolean  @default(true)
+  installerUrl            String
+  installerFilename       String
+  installerSizeBytes      BigInt?
+  sha256                   String
+  releaseTitle            String
+  releaseNotes            String[]
+  publishedAt             DateTime
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([projectCode, platform, version, buildNumber])
+  @@index([projectCode, platform, enabled, publishedAt])
+  @@map("app_update_releases")
+}
+
 model Client {
   id         Int      @id @default(autoincrement())
   companyId  Int

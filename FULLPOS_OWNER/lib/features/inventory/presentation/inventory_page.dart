@@ -18,7 +18,7 @@ class InventoryPageController extends ChangeNotifier {
   }
 
   final TextEditingController searchController;
-  List<String> _categories = const [];
+  List<String> _categories = <String>[];
   String? _selectedCategory;
   bool _outOfStockOnly = false;
 
@@ -99,8 +99,8 @@ class _InventoryPageState extends ConsumerState<InventoryPage>
 
   bool _loading = true;
   String? _error;
-  List<Product> _all = const [];
-  List<String> _syncedCategories = const [];
+  List<Product> _all = <Product>[];
+  List<String> _syncedCategories = <String>[];
 
   @override
   void initState() {

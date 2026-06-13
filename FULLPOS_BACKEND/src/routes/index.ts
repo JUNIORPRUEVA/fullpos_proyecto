@@ -18,6 +18,7 @@ import integrationsRoutes from '../modules/integrations/integrations.routes';
 import clientsRoutes from '../modules/clients/clients.routes';
 import categoriesRoutes from '../modules/categories/categories.routes';
 import suppliersRoutes from '../modules/suppliers/suppliers.routes';
+import appUpdateRoutes from '../modules/app-updates/app-updates.routes';
 import { adminElectronicInvoicingRouter, posElectronicInvoicingRouter } from '../modules/electronic-invoicing/electronic-invoicing.module';
 import { cloudSyncRateLimit } from '../middlewares/cloudSyncRateLimit';
 import { cloudSyncAuditLog } from '../middlewares/cloudSyncAuditLog';
@@ -46,6 +47,7 @@ router.use('/integrations', integrationsRoutes);
 router.use('/clients', clientsRoutes);
 router.use('/categories', categoriesRoutes);
 router.use('/suppliers', suppliersRoutes);
+router.use('/app-updates', appUpdateRoutes);
 router.use('/electronic-invoicing', posElectronicInvoicingRouter);
 router.use('/electronic-invoicing', adminElectronicInvoicingRouter);
 

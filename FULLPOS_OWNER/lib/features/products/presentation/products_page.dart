@@ -23,7 +23,7 @@ class ProductsPageController extends ChangeNotifier {
   }
 
   final TextEditingController searchController;
-  List<String> _categories = const [];
+  List<String> _categories = <String>[];
   String? _selectedCategory;
 
   VoidCallback? onSearch;
@@ -97,12 +97,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage>
   StreamSubscription<ProductRealtimeMessage>? _productRealtimeSubscription;
   bool _refreshInFlight = false;
   bool _reloadRequested = false;
-  List<Product> _allProducts = const [];
-  List<Product> _products = const [];
+  List<Product> _allProducts = <Product>[];
+  List<Product> _products = <Product>[];
   bool _loading = true;
   String? _error;
   String? _selectedCategory;
-  List<String> _syncedCategories = const [];
+  List<String> _syncedCategories = <String>[];
 
   @override
   void initState() {
@@ -813,7 +813,7 @@ class _ProductCard extends StatelessWidget {
                               tag: 'product-image-${product.id}',
                               child: Image.network(
                                 product.imageUrl!,
-                                fit: BoxFit.cover,
+                                fit: BoxFit.contain,
                                 errorBuilder: (context, error, stackTrace) {
                                   return _ProductCardPlaceholder(
                                     product: product,
