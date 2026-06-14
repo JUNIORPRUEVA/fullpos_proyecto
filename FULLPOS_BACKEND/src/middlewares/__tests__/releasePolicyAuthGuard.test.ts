@@ -89,3 +89,36 @@ test('release policy guard preserves admin/owner JWT authorization', async () =>
     .expect(200);
   assert.equal(accepted.body.method, 'admin_session');
 });
+
+test('missing FullCredit key disables only release-key authentication', async () => {
+  const app = express();
+  app.put(
+    '/fullcredit/android',
+    createReleasePolicyAuthGuard(
+      'fullpos-release-key-with-32-characters',
+      undefined,
+    ),
+    (_req, res) => res.sendStatus(200),
+  );
+
+  await request(app)
+    .put('/fullcredit/android')
+    .set('X-Release-Key', 'fullcredit-release-key-with-32-characters')
+    .expect(401);
+
+  const token = jwt.sign(
+    {
+      id: 1,
+      companyId: 1,
+      username: 'release-owner',
+      role: 'owner',
+    },
+    env.JWT_ACCESS_SECRET,
+    { expiresIn: '5m' },
+  );
+
+  await request(app)
+    .put('/fullcredit/android')
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+});

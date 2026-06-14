@@ -23,11 +23,7 @@ CREATE TABLE "app_update_releases" (
     CONSTRAINT "app_update_releases_minimumSupportedBuild_check" CHECK ("minimumSupportedBuild" > 0),
     CONSTRAINT "app_update_releases_installerSizeBytes_check" CHECK ("installerSizeBytes" IS NULL OR "installerSizeBytes" > 0),
     CONSTRAINT "app_update_releases_sha256_check" CHECK ("sha256" ~ '^[0-9A-Fa-f]{64}$'),
-    CONSTRAINT "app_update_releases_installerFilename_check" CHECK (
-      ("projectCode" = 'fullpos' AND "platform" = 'windows' AND "installerFilename" = 'FullPOS-Setup.exe')
-      OR
-      ("projectCode" = 'fullcredit' AND "platform" = 'android' AND "installerFilename" = 'FullCredit-Android.apk')
-    )
+    CONSTRAINT "app_update_releases_installerFilename_check" CHECK ("installerFilename" = 'FullPOS-Setup.exe')
 );
 
 CREATE UNIQUE INDEX "app_update_releases_projectCode_platform_version_buildNumber_key"

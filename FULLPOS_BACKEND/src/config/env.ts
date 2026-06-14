@@ -128,8 +128,9 @@ if (env.NODE_ENV === 'production') {
     );
   }
   if (!env.FULLCREDIT_RELEASE_API_KEY) {
-    throw new Error(
-      'FULLCREDIT_RELEASE_API_KEY is required in production and must contain at least 32 characters.',
+    console.warn(
+      '[SECURITY WARNING] FULLCREDIT_RELEASE_API_KEY is not set in production. ' +
+      'FullCredit update publication by release key is disabled; admin/owner authentication remains available.',
     );
   }
 
