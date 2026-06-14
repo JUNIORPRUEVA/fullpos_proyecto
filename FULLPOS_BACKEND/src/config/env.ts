@@ -65,6 +65,10 @@ const envSchema = z.object({
     optionalTrimmedString,
     z.string().min(32).optional(),
   ),
+  FULLCREDIT_RELEASE_API_KEY: z.preprocess(
+    optionalTrimmedString,
+    z.string().min(32).optional(),
+  ),
   CORS_ORIGINS: z.string().optional(),
   OVERRIDE_API_KEY: z.string().optional(),
   ALLOW_PUBLIC_CLOUD: z.preprocess(parseBooleanEnv, z.boolean().optional()),
@@ -121,6 +125,11 @@ if (env.NODE_ENV === 'production') {
   if (!env.FULLPOS_RELEASE_API_KEY) {
     throw new Error(
       'FULLPOS_RELEASE_API_KEY is required in production and must contain at least 32 characters.',
+    );
+  }
+  if (!env.FULLCREDIT_RELEASE_API_KEY) {
+    throw new Error(
+      'FULLCREDIT_RELEASE_API_KEY is required in production and must contain at least 32 characters.',
     );
   }
 

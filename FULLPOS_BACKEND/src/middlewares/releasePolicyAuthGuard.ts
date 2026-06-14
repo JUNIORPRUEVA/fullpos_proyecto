@@ -20,7 +20,10 @@ function reject(res: Response) {
   });
 }
 
-export function createReleasePolicyAuthGuard(expectedKey = env.FULLPOS_RELEASE_API_KEY) {
+export function createReleasePolicyAuthGuard(
+  fullPosKey = env.FULLPOS_RELEASE_API_KEY,
+  fullCreditKey = env.FULLCREDIT_RELEASE_API_KEY,
+) {
   const adminRoles = requireRoles('admin', 'owner');
 
   return (req: Request, res: Response, next: NextFunction) => {
@@ -32,7 +35,10 @@ export function createReleasePolicyAuthGuard(expectedKey = env.FULLPOS_RELEASE_A
       }
 
       const providedKey = rawHeader;
-      const configuredKey = expectedKey?.trim() ?? '';
+      const isFullCredit = req.path.includes('/fullcredit/android');
+      const configuredKey = (
+        isFullCredit ? fullCreditKey : fullPosKey
+      )?.trim() ?? '';
       if (
         providedKey.trim().length === 0 ||
         configuredKey.length < 32 ||

@@ -38,3 +38,27 @@ test('rejects malformed semantic versions and SHA-256 values', () => {
     sha256: 'bad',
   }).success, false);
 });
+
+test('accepts a complete FullCredit Android update policy', () => {
+  const parsed = appUpdatePolicySchema.parse({
+    ...validPolicy,
+    projectCode: 'fullcredit',
+    platform: 'android',
+    installerUrl:
+      'https://github.com/JUNIORPRUEVA/fullcredit-releases/releases/download/v1.0.2/FullCredit-Android.apk',
+    installerFilename: 'FullCredit-Android.apk',
+    releaseTitle: 'FullCredit v1.0.2',
+  });
+  assert.equal(parsed.projectCode, 'fullcredit');
+  assert.equal(parsed.platform, 'android');
+});
+
+test('rejects mismatched FullCredit filename and arbitrary hosts', () => {
+  assert.equal(appUpdatePolicySchema.safeParse({
+    ...validPolicy,
+    projectCode: 'fullcredit',
+    platform: 'android',
+    installerUrl: 'https://example.com/app.apk',
+    installerFilename: 'FullPOS-Setup.exe',
+  }).success, false);
+});

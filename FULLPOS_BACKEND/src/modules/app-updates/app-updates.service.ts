@@ -3,8 +3,8 @@ import { prisma } from '../../config/prisma';
 import { appUpdatePolicySchema } from './app-updates.validation';
 
 type PolicyInput = {
-  projectCode: 'fullpos';
-  platform: 'windows';
+  projectCode: 'fullpos' | 'fullcredit';
+  platform: 'windows' | 'android';
   version: string;
   buildNumber: number;
   minimumSupportedVersion: string;
@@ -12,7 +12,7 @@ type PolicyInput = {
   mandatory: boolean;
   enabled: boolean;
   installerUrl: string;
-  installerFilename: 'FullPOS-Setup.exe';
+  installerFilename: 'FullPOS-Setup.exe' | 'FullCredit-Android.apk';
   installerSizeBytes?: bigint | null;
   sha256: string;
   releaseTitle: string;
@@ -49,11 +49,14 @@ function toPublicPolicy(row: AppUpdateRelease) {
   };
 }
 
-export async function getFullPosWindowsUpdatePolicy() {
+export async function getAppUpdatePolicy(
+  projectCode: 'fullpos' | 'fullcredit',
+  platform: 'windows' | 'android',
+) {
   const row = await prisma.appUpdateRelease.findFirst({
     where: {
-      projectCode: 'fullpos',
-      platform: 'windows',
+      projectCode,
+      platform,
       enabled: true,
     },
     orderBy: [
@@ -63,7 +66,7 @@ export async function getFullPosWindowsUpdatePolicy() {
   });
 
   if (!row) {
-    const error: any = new Error('No enabled Windows update policy is configured');
+    const error: any = new Error('No enabled update policy is configured');
     error.status = 404;
     error.errorCode = 'UPDATE_POLICY_NOT_CONFIGURED';
     throw error;
@@ -72,7 +75,7 @@ export async function getFullPosWindowsUpdatePolicy() {
   return toPublicPolicy(row);
 }
 
-export async function upsertFullPosWindowsUpdatePolicy(input: PolicyInput) {
+export async function upsertAppUpdatePolicy(input: PolicyInput) {
   const validated = appUpdatePolicySchema.parse(input);
   const version = validated.version.replace(/^v/i, '').split('+')[0];
   const minimumVersion = validated.minimumSupportedVersion.replace(/^v/i, '').split('+')[0];
@@ -108,3 +111,10 @@ export async function upsertFullPosWindowsUpdatePolicy(input: PolicyInput) {
 
   return toPublicPolicy(row);
 }
+
+export const getFullPosWindowsUpdatePolicy = () =>
+  getAppUpdatePolicy('fullpos', 'windows');
+export const getFullCreditAndroidUpdatePolicy = () =>
+  getAppUpdatePolicy('fullcredit', 'android');
+export const upsertFullPosWindowsUpdatePolicy = upsertAppUpdatePolicy;
+export const upsertFullCreditAndroidUpdatePolicy = upsertAppUpdatePolicy;

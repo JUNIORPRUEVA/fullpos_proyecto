@@ -3,6 +3,7 @@ import test from 'node:test';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import request from 'supertest';
+import env from '../../config/env';
 import {
   createReleasePolicyAuthGuard,
   timingSafeSecretEqual,
@@ -28,11 +29,29 @@ function createTestApp(releaseKey: string) {
   const app = express();
   app.put(
     '/policy',
-    createReleasePolicyAuthGuard(releaseKey),
+    createReleasePolicyAuthGuard(releaseKey, releaseKey),
     (req, res) => res.json({ method: req.releasePolicyAuthMethod }),
   );
   return app;
 }
+
+test('FullCredit release key is scoped to the FullCredit route', async () => {
+  const fullPosKey = 'fullpos-release-key-with-32-characters';
+  const fullCreditKey = 'fullcredit-release-key-with-32-characters';
+  const app = express();
+  const guard = createReleasePolicyAuthGuard(fullPosKey, fullCreditKey);
+  app.put('/fullpos/windows', guard, (_req, res) => res.sendStatus(200));
+  app.put('/fullcredit/android', guard, (_req, res) => res.sendStatus(200));
+
+  await request(app)
+    .put('/fullcredit/android')
+    .set('X-Release-Key', fullCreditKey)
+    .expect(200);
+  await request(app)
+    .put('/fullpos/windows')
+    .set('X-Release-Key', fullCreditKey)
+    .expect(401);
+});
 
 test('release policy guard accepts only the exact X-Release-Key', async () => {
   const key = 'release-key-with-at-least-32-characters';
@@ -60,7 +79,7 @@ test('release policy guard preserves admin/owner JWT authorization', async () =>
       username: 'release-admin',
       role: 'admin',
     },
-    'test-access-secret-long-enough',
+    env.JWT_ACCESS_SECRET,
     { expiresIn: '5m' },
   );
 
